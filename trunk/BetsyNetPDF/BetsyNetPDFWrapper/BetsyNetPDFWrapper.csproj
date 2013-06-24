@@ -98,7 +98,6 @@
   </Target>
   -->
   <PropertyGroup>
-    <PreBuildEvent>
-    </PreBuildEvent>
+    <PreBuildEvent>"c:\Program Files\TortoiseSVN\bin\SubWCRev.exe" $(ProjectDir)..\..  $(ProjectDir)AssemblyInfoTemplate.cs $(ProjectDir)AssemblyInfo.cs</PreBuildEvent>
   </PropertyGroup>
 </Project>
