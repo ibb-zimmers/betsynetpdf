@@ -38,10 +38,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace BetsyNetPDF
+namespace SumatraNet
 {
     public class AssemblyInfo
     {
-        public const string VERSION = "31";
+        public const string VERSION = "2";
     }
 }
