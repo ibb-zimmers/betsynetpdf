@@ -1,0 +1,13 @@
+Index: src/DisplayModel.cpp
+===================================================================
+--- src/DisplayModel.cpp	(revision 22)
++++ src/DisplayModel.cpp	(working copy)
+@@ -866,6 +866,8 @@
+ // note: returns false for pages that haven't been rendered yet
+ bool DisplayModel::IsOverText(PointI pt)
+ {
++	return false;
++
+     int pageNo = GetPageNoByPoint(pt);
+     if (!ValidPageNo(pageNo))
+         return false;

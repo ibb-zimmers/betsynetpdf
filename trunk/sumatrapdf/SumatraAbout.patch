@@ -1,0 +1,45 @@
+Index: SumatraAbout.cpp
+===================================================================
+--- SumatraAbout.cpp	(revision 22)
++++ SumatraAbout.cpp	(working copy)
+@@ -711,9 +711,9 @@
+     CalcMD5Digest((unsigned char *)pathU.Get(), str::Len(pathU), digest);
+     ScopedMem<char> fingerPrint(str::MemToHex(digest, 16));
+ 
+-    ScopedMem<WCHAR> thumbsPath(AppGenDataFilename(THUMBNAILS_DIR_NAME));
+-    if (!thumbsPath)
+-        return NULL;
++    ScopedMem<WCHAR> thumbsPath;//(AppGenDataFilename(THUMBNAILS_DIR_NAME));
++    //if (!thumbsPath)
++	return NULL;
+     ScopedMem<WCHAR> fname(str::conv::FromAnsi(fingerPrint));
+ 
+     return str::Format(L"%s\\%s.png", thumbsPath, fname);
+@@ -722,10 +722,10 @@
+ // removes thumbnails that don't belong to any frequently used item in file history
+ void CleanUpThumbnailCache(FileHistory& fileHistory)
+ {
+-    ScopedMem<WCHAR> thumbsPath(AppGenDataFilename(THUMBNAILS_DIR_NAME));
+-    if (!thumbsPath)
+-        return;
+-    ScopedMem<WCHAR> pattern(path::Join(thumbsPath, L"*.png"));
++    ScopedMem<WCHAR> thumbsPath;//(AppGenDataFilename(THUMBNAILS_DIR_NAME));
++    //if (!thumbsPath)
++	return;
++    ScopedMem<WCHAR> pattern;//(path::Join(thumbsPath, L"*.png"));
+ 
+     WStrVec files;
+     WIN32_FIND_DATA fdata;
+Index: SumatraAbout.h
+===================================================================
+--- SumatraAbout.h	(revision 22)
++++ SumatraAbout.h	(working copy)
+@@ -18,7 +18,7 @@
+ #define SLINK_LIST_SHOW L"<View,ShowList>"
+ #define SLINK_LIST_HIDE L"<View,HideList>"
+ 
+-#define THUMBNAILS_DIR_NAME L"sumatrapdfcache"
++// #define THUMBNAILS_DIR_NAME L"sumatrapdfcache"
+ // thumbnails are 150px high and have a ratio of sqrt(2) : 1
+ #define THUMBNAIL_DX        212
+ #define THUMBNAIL_DY        150
