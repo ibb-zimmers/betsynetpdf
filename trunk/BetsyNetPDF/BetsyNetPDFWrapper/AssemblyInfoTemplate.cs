@@ -38,7 +38,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace SumatraNet
+namespace BetsyNetPDF
 {
     public class AssemblyInfo
     {
