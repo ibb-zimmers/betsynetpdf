@@ -1,0 +1,2280 @@
+Index: src/SumatraPDF.cpp
+===================================================================
+--- src/SumatraPDF.cpp	(revision 22)
++++ src/SumatraPDF.cpp	(working copy)
+@@ -5,7 +5,7 @@
+ #include "SumatraPDF.h"
+ #include <malloc.h>
+ #include <wininet.h>
+-#include <string>
++#include <sstream>
+ 
+ #include "AppPrefs.h"
+ #include "AppTools.h"
+@@ -19,8 +19,6 @@
+ #include "Favorites.h"
+ #include "FileUtil.h"
+ #include "FileWatch.h"
+-using namespace Gdiplus;
+-#include "GdiPlusUtil.h"
+ #include "HttpUtil.h"
+ #include "HtmlWindow.h"
+ #include "Menu.h"
+@@ -48,7 +46,8 @@
+ #include "UITask.h"
+ #include "Version.h"
+ #include "WindowInfo.h"
+-#include "WinUtil.h"
++#include "WinUtil.h"
++#include <iostream>
+ 
+ HANDLE hInst;
+ 
+@@ -1904,6 +1903,13 @@
+         else
+             renderDelay = gRenderCache.Paint(hdc, bounds, dm, pageNo, pageInfo, &renderOutOfDateCue);
+ 
++		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
++		if(betsyApi != NULL)
++		{
++			betsyApi->DrawOverlayObjets(&hdc, &win, pageNo, bounds);
++			betsyApi->DrawLine(&hdc, &win);
++		}
++
+         if (renderDelay) {
+             ScopedFont fontRightTxt(GetSimpleFont(hdc, L"MS Shell Dlg", 14));
+             HGDIOBJ hPrevFont = SelectObject(hdc, fontRightTxt);
+@@ -1912,7 +1918,10 @@
+                 if (renderDelay < REPAINT_MESSAGE_DELAY_IN_MS)
+                     win.RepaintAsync(REPAINT_MESSAGE_DELAY_IN_MS / 4);
+                 else
++				{
+                     DrawCenteredText(hdc, bounds, _TR("Please wait - rendering..."), IsUIRightToLeft());
++					win.RepaintAsync(renderDelay / 4);
++				}
+                 rendering = true;
+             } else {
+                 DrawCenteredText(hdc, bounds, _TR("Couldn't render the page"), IsUIRightToLeft());
+@@ -2011,7 +2020,12 @@
+         return;
+ 
+     SizeI drag(x - win.dragPrevPos.x, y - win.dragPrevPos.y);
+-    win.MoveDocBy(drag.dx, -2 * drag.dy);
++
++	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
++	if(betsyApi != NULL && betsyApi->hitLabelForDragging)
++		betsyApi->MoveSelectedOverlayObjectsBy(&win, x, y);
++	else
++		win.MoveDocBy(drag.dx, -2 * drag.dy);
+ }
+ 
+ static void OnMouseMove(WindowInfo& win, int x, int y, WPARAM flags)
+@@ -2043,6 +2057,7 @@
+     }
+ 
+     SizeI drag;
++	BetsyNetPDFUnmanagedApi* betsyApi;
+     switch (win.mouseAction) {
+     case MA_SCROLLING:
+         win.yScrollSpeed = (y - win.dragStart.y) / SMOOTHSCROLL_SLOW_DOWN_FACTOR;
+@@ -2061,8 +2076,20 @@
+     case MA_DRAGGING:
+     case MA_DRAGGING_RIGHT:
+         drag = SizeI(win.dragPrevPos.x - x, win.dragPrevPos.y - y);
+-        win.MoveDocBy(drag.dx, drag.dy);
++		
++		betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
++		if(betsyApi != NULL && betsyApi->hitLabelForDragging)
++			betsyApi->MoveSelectedOverlayObjectsBy(&win, x, y);
++		else
++			win.MoveDocBy(drag.dx, drag.dy);
+         break;
++	case MA_IDLE:
++		betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
++		if(betsyApi != NULL && betsyApi->mouseOverEnabled)
++			betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, false);
++		if(betsyApi != NULL && (betsyApi->measureMode || betsyApi->lineMode))
++			betsyApi->SetCurrentLineEnd(&win, x, y);
++		break;
+     }
+ 
+     win.dragPrevPos = PointI(x, y);
+@@ -2099,6 +2126,10 @@
+     win.dragStartPending = true;
+     win.dragStart = PointI(x, y);
+ 
++	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
++	if(betsyApi != NULL)
++		betsyApi->CheckOverlayObjectAtMousePos(&win, x, y);
++
+     // - without modifiers, clicking on text starts a text selection
+     //   and clicking somewhere else starts a drag
+     // - pressing Shift forces dragging
+@@ -2147,10 +2178,26 @@
+     bool didDragMouse = !win.dragStartPending ||
+         abs(x - win.dragStart.x) > GetSystemMetrics(SM_CXDRAG) ||
+         abs(y - win.dragStart.y) > GetSystemMetrics(SM_CYDRAG);
++
++	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
++
+     if (MA_DRAGGING == win.mouseAction)
++	{
+         OnDraggingStop(win, x, y, !didDragMouse);
++		if(betsyApi != NULL)
++		{
++			if(didDragMouse && betsyApi->hitLabelForDragging)
++				betsyApi->CheckOverlayObjectMoved(&win, x, y);
++			else
++				betsyApi->CheckMouseClick(&win,x,y,key);
++		}
++	}
+     else
++	{
+         OnSelectionStop(&win, x, y, !didDragMouse);
++		if(betsyApi != NULL)
++			betsyApi->CheckSelectionChanged(&win, key);
++	}
+ 
+     PointD ptPage = win.dm->CvtFromScreen(PointI(x, y));
+     // TODO: win.linkHandler->GotoLink might spin the event loop
+@@ -2428,14 +2475,22 @@
+ 
+ void QuitIfNoMoreWindows()
+ {
+-    if (0 == TotalWindowsCount()) {
++	int i;
++	for(i = 0; i < gWindows.Count(); i++)
++	{
++		if(gWindows[i]->betsyApi != NULL)
++			return;
++	}
++
++	if (0 == TotalWindowsCount() ) 
++	{
+         PostQuitMessage(0);
+     }
+ }
+ 
+ void CloseDocumentAndDeleteWindowInfo(WindowInfo *win)
+ {
+-    if (!win)
++	if (!win)
+         return;
+     HWND hwndToDestroy = win->hwndFrame;
+     CloseDocumentInWindow(win);
+@@ -2449,7 +2504,7 @@
+    menu item. */
+ void CloseWindow(WindowInfo *win, bool quitIfLast, bool forceClose)
+ {
+-    assert(win);
++	assert(win);
+     if (!win) return;
+     // when used as an embedded plugin, closing should happen automatically
+     // when the parent window is destroyed (cf. WM_DESTROY)
+@@ -2465,7 +2520,7 @@
+     if (win->presentation)
+         ExitFullscreen(*win);
+ 
+-    bool lastWindow = (1 == TotalWindowsCount());
++    bool lastWindow = false;// = (1 == TotalWindowsCount());
+     if (lastWindow)
+         SavePrefs();
+     else
+@@ -3499,6 +3554,10 @@
+     } else if (VK_DIVIDE == key) {
+         win->dm->RotateBy(-90);
+         gIsDivideKeyDown = true;
++	} else if (VK_DELETE == key) {
++		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
++		if(betsyApi != NULL)
++			betsyApi->CheckDeleteOverlayObject();
+     } else {
+         return false;
+     }
+@@ -4270,21 +4329,21 @@
+                 int deltaY = win.touchState.panPos.y - gi.ptsLocation.y;
+                 win.touchState.panPos = gi.ptsLocation;
+ 
+-                if ((gi.dwFlags & GF_INERTIA) && abs(deltaX) > abs(deltaY)) {
+-                    // Switch pages once we hit inertia in a horizontal direction
+-                    if (deltaX < 0)
+-                        win.dm->GoToPrevPage(0);
+-                    else if (deltaX > 0)
+-                        win.dm->GoToNextPage(0);
+-                    // When we switch pages, go back to the initial scroll position
+-                    // and prevent further pan movement caused by the inertia
+-                    win.dm->ScrollXTo(win.touchState.panScrollOrigX);
+-                    win.touchState.panStarted = false;
+-                }
+-                else {
++                //if ((gi.dwFlags & GF_INERTIA) && abs(deltaX) > abs(deltaY)) {
++                //    // Switch pages once we hit inertia in a horizontal direction
++                //    if (deltaX < 0)
++                //        win.dm->GoToPrevPage(0);
++                //    else if (deltaX > 0)
++                //        win.dm->GoToNextPage(0);
++                //    // When we switch pages, go back to the initial scroll position
++                //    // and prevent further pan movement caused by the inertia
++                //    win.dm->ScrollXTo(win.touchState.panScrollOrigX);
++                //    win.touchState.panStarted = false;
++                //}
++                //else {
+                     // Pan/Scroll
+                     win.MoveDocBy(deltaX, deltaY);
+-                }
++                //}
+             }
+             break;
+ 
+@@ -5084,88 +5143,1236 @@
+ // Could be made to compile stand-alone
+ #include "SumatraStartup.cpp"
+ 
+-/////////////////////////////////////////////////////////////////////////////////
+-// unmanged api
+-SumatraUnmanagedApi::SumatraUnmanagedApi()
++///////////////////////////////////////////////////////////////////////////////
++// BetsyNetPDF overlay objects
++///////////////////////////////////////////////////////////////////////////////
++OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double angle, float fontSize, Color foreGround, Color backGround)
++{
++	this->id = id;
++	this->label = label;
++	this->font = font;
++	this->page = 1;
++	this->angle = angle;
++	this->fontSize = fontSize;
++	this->selected = false;
++	this->bold = false;
++	this->italic = false;
++	this->foreGround = foreGround;
++	this->backGround = backGround;
++
++	this->SetX(x);
++	this->SetY(y);
++	this->SetDX(dx);
++	this->SetDY(dy);
++	this->SetLX(lx);
++	this->SetLY(ly);
++}
++
++double OverlayObject::GetX()
++{
++	return (this->x_dpi / 72.0) * 2540.0;
++}
++
++double OverlayObject::GetY()
++{
++	return (this->y_dpi / 72.0) * 2540.0;
++}
++
++double OverlayObject::GetDX()
++{
++	if(this->dx_dpi <= 0.0)
++		return -1;
++
++	return (this->dx_dpi / 72.0) * 2540.0;
++}
++
++double OverlayObject::GetDY()
++{
++	if(this->dy_dpi <= 0.0)
++		return -1;
++
++	return (this->dy_dpi / 72.0) * 2540.0;
++}
++
++double OverlayObject::GetLX()
++{
++	if(this->lx_dpi <= 0.0)
++		return -1;
++
++	return (this->lx_dpi / 72.0) * 2540.0;
++}
++
++double OverlayObject::GetLY()
++{
++	if(this->ly_dpi <= 0.0)
++		return -1;
++
++	return (this->ly_dpi / 72.0) * 2540.0;
++}
++
++void OverlayObject::SetX(double x)
++{
++	this->x_dpi = (x / 2540.0) * 72.0;
++}
++
++void OverlayObject::SetY(double y)
++{
++	this->y_dpi = (y / 2540.0) * 72.0;
++}
++
++void OverlayObject::SetDX(double dx)
++{
++	if(dx <= 0.0)
++		this->dx_dpi = -1;
++	else
++		this->dx_dpi = (dx / 2540.0) * 72.0;
++}
++
++void OverlayObject::SetDY(double dy)
++{
++	if(dy <= 0.0)
++		this->dy_dpi = -1;
++	else
++		this->dy_dpi = (dy / 2540.0) * 72.0;
++}
++
++void OverlayObject::SetLX(double lx)
++{
++	if(lx <= 0.0)
++		this->lx_dpi = -1;
++	else
++		this->lx_dpi = (lx / 2540.0) * 72.0;
++}
++
++void OverlayObject::SetLY(double ly)
++{
++	if(ly <= 0.0)
++		this->ly_dpi = -1;
++	else
++		this->ly_dpi = (ly / 2540.0) * 72.0;
++}
++
++void OverlayObject::InitLXY(WindowInfo* win)
++{
++	if((lx_dpi >= 0.0 && ly_dpi >= 0.0) || this->currentLabelLocation.size() == 0)
++		return;
++
++	double pageHeight = win->dm->GetPageInfo(1)->page.dy;
++	PointI pointOnScreen(this->currentLabelLocation[0].X, this->currentLabelLocation[0].Y);
++	PointD pointOnPage = win->dm->CvtFromScreen(pointOnScreen, 1);
++
++	lx_dpi = pointOnPage.x;
++	ly_dpi = pageHeight - pointOnPage.y;
++}
++
++void OverlayObject::Move(double deltaX, double deltaY, bool moveLabel)
++{
++	if(!moveLabel)
++	{
++		this->x_dpi -= deltaX;
++		this->y_dpi += deltaY;
++	}
++	if(lx_dpi >= 0.0 && ly_dpi >= 0.0)
++	{
++		this->lx_dpi -= deltaX;
++		this->ly_dpi += deltaY;
++	}
++}
++
++void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds)
++{
++	if(this->page!=pageNo)
++		return;
++
++	double pageHeight = win->dm->GetPageInfo(1)->page.dy;
++	float zoom = win->dm->ZoomReal(pageNo);
++
++	PointD pointOnPage(this->x_dpi, pageHeight - this->y_dpi);
++	PointI pointOnScreen = win->dm->CvtToScreen(pageNo, pointOnPage);
++
++	// calc size on screen
++	Widen<wchar_t> to_wstring;
++	std::wstring wsfont = to_wstring(this->font);
++	std::wstring wslabel = to_wstring(this->label);
++
++	FontFamily  fontFamily(wsfont.c_str());
++	float fsize = this->fontSize * zoom;
++	Font        font(&fontFamily, fsize, this->selected ? FontStyleBold : FontStyleRegular, Gdiplus::Unit::UnitPoint);
++	PointF      pointF(pointOnScreen.x, pointOnScreen.y);
++	RectF		bbox( 0, 0, 0, 0);
++	g->MeasureString(wslabel.c_str(), -1, &font, pointF, &bbox);
++
++	if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
++	{
++		bbox.Width = this->dx_dpi * zoom;
++		bbox.Height = this->dy_dpi * zoom;
++	}
++
++	if((pointOnScreen.x + bbox.Width) < bounds.x || pointOnScreen.x > (bounds.x + bounds.dx))
++		return;
++
++	if((pointOnScreen.y + bbox.Height) < bounds.y || pointOnScreen.y > (bounds.y + bounds.dy))
++		return;
++	
++	PointF points[4] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height) };
++
++	// calc rotation
++	double angle = win->dm->Rotation() - this->angle;
++	Matrix rotation;
++	if(angle != 0.0)
++	{
++		rotation.RotateAt(angle, pointF, Gdiplus::MatrixOrderAppend);
++		rotation.TransformPoints(points, 4);
++		g->SetTransform(&rotation);
++	}
++
++	//store current location
++	this->currentScreenLocation.assign(points, points + 4);
++
++	// paint lable bg
++	SolidBrush  bbrush(this->backGround);
++	SolidBrush  fbrush(this->foreGround);
++	if(this->selected)
++	{
++		bbrush.SetColor(Color::Purple);
++		fbrush.SetColor(Color::White);
++	}
++
++	g->FillRectangle(&bbrush, bbox);
++
++	StringFormat sformat;
++	sformat.SetAlignment(StringAlignmentNear);
++	// paint lable fg
++	if(this->dx_dpi <= 0.0 && this->dy_dpi <= 0.0)
++	{
++		g->DrawString(wslabel.c_str(), -1, &font, bbox, &sformat, &fbrush);
++	}
++	else
++	{
++		PointF labelPoint, llineStart, llineEnd;
++		
++		// draw label below object
++		if(bbox.Width > bbox.Height)
++		{
++			labelPoint = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height + 25 * zoom);
++			llineStart = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height);
++		}
++		//draw label left of object
++		else
++		{
++			labelPoint = PointF(bbox.X + bbox.Width + 25 * zoom, bbox.Y + bbox.Height / 2);
++			llineStart = PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2);
++		}
++		if(lx_dpi >= 0.0 && ly_dpi >= 0.0)
++		{
++			PointD lpointOnPage(this->lx_dpi, pageHeight - this->ly_dpi);
++			PointI lpointOnScreen = win->dm->CvtToScreen(pageNo, lpointOnPage);
++
++			labelPoint = PointF(lpointOnScreen.x, lpointOnScreen.y);
++		}
++
++		// calc label position & size
++		RectF llabelBox(0, 0, 0, 0);
++		g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
++
++		PointF lpoints[4] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height) };
++		if(angle != 0.0)
++			rotation.TransformPoints(lpoints, 4);
++
++		this->currentLabelLocation.assign(lpoints, lpoints + 4);
++
++		if(bbox.Width > bbox.Height)
++			llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y);
++		else
++			llineEnd = PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2);
++
++		if(lx_dpi >= 0.0 && ly_dpi >= 0.0)
++		{
++			// set linestart/lineend according to label position
++			if(llabelBox.Y + llabelBox.Height <= bbox.Y)
++			{
++				llineStart = PointF(bbox.X + bbox.Width / 2, bbox.Y);
++				llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y + llabelBox.Height);
++			}
++			else
++			{
++				if(labelPoint.Y >= bbox.Y + bbox.Height)
++				{
++					llineStart = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height);
++					llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y);
++				}
++				else
++				{
++					if(labelPoint.X <= bbox.X)
++					{
++						llineStart = PointF(bbox.X, bbox.Y + bbox.Height / 2);
++						llineEnd = PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height / 2);
++					}
++					else
++					{
++						llineStart = PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2);
++						llineEnd = PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2);
++					}
++				}
++			}
++		}		
++
++		g->FillRectangle(&bbrush, llabelBox);
++
++		g->DrawString(wslabel.c_str(), -1, &font, llabelBox, &sformat, &fbrush);
++
++		Pen linePen(Color::Black);
++		g->DrawLine(&linePen, llineStart, llineEnd);
++	}
++
++	// reset rotation
++	if(angle != 0)
++	{
++		Matrix reset;
++		g->SetTransform(&reset);
++	}
++}
++
++bool OverlayObject::CheckSelectionChanged(WindowInfo* win)
++{
++	bool inSelection = this->CheckIsInSelection(win);
++
++	if(inSelection == this->selected)
++	{
++		if(this->selected)
++			return true;
++		else
++			return false;
++	}
++	else
++	{
++		this->selected = inSelection;
++		return true;
++	}
++}
++
++bool OverlayObject::CheckIsInSelection(WindowInfo* win)
++{
++	bool inSelection = CheckIsInSelection(win, false);
++	if(!inSelection)
++		inSelection = CheckIsInSelection(win, true);
++
++	return inSelection;
++}
++
++bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
++{
++	RectF objRect;
++	if(label)
++		objRect = this->GetRect(this->currentLabelLocation);
++	else
++		objRect = this->GetRect(this->currentScreenLocation);
++
++	if(objRect.Width == 0.0 && objRect.Height == 0)
++		return false;
++
++	double angle = win->dm->Rotation() - this->angle;
++	//it is a rectangle, so it s enough to check the intersection
++	if((((int)angle) % 90) == 0)
++	{
++		RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
++		return objRect.IntersectsWith(selOnScreen);
++	}
++	// it is a ploygon
++	else
++	{
++		return this->CheckIsPolyInSelection(win, label);
++	}
++}
++
++bool OverlayObject::CheckIsPolyInSelection(WindowInfo* win, bool label)
++{
++	int j = 1;
++
++	PointF objPoints[4];
++	RectF objRect;
++	if(label)
++	{
++		objPoints[0] = this->currentLabelLocation[0];
++		objPoints[1] = this->currentLabelLocation[1];
++		objPoints[2] = this->currentLabelLocation[2];
++		objPoints[3] = this->currentLabelLocation[3];
++
++		objRect = this->GetRect(this->currentLabelLocation);
++	}
++	else
++	{
++		objPoints[0] = this->currentScreenLocation[0];
++		objPoints[1] = this->currentScreenLocation[1];
++		objPoints[2] = this->currentScreenLocation[2];
++		objPoints[3] = this->currentScreenLocation[3];
++
++		objRect = this->GetRect(this->currentScreenLocation);
++	}
++
++	if( win->selectionRect.dx > 1 || win->selectionRect.dy > 1)
++	{
++		j = 4;
++		RectF selectionRectf(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
++		if(!objRect.IntersectsWith(selectionRectf))
++			return false;
++
++		if(selectionRectf.Contains(objPoints[0]) ||
++			selectionRectf.Contains(objPoints[1]) ||
++			selectionRectf.Contains(objPoints[2]) ||
++			selectionRectf.Contains(objPoints[3]))
++			return true;
++	}
++
++	PointF selectionPoints[4] = 
++	{ 
++		PointF(win->selectionRect.x, win->selectionRect.y), 
++		PointF(win->selectionRect.x + win->selectionRect.dx, win->selectionRect.y), 
++		PointF(win->selectionRect.x + win->selectionRect.dx, win->selectionRect.y + win->selectionRect.dy),
++		PointF(win->selectionRect.x, win->selectionRect.y + win->selectionRect.dy)
++	};
++
++	int x, i;
++	int countCollision = 0;
++	PointF p0, p1, p2, p3;
++	for(x = 0; x < j; x++)
++	{
++		p0 = selectionPoints[x];
++		if(j == 1)
++			p1 = PointF(win->dm->viewPort.dx, win->selectionRect.y);
++		else
++		{
++			if(x == 3)
++				p1 = selectionPoints[0];
++			else
++				p1 = selectionPoints[x + 1];
++		}
++
++		for(i = 0; i < 4; i++)
++		{
++			p2 = objPoints[i];
++			if(i == 3)
++				p3 = objPoints[0];
++			else
++				p3 = objPoints[i + 1];
++
++			if(OverlayObject::CheckSegementIntersection(p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y))
++				countCollision++;
++		}
++	}
++
++	if(j == 1)
++		return countCollision == 1;
++
++	return countCollision > 1;
++}
++
++RectF OverlayObject::GetRect(std::vector<PointF> points)
++{
++	float minX = 0, minY = 0, maxX = 0, maxY = 0;
++
++	int i;
++	PointF curPoint;
++	for(i = 0; i < points.size(); i++)
++	{
++		curPoint = points[i]; 
++		if(i == 0)
++		{
++			minX = maxX = curPoint.X;
++			minY = maxY = curPoint.Y;
++		}
++
++		if(curPoint.X < minX)
++			minX = curPoint.X;
++		if(curPoint.X > maxX)
++			maxX = curPoint.X;
++
++		if(curPoint.Y < minY)
++			minY = curPoint.Y;
++		if(curPoint.Y > maxY)
++			maxY = curPoint.Y;
++	}
++
++	return RectF(minX, minY, maxX - minX, maxY -  minY);
++}
++
++std::string OverlayObject::ToString()
++{
++	std::stringstream stream;
++
++	int fgR, fgG, fgB, bgR, bgG, bgB;
++	fgR = this->foreGround.GetR();
++	fgG = this->foreGround.GetG();
++	fgB = this->foreGround.GetB();
++	bgR = this->backGround.GetR();	
++	bgG = this->backGround.GetG();
++	bgB = this->backGround.GetB();	
++	
++	stream << "{";
++	stream << this->id << "|";
++	stream << this->label << "|";
++	stream << this->GetX() << "|";
++	stream << this->GetY() << "|";
++	stream << this->GetDX() << "|";
++	stream << this->GetDY() << "|";
++	stream << this->GetLX() << "|";
++	stream << this->GetLY() << "|";
++	stream << this->angle << "|";
++	stream << this->font << "|";
++	stream << this->fontSize << "|";
++	stream << fgR << "|";
++	stream << fgG << "|";
++	stream << fgB << "|";
++	stream << bgR << "|";	
++	stream << bgG << "|";
++	stream << bgB;	
++	stream << "}";
++
++	return stream.str();
++}
++
++OverlayObject* OverlayObject::CreateFromString(std::string obj)
++{
++	// remove {...}
++	obj = obj.substr(1, obj.length() - 1);
++	obj = obj.substr(0, obj.length() - 1);
++
++	int loop = 0;
++	size_t pos = obj.find_first_of("|");
++	std::stringstream stream;
++	std::string stoken, id, label, font;
++	int bb, bg, br, fr, fg, fb;
++	double x, y, dx, dy, lx, ly, angle;
++	float fontSize;
++	while(pos != std::string::npos)
++	{
++		stream = std::stringstream("");
++
++		stoken = obj.substr(0, pos);
++		obj = obj.substr(pos + 1);
++
++		stream << stoken;
++
++		switch(loop)
++		{
++		case 0:
++			id = stream.str();
++			break;
++
++		case 1:
++			label = stream.str();
++			break;
++
++		case 2:
++			stream >> x;
++			break;
++
++		case 3:
++			stream >> y;
++			break;
++
++		case 4:
++			stream >> dx;
++			break;
++
++		case 5:
++			stream >> dy;
++			break;
++
++		case 6:
++			stream >> lx;
++			break;
++
++		case 7:
++			stream >> ly;
++			break;
++
++		case 8:
++			stream >> angle;
++			break;
++
++		case 9:
++			font = stream.str();
++			break;
++
++		case 10:
++			stream >> fontSize;
++			break;
++
++		case 11:
++			stream >> fr;
++			break;
++
++		case 12:
++			stream >> fg;
++			break;
++
++		case 13:
++			stream >> fb;
++			break;
++
++		case 14:
++			stream >> br;
++			break;
++
++		case 15:
++			stream >> bg;
++			break;
++		}
++
++		loop++;
++		pos = obj.find_first_of("|");
++	}
++
++	stream = std::stringstream("");
++	stream << obj;
++	stream >> bb;
++
++	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, angle, fontSize, Color(fr, fg, fb), Color(br, bg, bb));
++}
++
++bool OverlayObject::CheckSegementIntersection(float p0_x, float p0_y, float p1_x, float p1_y, float p2_x, float p2_y, float p3_x, float p3_y)
+ {
+-	this->win = NULL;
++    float s1_x, s1_y, s2_x, s2_y;
++    s1_x = p1_x - p0_x;     s1_y = p1_y - p0_y;
++    s2_x = p3_x - p2_x;     s2_y = p3_y - p2_y;
++
++    float s, t;
++    s = (-s1_y * (p0_x - p2_x) + s1_x * (p0_y - p2_y)) / (-s2_x * s1_y + s1_x * s2_y);
++    t = ( s2_x * (p0_y - p2_y) - s2_y * (p0_x - p2_x)) / (-s2_x * s1_y + s1_x * s2_y);
++
++    if (s >= 0 && s <= 1 && t >= 0 && t <= 1)
++    {
++        // Collision detected
++        /*if (i_x != NULL)
++            *i_x = p0_x + (t * s1_x);
++        if (i_y != NULL)
++            *i_y = p0_y + (t * s1_y);*/
++        return true;
++    }
++
++    return false; // No collision
++}
++///////////////////////////////////////////////////////////////////////////////
++// end BetsyNetPDF overlay objects
++///////////////////////////////////////////////////////////////////////////////
++
++///////////////////////////////////////////////////////////////////////////////
++// BetsyNetPDF unmanged api
++///////////////////////////////////////////////////////////////////////////////
++BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
++{
++	this->hitLabelForDragging = false;
++	this->selectionChanging = false;
++	this->mouseOverEnabled = false;
++	this->measureMode = false;
++	this->lineMode = false;
++	this->moveLabel = false;
++	this->lastObj = NULL;
++	this->lineStart = NULL;
++	this->lineEnd = NULL;
++	this->curLineEnd = NULL;
+ }
+ 
+-void SumatraUnmanagedApi::SumatraViewer(TCHAR* hwnd, TCHAR* file)
++void BetsyNetPDFUnmanagedApi::UpdateViewer(WindowInfo* win, char* hwnd)
+ {
+-	this->hwnd = hwnd;
+-	this->file = file;
++	if(!gPluginMode)
++		return;
+ 
+-	if(this->win)
++	Widen<wchar_t> to_wstring;
++	std::string shwnd(hwnd);
++	std::wstring wshwnd = to_wstring(shwnd);
++
++	HWND parentHWND = (HWND)_wtol(wshwnd.c_str());
++
++	SetParent(win->hwndFrame, parentHWND);
++	MoveWindow(win->hwndFrame, ClientRect(parentHWND));
++	ShowWindow(win->hwndFrame, SW_SHOW);
++	UpdateWindow(win->hwndFrame);
++}
++
++void BetsyNetPDFUnmanagedApi::SetDelegates(
++	OnSelectionChangedDelegate selChanged, 
++	OnMouseClickDelegate mouseClick, 
++	OnDeleteDelegate onDelete, 
++	OnObjectMovedDelegate onMove, 
++	OnRequestContextMenuDelegate requestContextMenuPointer,
++	OnMouseOverObject onMouseOver,
++	OnDistanceMeasuredDelegate onMeasure,
++	OnLineDrawnDelegate onLine)
++{
++	this->notifySelectionChanged = selChanged;
++	this->notifyMouseClick = mouseClick;
++	this->notifyDelete = onDelete;
++	this->notifyObjectMoved = onMove;
++	this->requestContextMenu = requestContextMenuPointer;
++	this->notifyMouseOverObject = onMouseOver;
++	this->notifyDistanceMeasured = onMeasure;
++	this->notifyLineDrawn = onLine;
++}
++
++void BetsyNetPDFUnmanagedApi::DrawOverlayObjets(HDC* hdc, WindowInfo* win, int pageNo, RectI bounds)
++{
++	if(this->selectionChanging)
++		return;
++
++	int i;
++	OverlayObject *curObj;
++	Graphics g(*hdc);
++	for(i=0;i< this->overlayObjects.size();i++)
++	{
++		curObj = this->overlayObjects.at(i);
++		curObj->currentScreenLocation.clear();
++		curObj->currentLabelLocation.clear();
++		curObj->Paint(&g, win, pageNo, bounds);
++	}
++}
++
++void BetsyNetPDFUnmanagedApi::DrawLine(HDC* hdc, WindowInfo* win)
++{
++	if(!this->measureMode && !this->lineMode)
++		return;
++
++	if(this->lineStart == NULL || this->curLineEnd == NULL)
++		return;
++
++	Graphics g(*hdc);
++	SolidBrush lineBrush(Color::Red);
++	Pen linePen(&lineBrush, 2);
++
++	PointI startScreen = win->dm->CvtToScreen(1, *this->lineStart);
++
++	g.DrawEllipse(&linePen, startScreen.x - 2, startScreen.y - 2, 4, 4);
++	g.DrawLine(&linePen, startScreen.x, startScreen.y, this->curLineEnd->X, this->curLineEnd->Y);
++	g.DrawEllipse(&linePen, this->curLineEnd->X - 2, this->curLineEnd->Y - 2, 4, 4);
++}
++
++void BetsyNetPDFUnmanagedApi::SetCurrentLineEnd(WindowInfo* win, int x, int y)
++{
++	if(this->lineStart == NULL)
++		return;
++
++	this->curLineEnd = new Point(x, y);
++	InvalidateRect(win->hwndCanvas, NULL, true);
++	UpdateWindow(win->hwndCanvas);
++}
++
++//void BetsyNetPDFUnmanagedApi::ProcessOverlayObject(WindowInfo* win, char* id, char* label, char* font, double x, double y, double dx, double dy, double angle, float fontSize, Color foreGround, Color backGround, bool update, bool repaint)
++//{
++//	std::string sid(id);
++//	std::string slabel(label);
++//	std::string sfont(font);
++//
++//	int i;
++//	bool found = false;
++//	OverlayObject* oo;
++//	
++//	if(update)
++//	{
++//		for(i=0; i<overlayObjects.size(); i++)
++//		{
++//			if(overlayObjects[i]->id == sid)
++//			{
++//				found = true;
++//				oo = overlayObjects[i];
++//
++//				oo->label = slabel;
++//				oo->font = sfont;
++//				oo->SetX(x);
++//				oo->SetY(y);
++//				oo->SetDX(dx);
++//				oo->SetDY(dy);
++//				oo->angle = angle;
++//				oo->fontSize = fontSize;
++//				oo->foreGround = foreGround;
++//				oo->backGround = backGround;
++//			}
++//		}
++//	}
++//
++//	if(!found)
++//	{
++//		oo = new OverlayObject(sid, slabel, sfont, x, y, dx, dy, angle, fontSize, foreGround, backGround);
++//		overlayObjects.push_back(oo);
++//	}
++//
++//	if(repaint)
++//	{
++//		InvalidateRect(win->hwndCanvas, NULL, true);
++//		UpdateWindow(win->hwndCanvas);
++//	}
++//}
++
++void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objects)
++{
++	OverlayObject* oo;
++	std::string sobjects(objects);
++	std::string objToken;
++	size_t pos = sobjects.find_first_of("}");
++	int i;
++	bool found;
++	while(pos != std::string::npos)
+ 	{
+-		LoadArgs args(file, this->win, true, true);
+-		LoadDocument(args);
++		objToken = sobjects.substr(0, pos + 1);
++		sobjects = sobjects.substr(pos + 1);
++
++		oo = OverlayObject::CreateFromString(objToken);
++		found = false;
++		for(i = 0; i < this->overlayObjects.size(); i++)
++		{
++			if(this->overlayObjects[i]->id == oo->id)
++			{
++				found = true;
++				oo->selected = this->overlayObjects[i]->selected;
++				this->overlayObjects[i] = oo;
++				break;
++			}
++		}
++
++		if(!found)
++		{
++			this->overlayObjects.push_back(oo);
++		}
++		
++		pos = sobjects.find_first_of("}");
+ 	}
+-	else
+-		this->InitViewer();
++	
++	InvalidateRect(win->hwndCanvas, NULL, true);
++	UpdateWindow(win->hwndCanvas);
+ }
+ 
+-void SumatraUnmanagedApi::UpdateViewer(TCHAR* hwnd)
++void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
+ {
+-	if(!this->win || !gPluginMode)
++	std::string sid(id);
++
++	int i;
++	bool repaint = false;
++	for(i=0;i<overlayObjects.size();i++)
++	{
++		if(overlayObjects[i]->id == sid)
++		{
++			overlayObjects.erase(overlayObjects.begin()+i);
++			repaint = true;
++			break;
++		}
++	}
++
++	if(repaint)
++	{
++		InvalidateRect(win->hwndCanvas, NULL, true);
++		UpdateWindow(win->hwndCanvas);
++	}
++}
++
++void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* objectIds)
++{
++	std::string sobjectIds(objectIds);
++	int i;
++	OverlayObject* curObj;
++	bool repaint = false;
++	size_t pos;
++	for( i = 0; i < this->overlayObjects.size(); i++)
++	{
++		curObj = this->overlayObjects[i];
++		pos = sobjectIds.find("|" + curObj->id + "|");
++
++		if(pos == std::string::npos)
++		{
++			if(curObj->selected)
++			{
++				repaint = true;
++				curObj->selected = false;
++			}
++		}
++		else
++		{
++			if(!curObj->selected)
++			{
++				repaint = true;
++				curObj->selected = true;
++			}
++		}
++	}
++
++	if(repaint)
++	{
++		InvalidateRect(win->hwndCanvas, NULL, true);
++		UpdateWindow(win->hwndCanvas);
++	}
++}
++
++bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, WPARAM key)
++{
++	if(win->selectionRect.dx == 0 && win->selectionRect.dy == 0)
++		win->selectionRect = RectI(win->selectionRect.x, win->selectionRect.y, 1, 1);
++
++	this->selectionChanging = true;
++
++	bool selectionChanged = false, notify = false;
++	int i;
++	OverlayObject *curObj;
++	for(i=0; i < this->overlayObjects.size(); i++)
++	{
++		curObj = this->overlayObjects[i];
++		if(key == MK_CONTROL)
++		{
++			if(curObj->CheckIsInSelection(win))
++			{
++				curObj->selected = !curObj->selected;
++				notify = true;
++			}
++		}
++		else
++			selectionChanged = curObj->CheckSelectionChanged(win);
++
++		if(selectionChanged)
++			notify = true;
++	}
++
++	this->selectionChanging = false;
++
++	if(notify)
++	{
++		win->showSelection = false;
++
++		InvalidateRect(win->hwndCanvas, NULL, true);
++		UpdateWindow(win->hwndCanvas);
++
++		this->notifySelectionChanged();
++	}
++
++	return notify;
++}
++	
++char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjectIds()
++{
++	int i;
++	OverlayObject* oo;
++	std::stringstream objIds;
++	for(i=0; i < this->overlayObjects.size(); i++)
++	{
++		oo = this->overlayObjects[i];
++		if(oo->selected)
++			objIds << oo->id << "|";
++	}
++
++	std::string sobjIds = objIds.str();
++	size_t len = sobjIds.length() + 1;
++	char* ret = new char[len];
++	strcpy(ret, sobjIds.c_str());
++
++	return ret;
++}
++
++char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjects()
++{
++	int i;
++	OverlayObject* oo;
++	std::stringstream objects;
++	for(i=0; i < this->overlayObjects.size(); i++)
++	{
++		oo = this->overlayObjects[i];
++		if(oo->selected)
++			objects << oo->ToString();
++	}
++
++	std::string sobjects = objects.str();
++	size_t len = sobjects.length() + 1;
++	char* ret = new char[len];
++	strcpy(ret, sobjects.c_str());
++
++	return ret;
++}
++
++void BetsyNetPDFUnmanagedApi::DeselectOverlayObjects()
++{
++	int i;
++	for(i = 0; i < this->overlayObjects.size(); i++)
++		this->overlayObjects[i]->selected = false;
++}
++
++char* BetsyNetPDFUnmanagedApi::GetAllOverlayObjects()
++{
++	int i;
++	OverlayObject* oo;
++	std::stringstream objects;
++	for(i=0; i < this->overlayObjects.size(); i++)
++	{
++		oo = this->overlayObjects[i];
++		objects << oo->ToString();
++	}
++
++	std::string sobjects = objects.str();
++	size_t len = sobjects.length() + 1;
++	char* ret = new char[len];
++	strcpy(ret, sobjects.c_str());
++
++	return ret;
++}
++
++void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, WPARAM key)
++{
++	if(this->measureMode || this->lineMode)
++	{
++		PointI onScreen(x, y);
++		if(this->lineStart == NULL)
++		{			
++			this->lineStart = new PointD(win->dm->CvtFromScreen(onScreen));
++			return;
++		}
++		else
++			this->lineEnd = new PointD(win->dm->CvtFromScreen(onScreen));
++
++		if(this->measureMode)
++		{
++			// calc length and notify
++			double a = lineStart->x - lineEnd->x;
++			double b = lineStart->y - lineEnd->y;
++
++			double length_dpi = sqrt((a * a) + (b * b));
++			this->notifyDistanceMeasured((length_dpi / 72.0) * 2540.0);
++		}
++		else
++			if(this->lineMode)
++			{
++				// notif start/end point coords
++				double p1x = (this->lineStart->x / 72.0) * 2540.0;
++				double p1y = win->dm->GetPageInfo(1)->page.dy - this->lineStart->y;
++				p1y = (p1y / 72.0) * 2540.0;
++
++				double p2x = (this->lineEnd->x / 72.0) * 2540.0;
++				double p2y = win->dm->GetPageInfo(1)->page.dy - this->lineEnd->y;
++				p2y = (p2y / 72.0) * 2540.0;
++
++				this->notifyLineDrawn(p1x, p1y, p2x, p2y);
++			}
++
++		// reset 
++		this->lineMode = false;
++		this->measureMode = false;
++		this->lineEnd = NULL;
++		this->curLineEnd = NULL;
++		this->lineStart = NULL;
++
+ 		return;
++	}
+ 
+-	HWND parentHWND = (HWND)_wtol(hwnd);
++	win->selectionRect = RectI(x, y, 1, 1);
++	bool selChanged = this->CheckSelectionChanged(win, key);
+ 
+-	//MakePluginWindow(*this->win, parentHWND);
+-	WindowInfo& lwin = *this->win;
++	if(!selChanged)
++	{
++		PointI pointOnScreen(x, y);
++		PointD pointOnPage = win->dm->CvtFromScreen(pointOnScreen);
++		double x = (pointOnPage.x / 72.0) * 2540.0;
++		double y = win->dm->GetPageInfo(1)->page.dy - pointOnPage.y;
++		y = (y / 72.0) * 2540.0;
++		this->notifyMouseClick(x, y);
++	}
++}
+ 
+-	SetParent(lwin.hwndFrame, parentHWND);
+-	MoveWindow(lwin.hwndFrame, ClientRect(parentHWND));
+-	ShowWindow(lwin.hwndFrame, SW_SHOW);
+-	UpdateWindow(lwin.hwndFrame);
++void BetsyNetPDFUnmanagedApi::CheckDeleteOverlayObject()
++{
++	int i;
++	OverlayObject* oo;
++	bool selection = false;
++	
++	for(i=0; i < this->overlayObjects.size(); i++)
++	{
++		oo = this->overlayObjects[i];
++		if(oo->selected)
++		{
++			selection = true;
++			break;
++		}
++	}
++
++	if(selection)
++		this->notifyDelete();
+ }
+ 
+-void SumatraUnmanagedApi::CleanupViewer()
++void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool moveObj)
+ {
+-    CleanUpThumbnailCache(gFileHistory);
++	if(this->measureMode || this->lineMode)
++		return;
+ 
+-    while (gWindows.Count() > 0) {
+-        DeleteWindowInfo(gWindows.At(0));
+-    }
+-    while (gEbookWindows.Count() > 0) {
+-        DeleteEbookWindow(gEbookWindows.At(0), true);
+-    }
++	int i;
++	OverlayObject* oo;
++	win->selectionRect = RectI(x, y, 1, 1);
++	for(i = 0; i < this->overlayObjects.size(); i++)
++	{
++		oo = this->overlayObjects[i];
++		
++		if(moveObj && oo->selected && oo->CheckIsInSelection(win))
++		{
++			this->hitLabelForDragging = true;
++			this->moveLabel = oo->CheckIsInSelection(win, true);
++			this->dragStart = win->dm->CvtFromScreen(PointI(x, y), 1);
++			this->lastDragLoc = win->dm->CvtFromScreen(PointI(x, y), 1);
++			break;
++		}
++		if(!moveObj && oo->CheckIsInSelection(win))
++			break;
+ 
+-#ifndef DEBUG
+-    // leave all the remaining clean-up to the OS
+-    // (as recommended for a quick exit)
+-    ExitProcess(1);
+-#endif
++		oo = NULL;
++	}
+ 
+-    DeleteObject(gBrushNoDocBg);
+-    DeleteObject(gBrushLogoBg);
+-    DeleteObject(gBrushAboutBg);
+-    DeleteObject(gDefaultGuiFont);
+-    DeleteBitmap(gBitmapReloadingCue);
++	if(moveObj && this->moveLabel)
++	{
++		for(i = 0; i < this->overlayObjects.size(); i++)
++		{
++			oo = this->overlayObjects[i];
++			if(oo->selected)
++				oo->InitLXY(win);
++		}
++	}
+ 
+-    delete gFavorites;
++	if(!moveObj)
++	{
++		if(oo == NULL)
++			this->lastObj = NULL;
+ 
+-    mui::Destroy();
+-    uitask::Destroy();
++		if(oo == this->lastObj)
++			return;
+ 
+-    trans::Destroy();
++		this->lastObj = oo;
++		
++		size_t len = oo->id.length() + 1;
++		char* ret = new char[len];
++		strcpy(ret, oo->id.c_str());
+ 
+-    // it's still possible to crash after this (destructors of static classes,
+-    // atexit() code etc.) point, but it's very unlikely
+-    if (!RunningUnderWine())
+-        UninstallCrashHandler();
++		this->notifyMouseOverObject(ret);
++	}
++}
+ 
+-#ifdef DEBUG
+-    // output leaks after all destructors of static objects have run
+-    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+-#endif
++void BetsyNetPDFUnmanagedApi::MoveSelectedOverlayObjectsBy(WindowInfo* win, int x, int y)
++{
++	PointD currentLoc = win->dm->CvtFromScreen(PointI(x, y), 1);
++	double deltaX = lastDragLoc.x - currentLoc.x;
++	double deltaY = lastDragLoc.y - currentLoc.y;
++
++	int i;
++	OverlayObject* oo;
++	bool repaint = false;
++	for(i = 0; i < this->overlayObjects.size(); i++)
++	{
++		oo = this->overlayObjects[i];
++		if(oo->selected)
++		{
++			oo->Move(deltaX, deltaY, this->moveLabel);
++			repaint = true;
++		}
++	}
++
++	this->lastDragLoc = currentLoc;
++
++	if(repaint)
++	{
++		InvalidateRect(win->hwndCanvas, NULL, true);
++		UpdateWindow(win->hwndCanvas);
++	}
+ }
+ 
+-void SumatraUnmanagedApi::InitViewer()
++void BetsyNetPDFUnmanagedApi::CheckOverlayObjectMoved(WindowInfo* win, int x, int y)
+ {
+-	int retCode = 1;    // by default it's error
++	PointD dragEnd = win->dm->CvtFromScreen(PointI(x, y), 1);
++	double deltaX = this->dragStart.x - dragEnd.x;
++	double deltaY = this->dragStart.y - dragEnd.y;
+ 
++	if(deltaX != 0.0 || deltaY != 0.0)
++	{
++		double x = (deltaX / 72.0) * 2540.0;
++		double y = (deltaY / 72.0) * 2540.0;
++		this->notifyObjectMoved(x, -y, this->moveLabel);
++	}
++
++	this->hitLabelForDragging = false;
++	this->moveLabel = false;
++	this->dragStart = PointD();
++}
++
++void BetsyNetPDFUnmanagedApi::CheckOnRequestContextMenu(WindowInfo* win, int x, int y)
++{
++	win->selectionRect = RectI(x, y, 1, 1);
++
++	int i;
++	OverlayObject *curObj = NULL;
++	for(i = 0; i < this->overlayObjects.size(); i++)
++	{
++		curObj = this->overlayObjects[i];
++		if(curObj->selected && curObj->CheckIsInSelection(win))
++			break;
++
++		curObj = NULL;
++	}
++
++	if(curObj == NULL)
++	{
++		this->requestContextMenu(x, y, "");
++		return;
++	}
++
++	size_t len = curObj->id.length() + 1;
++	char* ret = new char[len];
++	strcpy(ret, curObj->id.c_str());
++
++	this->requestContextMenu(x, y, ret);
++}
++
++void BetsyNetPDFUnmanagedApi::ClearOverlayObjectList(WindowInfo* win)
++{
++	this->overlayObjects.clear();
++	
++	InvalidateRect(win->hwndCanvas, NULL, true);
++	UpdateWindow(win->hwndCanvas);
++}
++
++void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd)
++{
++	i.bgColor = gGlobalPrefs.bgColor;
++	i.fwdSearch.offset = gGlobalPrefs.fwdSearch.offset;
++	i.fwdSearch.width = gGlobalPrefs.fwdSearch.width;
++	i.fwdSearch.color = gGlobalPrefs.fwdSearch.color;
++	i.fwdSearch.permanent = gGlobalPrefs.fwdSearch.permanent;
++	i.escToExit = gGlobalPrefs.escToExit;
++	if (gGlobalPrefs.useSysColors) {
++		i.colorRange[0] = GetSysColor(COLOR_WINDOWTEXT);
++		i.colorRange[1] = GetSysColor(COLOR_WINDOW);
++	}
++
++	std::string ssumatra("\"BetsyNetPDF.dll\" ");
++	std::string splugin(" -plugin ");
++	std::string scmd = ssumatra + "\"" + file + "\"" + splugin + hwnd;
++
++	Widen<wchar_t> to_wstring;
++	std::wstring wscmd = to_wstring(scmd);
++
++	i.ParseCommandLine((TCHAR*)wscmd.c_str());	
++}
++///////////////////////////////////////////////////////////////////////////////
++// end BetsyNetPDF unmanged api
++///////////////////////////////////////////////////////////////////////////////
++
++///////////////////////////////////////////////////////////////////////////////
++// BetsyNetPDF unmanged api callers
++///////////////////////////////////////////////////////////////////////////////
++extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, 
++	OnSelectionChangedDelegate selChangedPtr, 
++	OnMouseClickDelegate mouseClickPointer, 
++	OnDeleteDelegate onDeletePointer, 
++	OnObjectMovedDelegate onMovePointer, 
++	OnRequestContextMenuDelegate requestContextMenuPointer, 
++	OnMouseOverObject onMouseOver,
++	OnDistanceMeasuredDelegate onMeasure,
++	OnLineDrawnDelegate onLine)
++{
++	BetsyNetPDFUnmanagedApi* betsyApi = new BetsyNetPDFUnmanagedApi();
++	betsyApi->SetDelegates(selChangedPtr, mouseClickPointer, onDeletePointer, onMovePointer, requestContextMenuPointer, onMouseOver, onMeasure, onLine);
++	betsyApi->hwnd= std::string(hwnd);
++	betsyApi->file = std::string(file);
++
++    int retCode = 1;    // by default it's error
++
+ #ifdef DEBUG
+     // Memory leak detection (only enable _CRTDBG_LEAK_CHECK_DF for
+     // regular termination so that leaks aren't checked on exceptions,
+@@ -5185,28 +6392,31 @@
+     // without a cd).
+     SetErrorMode(SEM_NOOPENFILEERRORBOX | SEM_FAILCRITICALERRORS);
+ 
+-    RunUnitTests();
++    //RunUnitTests();
+ 
+     srand((unsigned int)time(NULL));
+ 
+     // don't bother sending crash reports when running under Wine
+     // as they're not helpful
+-    if (!RunningUnderWine()) {
+-        ScopedMem<WCHAR> symDir;
+-        ScopedMem<WCHAR> tmpDir(path::GetTempPath());
+-        if (tmpDir)
+-            symDir.Set(path::Join(tmpDir, L"SumatraPDF-symbols"));
+-        else
+-            symDir.Set(AppGenDataFilename(L"SumatraPDF-symbols"));
+-        ScopedMem<WCHAR> crashDumpPath(AppGenDataFilename(CRASH_DUMP_FILE_NAME));
+-        InstallCrashHandler(crashDumpPath, symDir);
+-    }
++    //if (!RunningUnderWine()) {
++    /*ScopedMem<WCHAR> symDir;
++    ScopedMem<WCHAR> tmpDir(path::GetTempPath());
++    if (tmpDir)
++        symDir.Set(path::Join(tmpDir, L"SumatraPDF-symbols"));
++    else
++        symDir.Set(AppGenDataFilename(L"SumatraPDF-symbols"));
++    ScopedMem<WCHAR> crashDumpPath(AppGenDataFilename(CRASH_DUMP_FILE_NAME));
++    InstallCrashHandler(crashDumpPath, symDir);*/
++    //}
+ 
+-    ScopedOle ole;
+-    InitAllCommonControls();
+-    ScopedGdiPlus gdiPlus(true);
+-    mui::Initialize();
+-    uitask::Initialize();
++	if(TotalWindowsCount() == 0)
++	{
++		ScopedOle ole;
++		InitAllCommonControls();
++		ScopedGdiPlus gdiPlus(true);
++		mui::Initialize();
++		uitask::Initialize();
++	}
+ 
+     ScopedMem<WCHAR> prefsFilename(GetPrefsFileName());
+     if (!file::Exists(prefsFilename)) {
+@@ -5221,7 +6431,7 @@
+     prefsFilename.Set(NULL);
+ 
+     CommandLineInfo i;
+-	this->GetFakedCmd(i);// GetCommandLineInfo(i);
++	BetsyNetPDFUnmanagedApi::GetFakedCmd(i, betsyApi->file, betsyApi->hwnd);
+ 
+     if (i.showConsole)
+         RedirectIOToConsole();
+@@ -5232,6 +6442,8 @@
+         if (i.showConsole)
+             system("pause");
+     }
++    /*if (i.exitImmediately)
++        goto Exit;*/
+     gCrashOnOpen = i.crashOnOpen;
+ 
+     gGlobalPrefs.bgColor = i.bgColor;
+@@ -5253,24 +6465,18 @@
+     }
+     CurrLangNameSet(i.lang);
+ 
+-    RegisterWinClass((HINSTANCE)hInst);
+-    InstanceInit((HINSTANCE)hInst, false);
++    if(TotalWindowsCount() == 0)
++	{
++		RegisterWinClass((HINSTANCE)hInst);
++		InstanceInit((HINSTANCE)hInst, 0);
++	}
+ 
+-    if (i.hwndPluginParent) {
+-        SetupPluginMode(i);
++    if (i.hwndPluginParent) 
++	{
++		SetupPluginMode(i);
+ 		gGlobalPrefs.toolbarVisible = false;
+-    }
++	}
+ 
+-    if (i.printerName) {
+-        // note: this prints all PDF files. Another option would be to
+-        // print only the first one
+-        for (size_t n = 0; n < i.fileNames.Count(); n++) {
+-            bool ok = PrintFile(i.fileNames.At(n), i.printerName, !i.silent, i.printSettings);
+-            if (!ok)
+-                retCode++;
+-        }
+-    }
+-
+     if (i.fileNames.Count() == 0 && gGlobalPrefs.rememberOpenedFiles && gGlobalPrefs.showStartPage) {
+         // make the shell prepare the image list, so that it's ready when the first window's loaded
+         SHFILEINFO sfi;
+@@ -5278,7 +6484,7 @@
+     }
+ 
+     WindowInfo *win = NULL;
+-    bool isFirstWin = true;
++	bool isFirstWin = TotalWindowsCount() == 0;
+ 
+     for (size_t n = 0; n < i.fileNames.Count(); n++) {
+         if (i.reuseInstance && !i.printDialog) {
+@@ -5294,7 +6500,6 @@
+         }
+         isFirstWin = false;
+     }
+-    if (i.fileNames.Count() > 0 && isFirstWin) {}
+ 
+     if (isFirstWin) {
+         win = CreateAndShowWindowInfo();
+@@ -5304,216 +6509,251 @@
+     if (isFirstWin)
+         UpdateToolbarAndScrollbarState(*win);
+ 
+-    // Make sure that we're still registered as default,
+-    // if the user has explicitly told us to be
+-    if (gGlobalPrefs.pdfAssociateShouldAssociate && win)
+-        RegisterForPdfExtentions(win->hwndFrame);
++	win->betsyApi = betsyApi;
+ 
+-    if (gGlobalPrefs.enableAutoUpdate && gWindows.Count() > 0)
+-        AutoUpdateCheckAsync(gWindows.At(0)->hwndFrame, true);
++	return win;
++}
+ 
+-    if (i.stressTestPath)
+-        StartStressTest(&i, win, &gRenderCache);
++extern "C" UNMANAGED_API void __stdcall CallOpenNewFile(WindowInfo* win, char* file)
++{
++	if(win != NULL)
++	{
++		std::string sfile(file);
++		Widen<wchar_t> to_wstring;
++		std::wstring wfile = to_wstring(sfile);
++		
++		if(win->betsyApi != NULL)
++			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->overlayObjects.clear();
+ 
+-	this->win = win;
++		LoadArgs args(wfile.c_str(), win, true, true);
++		LoadDocument(args);
++	}
+ }
+ 
+-void SumatraUnmanagedApi::SaveAs()
++extern "C" UNMANAGED_API bool __stdcall CallIsDocOpen(WindowInfo* win)
+ {
+-	OnMenuSaveAs(*this->win);
++	if(win != NULL)
++		return win->IsDocLoaded();
++	else
++		return false;
+ }
+ 
+-void SumatraUnmanagedApi::Print()
++extern "C" UNMANAGED_API void __stdcall CallUpdateViewer(WindowInfo* win, char* hwnd)
+ {
+-	OnMenuPrint(this->win);
++	if(win != NULL && win->betsyApi != NULL)
++	{
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->UpdateViewer(win, hwnd);
++	}
+ }
+ 
+-void SumatraUnmanagedApi::FitPageWidth()
++extern "C" UNMANAGED_API void __stdcall CallFocusViewer(WindowInfo* win)
+ {
+-	ChangeZoomLevel(this->win, ZOOM_FIT_WIDTH, true);
++	if(win != NULL)
++	{
++		win->Focus();
++	}
+ }
+ 
+-void SumatraUnmanagedApi::FitWholePage()
++extern "C" UNMANAGED_API void __stdcall CallSetMouseOverEnabled(WindowInfo* win, bool enabled)
+ {
+-	ChangeZoomLevel(this->win, ZOOM_FIT_PAGE, false);
++	if(win != NULL && win->betsyApi != NULL)
++	{
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->mouseOverEnabled = enabled;
++	}
+ }
+ 
+-void SumatraUnmanagedApi::ZoomOut()
++extern "C" UNMANAGED_API void __stdcall CallSetMeasureModeEnabled(WindowInfo* win, bool enabled)
+ {
+-	if (this->win->IsDocLoaded())
+-		ZoomToSelection(this->win, this->win->dm->NextZoomStep(ZOOM_MIN));
++	if(win != NULL && win->betsyApi != NULL)
++	{
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->measureMode = enabled;
++		if(enabled)
++		{
++			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
++			InvalidateRect(win->hwndCanvas, NULL, true);
++			UpdateWindow(win->hwndCanvas);
++		}
++	}
+ }
+ 
+-void SumatraUnmanagedApi::ZoomIn()
++extern "C" UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, bool enabled)
+ {
+-	if (this->win->IsDocLoaded())
+-		ZoomToSelection(this->win, this->win->dm->NextZoomStep(ZOOM_MAX));
++	if(win != NULL && win->betsyApi != NULL)
++	{
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineMode = enabled;
++		if(enabled)
++		{
++			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
++			InvalidateRect(win->hwndCanvas, NULL, true);
++			UpdateWindow(win->hwndCanvas);
++		}
++	}
+ }
+ 
+-void SumatraUnmanagedApi::RotateLeft()
++extern "C" UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords)
+ {
+-	if (this->win->IsDocLoaded())
+-		this->win->dm->RotateBy(-90);
++	if(win != NULL && win->IsDocLoaded())
++	{
++		PointD val = win->dm->CvtFromScreen(PointI(screenCoords->X, screenCoords->Y), 1);
++
++		double x = (val.x / 72.0) * 2540.0;
++		double y = win->dm->GetPageInfo(1)->page.dy - val.y;
++		y = (y / 72.0) * 2540.0;
++
++		PointF* res = new PointF(x, y);
++		return res;
++	}
+ }
+ 
+-void SumatraUnmanagedApi::RotateRight()
++extern "C" UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords)
+ {
+-	if (this->win->IsDocLoaded())
+-		this->win->dm->RotateBy(90);
++	if(win != NULL && win->IsDocLoaded())
++	{
++		double x = (docCoords->X / 2540.0) * 72.0;
++		double y = (docCoords->Y / 2540.0) * 72.0;
++		y = win->dm->GetPageInfo(1)->page.dy - y;
++
++		PointI val = win->dm->CvtToScreen(1, PointD(x, y));
++		Point* res = new Point(val.x, val.y);
++		return res;
++	}
+ }
+ 
+-void SumatraUnmanagedApi::GetFakedCmd(CommandLineInfo& i)
++extern "C" UNMANAGED_API void __stdcall CallSaveAs(WindowInfo* win)
+ {
+-	i.bgColor = gGlobalPrefs.bgColor;
+-	i.fwdSearch.offset = gGlobalPrefs.fwdSearch.offset;
+-	i.fwdSearch.width = gGlobalPrefs.fwdSearch.width;
+-	i.fwdSearch.color = gGlobalPrefs.fwdSearch.color;
+-	i.fwdSearch.permanent = gGlobalPrefs.fwdSearch.permanent;
+-	i.escToExit = gGlobalPrefs.escToExit;
+-	if (gGlobalPrefs.useSysColors) {
+-		i.colorRange[0] = GetSysColor(COLOR_WINDOWTEXT);
+-		i.colorRange[1] = GetSysColor(COLOR_WINDOW);
++	if(win != NULL && win->IsDocLoaded())
++	{
++		OnMenuSaveAs(*win);
+ 	}
++}
+ 
+-	std::string ssumatra("\"SumatraPDF.dll\" ");
+-	std::string sfile(this->GetChar(this->file));
+-	std::string splugin(" -plugin ");
+-	std::string shwnd(this->GetChar(this->hwnd));
+-	std::string scmd = ssumatra+sfile+splugin+shwnd;
+-
+-	char* ccmd = new char[scmd.size()+1];
+-	strcpy(ccmd, scmd.c_str());
+-
+-	TCHAR* cmd = this->GetTCHAR(ccmd);
+-
+-	i.ParseCommandLine(cmd);	
++extern "C" UNMANAGED_API void __stdcall CallPrint(WindowInfo* win)
++{
++	if(win != NULL && win->IsDocLoaded())
++	{
++		OnMenuPrint(win);
++	}
+ }
+ 
+-char* SumatraUnmanagedApi::GetChar(TCHAR* oTCHAR)
++extern "C" UNMANAGED_API void __stdcall CallFitPageWidth(WindowInfo* win)
+ {
+-	//Get the size of the string by setting the 4th parameter to -1:
+-	DWORD dwNum = WideCharToMultiByte(CP_ACP, 0, oTCHAR, -1, NULL, 0,  NULL, NULL);
+-
+-	//Allocate space for wide char string:
+-	char* newChar;
+-	newChar = new char[dwNum];
+-
+-	//Then convert:
+-	WideCharToMultiByte (CP_ACP, 0, oTCHAR, -1, newChar, dwNum, NULL, NULL );
+-
+-	return newChar;
++	if(win != NULL && win->IsDocLoaded())
++	{
++		ChangeZoomLevel(win, ZOOM_FIT_WIDTH, true);
++	}
+ }
+ 
+-TCHAR* SumatraUnmanagedApi::GetTCHAR(char* oCHAR)
++extern "C" UNMANAGED_API void __stdcall CallFitWholePage(WindowInfo * win)
+ {
+-	//Get the size of the string by setting the 4th parameter to -1:
+-	DWORD dwNum = MultiByteToWideChar (CP_ACP, 0, oCHAR, -1, NULL, 0);
+-
+-	//Allocate space for wide char string:
+-	TCHAR *newTCHAR;
+-	newTCHAR = new TCHAR[dwNum];
+-
+-	//Then convert:
+-	MultiByteToWideChar (CP_ACP, 0, oCHAR, -1, newTCHAR, dwNum );
+-
+-	return newTCHAR;
++	if(win != NULL && win->IsDocLoaded())
++	{
++		ChangeZoomLevel(win, ZOOM_FIT_PAGE, false);
++	}
+ }
+-// end unmanaged api
+-/////////////////////////////////////////////////////////////////////////////////
+ 
+-/////////////////////////////////////////////////////////////////////////////////
+-// unmanged api callers
+-extern "C" UNMANAGED_API SumatraUnmanagedApi* CreateSumatraUnmanagedApiClass()
++extern "C" UNMANAGED_API void __stdcall CallZoomOut(WindowInfo* win)
+ {
+-	return new SumatraUnmanagedApi();
++	if(win != NULL && win->IsDocLoaded())
++	{
++		ZoomToSelection(win, win->dm->NextZoomStep(ZOOM_MIN));
++	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallSumatraViewer(SumatraUnmanagedApi* obj, TCHAR* hwnd, TCHAR* file)
++extern "C" UNMANAGED_API void __stdcall CallZoomIn(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->IsDocLoaded())
+ 	{
+-		obj->SumatraViewer(hwnd, file);
++		ZoomToSelection(win, win->dm->NextZoomStep(ZOOM_MAX));
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallUpdateViewer(SumatraUnmanagedApi* obj, TCHAR* hwnd)
++extern "C" UNMANAGED_API void __stdcall CallRotateLeft(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->IsDocLoaded())
+ 	{
+-		obj->UpdateViewer(hwnd);
++		win->dm->RotateBy(-90);
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallCleanupViewer(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API void __stdcall CallRotateRight(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->IsDocLoaded())
+ 	{
+-		obj->CleanupViewer();
++		win->dm->RotateBy(90);
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallSaveAs(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API void __stdcall CallRotateCounterClockWise(WindowInfo* win, int angle)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->IsDocLoaded())
+ 	{
+-		obj->SaveAs();
++		win->dm->RotateBy(angle * -1);
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallPrint(SumatraUnmanagedApi* obj)
++//extern "C" UNMANAGED_API void __stdcall CallProcessOverlayObject(WindowInfo* win, char* id, char* label, char* font, double x, double y, double dx, double dy, double angle, float fontSize, int foreGround, int backGround, bool update)
++//{
++//	if(win != NULL && win->betsyApi != NULL)
++//	{
++//		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ProcessOverlayObject(win, id, label, font, x, y, dx, dy, angle, fontSize, Color(foreGround), Color(backGround), update);
++//	}
++//}
++
++extern "C" UNMANAGED_API void __stdcall CallProcessOverlayObjects(WindowInfo* win, char* objs)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->Print();
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ProcessOverlayObjects(win, objs);
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallFitPageWidth(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API void __stdcall CallSetSelectedOverlayObjects(WindowInfo* win, char* objectIds)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->FitPageWidth();
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->SetSelectedOverlayObjects(win, objectIds);
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallFitWholePage(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API void __stdcall CallRemoveOverlayObject(WindowInfo* win, char* id)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->FitWholePage();
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->RemoveOverlayObject(win, id);
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallZoomOut(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjectIds(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->ZoomOut();
++		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetSelectedOverlayObjectIds();
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallZoomIn(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjects(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->ZoomIn();
++		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetSelectedOverlayObjects();
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallRotateLeft(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API char* __stdcall CallGetAllOverlayObjects(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->RotateLeft();
++		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetAllOverlayObjects();
+ 	}
+ }
+ 
+-extern "C" UNMANAGED_API void CallRotateRight(SumatraUnmanagedApi* obj)
++extern "C" UNMANAGED_API void __stdcall CallClearOverlayObjectList(WindowInfo* win)
+ {
+-	if(obj != NULL)
++	if(win != NULL && win->betsyApi != NULL)
+ 	{
+-		obj->RotateRight();
++		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ClearOverlayObjectList(win);
+ 	}
+ }
+-// end unmanaged api callers
+-/////////////////////////////////////////////////////////////////////////////////
+\ No newline at end of file
++///////////////////////////////////////////////////////////////////////////////
++// end BetsyNetPDF unmanged api callers
++///////////////////////////////////////////////////////////////////////////////
+\ No newline at end of file
+Index: src/SumatraPDF.h
+===================================================================
+--- src/SumatraPDF.h	(revision 22)
++++ src/SumatraPDF.h	(working copy)
+@@ -4,8 +4,14 @@
+ #ifndef SumatraPDF_h
+ #define SumatraPDF_h
+ 
++#include <string>
++#include <vector>
++
++using namespace Gdiplus;
++#include "GdiPlusUtil.h"
+ #include "FileHistory.h"
+ #include "SumatraWindow.h"
++#include "DisplayModel.h"
+ #include "ParseCommandLine.h"
+ 
+ #define UWM_PREFS_FILE_UPDATED  (WM_USER + 1)
+@@ -152,8 +158,92 @@
+ void        LoadDocument2(const WCHAR *fileName, SumatraWindow& win);
+ WindowInfo *CreateAndShowWindowInfo();
+ 
+-#ifndef __SumatraUnmanagedApi_h__
+-#define __SumatraUnmanagedApi_h__
++///////////////////////////////////////////////////////////////////////////////
++// BetsyNetPDF
++///////////////////////////////////////////////////////////////////////////////
++
++// Put this class in your personal toolbox... 
++ template<class E, 
++ class T = std::char_traits<E>, 
++ class A = std::allocator<E> > 
++  
++ class Widen : public std::unary_function< 
++     const std::string&, std::basic_string<E, T, A> > 
++ { 
++     std::locale loc_; 
++     const std::ctype<E>* pCType_; 
++  
++     // No copy-constructor, no assignment operator... 
++     Widen(const Widen&); 
++     Widen& operator= (const Widen&); 
++  
++ public: 
++     // Constructor... 
++     Widen(const std::locale& loc = std::locale()) : loc_(loc) 
++     { 
++#if defined(_MSC_VER) && (_MSC_VER < 1300) // VC++ 6.0... 
++         using namespace std; 
++         pCType_ = &_USE(loc, ctype<E> ); 
++#else 
++         pCType_ = &std::use_facet<std::ctype<E> >(loc); 
++#endif 
++     } 
++  
++     // Conversion... 
++     std::basic_string<E, T, A> operator() (const std::string& str) const 
++     { 
++         typename std::basic_string<E, T, A>::size_type srcLen = 
++             str.length(); 
++         const char* pSrcBeg = str.c_str(); 
++         std::vector<E> tmp(srcLen); 
++  
++         pCType_->widen(pSrcBeg, pSrcBeg + srcLen, &tmp[0]); 
++         return std::basic_string<E, T, A>(&tmp[0], srcLen); 
++     } 
++ }; 
++
++class OverlayObject
++{
++public:
++	std::string id, label, font;
++	double angle;
++	int page;
++	float fontSize;
++	bool selected, bold, italic;
++	std::vector<PointF> currentScreenLocation, currentLabelLocation;
++	Color foreGround, backGround;
++
++	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy , double lx, double ly, double angle, float fontSize, Color foreGround, Color backGround);
++	double GetX();
++	double GetY();
++	double GetDX();
++	double GetDY();
++	double GetLX();
++	double GetLY();
++	void SetX(double x);
++	void SetY(double y);
++	void SetDX(double dx);
++	void SetDY(double dy);
++	void SetLX(double lx);
++	void SetLY(double ly);
++	void InitLXY(WindowInfo* win);
++	void Move(double deltaX, double deltaY, bool moveLabel);
++	void Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds);
++	bool CheckSelectionChanged(WindowInfo* win);
++	bool CheckIsInSelection(WindowInfo* win);
++	bool CheckIsInSelection(WindowInfo* win, bool label);
++	bool CheckIsPolyInSelection(WindowInfo* win, bool label);
++	RectF GetRect(std::vector<PointF> points);
++	std::string ToString();
++	static OverlayObject* CreateFromString(std::string sobj);
++	static bool CheckSegementIntersection(float p0_x, float p0_y, float p1_x, float p1_y, float p2_x, float p2_y, float p3_x, float p3_y);
++
++private:
++	double x_dpi, y_dpi, dx_dpi, dy_dpi, lx_dpi, ly_dpi;
++};
++
++#ifndef __BetsyNetPDFUnmanagedApi_h__
++#define __BetsyNetPDFUnmanagedApi_h__
+ 
+ #define UNMANAGED_EXPORTS
+ 
+@@ -163,48 +253,133 @@
+ #define UNMANAGED_API __declspec(dllimport)
+ #endif
+ 
+-class UNMANAGED_API SumatraUnmanagedApi 
++typedef void (__stdcall *OnSelectionChangedDelegate)();
++typedef void (__stdcall *OnDeleteDelegate)();
++typedef void (__stdcall *OnMouseOverObject)(char* id);
++// x,y coords on page
++typedef void (__stdcall *OnMouseClickDelegate)(double x, double y);
++typedef void (__stdcall *OnObjectMovedDelegate)(double deltaX, double deltaY, bool moveLabel);
++typedef void (__stdcall *OnDistanceMeasuredDelegate)(double distance);
++typedef void (__stdcall *OnLineDrawnDelegate)(double p1x, double p1y, double p2x, double p2y);
++//x,y coords on screen
++typedef void (__stdcall *OnRequestContextMenuDelegate)(int x, int y, char* id);
++
++class UNMANAGED_API BetsyNetPDFUnmanagedApi 
+ {
+ public:
+-	SumatraUnmanagedApi();
+-	void SumatraViewer(TCHAR* hwnd, TCHAR* file);
+-	void UpdateViewer(TCHAR* hwnd);
+-	void CleanupViewer();
++	std::vector<OverlayObject*> overlayObjects;
++	OverlayObject* lastObj;
++	bool hitLabelForDragging, selectionChanging, mouseOverEnabled, measureMode, lineMode;
++	std::string hwnd;
++	std::string file;
+ 
+-	void SaveAs();
+-	void Print();
+-	void FitPageWidth();
+-	void FitWholePage();
+-	void ZoomOut();
+-	void ZoomIn();
+-	void RotateLeft();
+-	void RotateRight();
++	BetsyNetPDFUnmanagedApi();
++	void BetsyNetPDFViewer(char* hwnd, char* file);
++	void UpdateViewer(WindowInfo* win, char* hwnd);
++	void SetDelegates(
++		OnSelectionChangedDelegate selChanged, 
++		OnMouseClickDelegate mouseClick, 
++		OnDeleteDelegate onDelete, 
++		OnObjectMovedDelegate onMove, 
++		OnRequestContextMenuDelegate requestContextMenuPointer, 
++		OnMouseOverObject onMouseOver,
++		OnDistanceMeasuredDelegate onMeasure,
++		OnLineDrawnDelegate onLine);
+ 
++	void DrawOverlayObjets(HDC* hdc, WindowInfo* win, int pageNo, RectI bounds);
++	void DrawLine(HDC* hdc, WindowInfo* win);
++	void SetCurrentLineEnd(WindowInfo* win, int x, int y);
++
++	//void ProcessOverlayObject(WindowInfo* win, char* id, char* label, char* font, double x, double y, double dx, double dy, double angle, float fontSize, Color foreGround, Color backGround, bool update, bool repaint = true);
++	void ProcessOverlayObjects(WindowInfo* win, char* objects);
++	void RemoveOverlayObject(WindowInfo* win, char* id);
++	void SetSelectedOverlayObjects(WindowInfo* win, char* objectIds);
++	bool CheckSelectionChanged(WindowInfo* win, WPARAM key);
++	char* GetSelectedOverlayObjectIds();
++	char* GetSelectedOverlayObjects();
++	void DeselectOverlayObjects();
++	char* GetAllOverlayObjects();
++	// x,y coords on screen
++	void CheckMouseClick(WindowInfo* win, int x, int y, WPARAM key);
++	void CheckDeleteOverlayObject();
++	void CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool moveObj = true);
++	void ClearOverlayObjectList(WindowInfo* win);
++	void MoveSelectedOverlayObjectsBy(WindowInfo* win, int x, int y);
++	void CheckOverlayObjectMoved(WindowInfo* win, int x, int y);
++
++	void CheckOnRequestContextMenu(WindowInfo* win, int x, int y);
++
++	static void GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd);
++
+ private:
+-	TCHAR* hwnd;
+-	TCHAR* file;
+-	WindowInfo* win;
++	PointD dragStart;
++	PointD lastDragLoc;
++	PointD* lineStart;
++	PointD* lineEnd;
++	Point* curLineEnd;
++	bool moveLabel;
++	OnSelectionChangedDelegate notifySelectionChanged;
++	OnDeleteDelegate notifyDelete;
++	OnMouseClickDelegate notifyMouseClick;
++	OnObjectMovedDelegate notifyObjectMoved;
++	OnMouseOverObject notifyMouseOverObject;
++	OnDistanceMeasuredDelegate notifyDistanceMeasured;
++	OnLineDrawnDelegate notifyLineDrawn;
++	OnRequestContextMenuDelegate requestContextMenu;
+ 
+ 	void InitViewer();
+-	void GetFakedCmd(CommandLineInfo& i);
+-	char* GetChar(TCHAR* oTCHAR);
+-	TCHAR* GetTCHAR(char* oCHAR);
+ };
+ 
+-#endif //__SumatraUnmanagedApi_h__
++#endif //__BetsyNetPDFUnmanagedApi_h__
+ 
+-#ifndef __SumatraUnmanagedApiCallers_h__
+-#define __SumatraUnmanagedApiCallers_h__
++#ifndef __BetsyNetPDFUnmanagedApiCallers_h__
++#define __BetsyNetPDFUnmanagedApiCallers_h__
+ 
+ extern "C" {
+ 	
+-	extern UNMANAGED_API SumatraUnmanagedApi* CreateSumatraUnmanagedApiClass();
+-	extern UNMANAGED_API void CallSumatraViewer(SumatraUnmanagedApi* obj, TCHAR* hwnd, TCHAR* file);
+-	extern UNMANAGED_API void CallUpdateViewer(SumatraUnmanagedApi* obj, TCHAR* hwnd);
+-	extern UNMANAGED_API void CallCleanupViewer(SumatraUnmanagedApi* obj);
++	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file,
++		OnSelectionChangedDelegate selChangedPtr, 
++		OnMouseClickDelegate mouseClickPointer, 
++		OnDeleteDelegate onDeletePointer, 
++		OnObjectMovedDelegate onMovePointer, 
++		OnRequestContextMenuDelegate requestContextMenuPointer,
++		OnMouseOverObject onMouseOver,
++		OnDistanceMeasuredDelegate onMeasure,
++		OnLineDrawnDelegate onLine);
++	extern UNMANAGED_API void __stdcall CallOpenNewFile(WindowInfo* win, char* file);
++	extern UNMANAGED_API bool __stdcall CallIsDocOpen(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallUpdateViewer(WindowInfo* win, char* hwnd);
++	extern UNMANAGED_API void __stdcall CallFocusViewer(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallSetMouseOverEnabled(WindowInfo* win, bool enabled);
++	extern UNMANAGED_API void __stdcall CallSetMeasureModeEnabled(WindowInfo* win, bool enabled);
++	extern UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, bool enabled);
++	extern UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords);
++	extern UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords);
+ 
++	//extern UNMANAGED_API void __stdcall CallProcessOverlayObject(WindowInfo* win, char* id, char* label, char* font, double x, double y, double dx, double dy, double angle, float fontSize, int foreGround, int backGround, bool update);
++	extern UNMANAGED_API void __stdcall CallProcessOverlayObjects(WindowInfo* win, char* objs);
++	extern UNMANAGED_API void __stdcall CallSetSelectedOverlayObjects(WindowInfo* win, char* objectIds);
++	extern UNMANAGED_API void __stdcall CallRemoveOverlayObject(WindowInfo* win, char* id);
++	extern UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjectIds(WindowInfo* win);
++	extern UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjects(WindowInfo* win);
++	extern UNMANAGED_API char* __stdcall CallGetAllOverlayObjects(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallClearOverlayObjectList(WindowInfo* win);
++
++	extern UNMANAGED_API void __stdcall CallSaveAs(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallPrint(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallFitPageWidth(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallFitWholePage(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallZoomOut(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallZoomIn(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallRotateLeft(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallRotateRight(WindowInfo* win);
++	extern UNMANAGED_API void __stdcall CallRotateCounterClockWise(WindowInfo* win, int angle);
+ }
+ 
+-#endif // __SumatraUnmanagedApiCallers_h__
++#endif // __BetsyNetPDFUnmanagedApiCallers_h__
+ 
++///////////////////////////////////////////////////////////////////////////////
++// end BetsyNetPDF
++///////////////////////////////////////////////////////////////////////////////
++
+ #endif

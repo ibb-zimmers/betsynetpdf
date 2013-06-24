@@ -1,0 +1,40 @@
+Index: makefile.msvc
+===================================================================
+--- makefile.msvc	(revision 22)
++++ makefile.msvc	(working copy)
+@@ -126,14 +126,14 @@
+ OM   = $(O)\memtrace-x64
+ !endif
+ 
+-SUMATRA_APP = $(O)\SumatraPDF-x86.exe
+-SUMATRA_DLL = $(O)\SumatraPDF-x86.dll
++SUMATRA_APP = $(O)\BetsyNetPDF-x86.exe
++SUMATRA_DLL = $(O)\BetsyNetPDF-x86.dll
+ SUMATRA_APP_NO_MUPDF = $(O)\SumatraPDF-no-MuPDF-x86.exe
+ SUMATRA_RES = $(OS)\sumatrapdf-x86.res
+ 
+ !if "$(PLATFORM)"=="X64"
+-SUMATRA_APP = $(O)\SumatraPDF-x64.exe
+-SUMATRA_DLL = $(O)\SumatraPDF-x64.dll
++SUMATRA_APP = $(O)\BetsyNetPDF-x64.exe
++SUMATRA_DLL = $(O)\BetsyNetPDF-x64.dll
+ SUMATRA_APP_NO_MUPDF = $(O)\SumatraPDF-no-MuPDF-x64.exe
+ SUMATRA_RES = $(OS)\sumatrapdf-x64.res
+ !endif
+@@ -310,13 +310,13 @@
+ 	rc /r /fo$@ $(RC_FLAGS) src\SumatraPDF.rc
+ 
+ $(SUMATRA_APP): $(LIBS_OBJS) $(SUMATRA_OBJS)
+-	$(LD) $(LDFLAGS) $** $(LIBS) /PDB:$*.pdb /OUT:$@
++	$(LD) $(LDFLAGS) $** $(LIBS) /OUT:$@
+ 
+ $(SUMATRA_DLL): $(LIBS_OBJS) $(SUMATRA_OBJS)
+-	$(LD) $(LDFLAGS) $** $(LIBS) /PDB:$*-dll.pdb /DLL /OUT:$@
++	$(LD) $(LDFLAGS) $** $(LIBS) /DLL /OUT:$@
+ 
+ $(SUMATRA_APP_NO_MUPDF): $(SUMATRA_OBJS) $(OS)\MuPDF_Exports.obj
+-	$(LD) $(LDFLAGS) $** $(LIBS) /PDB:$*.pdb /OUT:$@ $(LIBMUPDF_LIB)
++	$(LD) $(LDFLAGS) $** $(LIBS) /OUT:$@ $(LIBMUPDF_LIB)
+ 
+ $(LIBMUPDF_RES): src\libmupdf.rc src\Version.h
+ 	rc /r /fo$@ $(RC_FLAGS) src\libmupdf.rc
