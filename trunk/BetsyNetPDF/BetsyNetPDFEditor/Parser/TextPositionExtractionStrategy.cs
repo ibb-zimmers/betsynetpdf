@@ -9,9 +9,9 @@ namespace BetsyNetPDF.Parser
     //this class was published on stackoverflow by greenhat http://stackoverflow.com/a/8825884
     class TextPositionExtractionStrategy : LocationTextExtractionStrategy
     {
-        private List<TextChunk> m_locationResult = new List<TextChunk>();
+        private List<MyTextChunk> m_locationResult = new List<MyTextChunk>();
         private List<TextInfo> m_TextLocationInfo = new List<TextInfo>();
-        public List<TextChunk> LocationResult
+        public List<MyTextChunk> LocationResult
         {
             get { return m_locationResult; }
         }
@@ -36,9 +36,9 @@ namespace BetsyNetPDF.Parser
             m_locationResult.Sort();
 
             StringBuilder sb = new StringBuilder();
-            TextChunk lastChunk = null;
+            MyTextChunk lastChunk = null;
             TextInfo lastTextInfo = null;
-            foreach (TextChunk chunk in m_locationResult)
+            foreach (MyTextChunk chunk in m_locationResult)
             {
                 if (lastChunk == null)
                 {
@@ -86,13 +86,13 @@ namespace BetsyNetPDF.Parser
         public override void RenderText(TextRenderInfo renderInfo)
         {
             LineSegment segment = renderInfo.GetBaseline();
-            TextChunk location = new TextChunk(renderInfo.GetText(), segment.GetStartPoint(), segment.GetEndPoint(), renderInfo.GetSingleSpaceWidth(), renderInfo.GetAscentLine(), renderInfo.GetDescentLine());
+            MyTextChunk location = new MyTextChunk(renderInfo.GetText(), segment.GetStartPoint(), segment.GetEndPoint(), renderInfo.GetSingleSpaceWidth(), renderInfo.GetAscentLine(), renderInfo.GetDescentLine());
             m_locationResult.Add(location);
 
         }
     }
 
-    class TextChunk : IComparable, ICloneable
+    class MyTextChunk : IComparable, ICloneable
     {
         string m_text;
         Vector m_startLocation;
@@ -109,7 +109,7 @@ namespace BetsyNetPDF.Parser
 
         public object Clone()
         {
-            TextChunk copy = new TextChunk(m_text, m_startLocation, m_endLocation, m_charSpaceWidth, AscentLine, DecentLine);
+            MyTextChunk copy = new MyTextChunk(m_text, m_startLocation, m_endLocation, m_charSpaceWidth, AscentLine, DecentLine);
             return copy;
         }
 
@@ -141,7 +141,7 @@ namespace BetsyNetPDF.Parser
         /// <param name="startLoc"></param>
         /// <param name="endLoc"></param>
         /// <param name="charSpaceWidth"></param>
-        public TextChunk(string txt, Vector startLoc, Vector endLoc, float charSpaceWidth, LineSegment ascentLine, LineSegment decentLine)
+        public MyTextChunk(string txt, Vector startLoc, Vector endLoc, float charSpaceWidth, LineSegment ascentLine, LineSegment decentLine)
         {
             m_text = txt;
             m_startLocation = startLoc;
@@ -168,7 +168,7 @@ namespace BetsyNetPDF.Parser
         /// </summary>
         /// <param name="textChunkToCompare">the location to compare to</param>
         /// <returns>true if this location is on the the same line as the other</returns>
-        public bool sameLine(TextChunk textChunkToCompare)
+        public bool sameLine(MyTextChunk textChunkToCompare)
         {
             if (m_orientationMagnitude != textChunkToCompare.m_orientationMagnitude) return false;
             if (m_distPerpendicular != textChunkToCompare.m_distPerpendicular) return false;
@@ -183,7 +183,7 @@ namespace BetsyNetPDF.Parser
         /// </summary>
         /// <param name="other"></param>
         /// <returns>the number of spaces between the end of 'other' and the beginning of this chunk</returns>
-        public float distanceFromEndOf(TextChunk other)
+        public float distanceFromEndOf(MyTextChunk other)
         {
             float distance = m_distParallelStart - other.m_distParallelEnd;
             return distance;
@@ -198,7 +198,7 @@ namespace BetsyNetPDF.Parser
         {
             if (obj == null) throw new ArgumentException("Object is now a TextChunk");
 
-            TextChunk rhs = obj as TextChunk;
+            MyTextChunk rhs = obj as MyTextChunk;
             if (rhs != null)
             {
                 if (this == rhs) return 0;
@@ -239,7 +239,7 @@ namespace BetsyNetPDF.Parser
         /// Create a TextInfo.
         /// </summary>
         /// <param name="initialTextChunk"></param>
-        public TextInfo(TextChunk initialTextChunk)
+        public TextInfo(MyTextChunk initialTextChunk)
         {
             TopLeft = initialTextChunk.AscentLine.GetStartPoint();
             BottomRight = initialTextChunk.DecentLine.GetEndPoint();
@@ -250,7 +250,7 @@ namespace BetsyNetPDF.Parser
         /// Add more text to this TextInfo.
         /// </summary>
         /// <param name="additionalTextChunk"></param>
-        public void appendText(TextChunk additionalTextChunk)
+        public void appendText(MyTextChunk additionalTextChunk)
         {
             BottomRight = additionalTextChunk.DecentLine.GetEndPoint();
             m_Text += additionalTextChunk.Text;

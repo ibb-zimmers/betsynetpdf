@@ -54,7 +54,7 @@ namespace BetsyNetPDF
             DevExpress.Skins.SkinManager.EnableFormSkins();
             UserLookAndFeel.Default.SetSkinStyle("DevExpress Style");
 
-            Application.Run(new BetsyNetPDFMDIViewer());
+            Application.Run(new BetsyNetPDFViewer());
         }
     }
 }

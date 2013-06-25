@@ -186,7 +186,7 @@ namespace BetsyNetPDF
             {
                 strategy = parser.ProcessContent<Parser.TextPositionExtractionStrategy>(i, new Parser.TextPositionExtractionStrategy());
 
-                foreach (Parser.TextChunk chunk in strategy.LocationResult)
+                foreach (Parser.MyTextChunk chunk in strategy.LocationResult)
                 {
                     if (oRegex.IsMatch(chunk.Text))
                     {

@@ -2306,7 +2306,7 @@ static void OnMouseMove(WindowInfo& win, int x, int y, WPARAM flags)
 	case MA_IDLE:
 		betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
 		if(betsyApi != NULL && betsyApi->mouseOverEnabled)
-			betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, false);
+			betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, flags == MK_CONTROL, false);
 		if(betsyApi != NULL && (betsyApi->measureMode || betsyApi->lineMode))
 			betsyApi->SetCurrentLineEnd(&win, x, y);
 		break;
@@ -2348,7 +2348,7 @@ static void OnMouseLeftButtonDown(WindowInfo& win, int x, int y, WPARAM key)
 
 	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
 	if(betsyApi != NULL)
-		betsyApi->CheckOverlayObjectAtMousePos(&win, x, y);
+		betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, key == MK_CONTROL);
 
     // - without modifiers, clicking on text starts a text selection
     //   and clicking somewhere else starts a drag
@@ -6351,6 +6351,7 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, WPARAM key)
 	bool prevSelectedState, selectionChanged = false, notify = false;
 	int i;
 	OverlayObject *curObj;
+	OverlayObject *lastSelectedObject = NULL;
 	for(i=0; i < this->overlayObjects.size(); i++)
 	{
 		curObj = this->overlayObjects[i];
@@ -6370,7 +6371,12 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, WPARAM key)
 		{
 			notify = true;
 			if(prevSelectedState == false && win->selectionRect.dx == 1 && win->selectionRect.dy == 1)
-				break;
+			{
+				if(lastSelectedObject != NULL)
+					lastSelectedObject->selected = false;
+
+				lastSelectedObject = curObj;
+			}
 		}
 	}
 
@@ -6536,7 +6542,7 @@ void BetsyNetPDFUnmanagedApi::CheckDeleteOverlayObject()
 		this->notifyDelete();
 }
 
-void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool moveObj)
+void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrl, bool moveObj)
 {
 	if(this->measureMode || this->lineMode)
 		return;
@@ -6572,7 +6578,7 @@ void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int 
 		}
 	}
 
-	if(!moveObj)
+	if(!moveObj && ctrl)
 	{
 		if(oo == NULL)
 			this->lastObj = NULL;
