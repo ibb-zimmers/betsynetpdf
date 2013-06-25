@@ -70,7 +70,7 @@ namespace BetsyNetPDF
 
         void ctrl_BetsyNetPDFMouseOverObjectEvent(string id)
         {
-            Console.WriteLine(id);
+            MessageBox.Show(id);
         }
 
         void ctrl_BetsyNetPDFLineDrawnEvent(double p1x, double p1y, double p2x, double p2y)

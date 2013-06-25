@@ -99,12 +99,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="BetsyNetPDFMDIViewer.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="BetsyNetPDFMDIViewer.Designer.cs">
-      <DependentUpon>BetsyNetPDFMDIViewer.cs</DependentUpon>
-    </Compile>
     <Compile Include="BetsyNetPDFViewer.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -115,9 +109,6 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="BetsyNetPDFMDIViewer.resx">
-      <DependentUpon>BetsyNetPDFMDIViewer.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="BetsyNetPDFViewer.resx">
       <DependentUpon>BetsyNetPDFViewer.cs</DependentUpon>
     </EmbeddedResource>

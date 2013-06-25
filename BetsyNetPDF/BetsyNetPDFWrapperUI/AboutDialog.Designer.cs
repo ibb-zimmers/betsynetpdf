@@ -77,6 +77,7 @@
             this.linkLabel1.TabIndex = 3;
             this.linkLabel1.TabStop = true;
             this.linkLabel1.Text = "https://code.google.com/p/betsynetpdf/";
+            this.linkLabel1.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel_LinkClicked);
             // 
             // memoEdit1
             // 
@@ -120,6 +121,7 @@
             this.linkLabel2.TabIndex = 9;
             this.linkLabel2.TabStop = true;
             this.linkLabel2.Text = "http://blog.kowalczyk.info/software/sumatrapdf/";
+            this.linkLabel2.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel_LinkClicked);
             // 
             // linkLabel3
             // 
@@ -130,6 +132,7 @@
             this.linkLabel3.TabIndex = 11;
             this.linkLabel3.TabStop = true;
             this.linkLabel3.Text = "http://sourceforge.net/projects/itextsharp/";
+            this.linkLabel3.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkLabel_LinkClicked);
             // 
             // labelControl6
             // 

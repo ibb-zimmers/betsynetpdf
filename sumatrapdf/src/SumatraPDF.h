@@ -306,7 +306,7 @@ public:
 	// x,y coords on screen
 	void CheckMouseClick(WindowInfo* win, int x, int y, WPARAM key);
 	void CheckDeleteOverlayObject();
-	void CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool moveObj = true);
+	void CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrl, bool moveObj = true);
 	void ClearOverlayObjectList(WindowInfo* win);
 	void MoveSelectedOverlayObjectsBy(WindowInfo* win, int x, int y);
 	void CheckOverlayObjectMoved(WindowInfo* win, int x, int y);

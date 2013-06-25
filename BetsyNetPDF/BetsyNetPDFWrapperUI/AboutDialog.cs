@@ -51,5 +51,14 @@ namespace BetsyNetPDF
             InitializeComponent();
             lblVersion.Text = version;
         }
+
+        private void linkLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            if (sender == null || !(sender is LinkLabel))
+                return;
+
+            LinkLabel ll = sender as LinkLabel;
+            System.Diagnostics.Process.Start(ll.Text);
+        }
     }
 }
