@@ -60,7 +60,6 @@ namespace BetsyNetPDF
             this.printOnPlotter = false;
 
             wrapper = new BetsyNetPDFWrapper();
-            lblVersion.Text = "rev. " + this.Version;
         }
 
         #region public methods
