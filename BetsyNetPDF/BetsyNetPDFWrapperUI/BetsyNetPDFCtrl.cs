@@ -61,7 +61,6 @@ namespace BetsyNetPDF
         private BarButtonItem barBtnRotateLeft;
         private BarButtonItem barBtnRotateRight;
         private BarButtonItem barBtnAbout;
-        private BarStaticItem lblVersion;
 
         public Bar ToolBar { get { return toolBar; } }
 
@@ -99,7 +98,6 @@ namespace BetsyNetPDF
             wrapper.MouseOverObjectEvent += new BetsyNetPDFWrapper.MouseOverObjectEventHandler(wrapper_MouseOverObjectEvent);
             wrapper.DistanceMeasuredEvent += new BetsyNetPDFWrapper.DistanceMeasuredEventHandler(wrapper_DistanceMeasuredEvent);
             wrapper.LineDrawnEvent += new BetsyNetPDFWrapper.LineDrawnEventHandler(wrapper_LineDrawnEvent);
-            lblVersion.Caption = "rev. " + this.Version;
         }
 
         #region properties
@@ -271,15 +269,9 @@ namespace BetsyNetPDF
             barBtnRotateRight.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barBtnRotateRight_ItemClick);
             toolBar.AddItem(barBtnRotateRight);
 
-            lblVersion = new BarStaticItem();
-            lblVersion.Manager = barManager;
-            lblVersion.Alignment = DevExpress.XtraBars.BarItemLinkAlignment.Right;
-            lblVersion.Name = "lblVersion";
-            lblVersion.TextAlignment = System.Drawing.StringAlignment.Near;
-            toolBar.AddItem(lblVersion);
-
             barBtnAbout = new BarButtonItem(barManager, "About");
             barBtnAbout.Hint = " ";
+            barBtnAbout.Alignment = DevExpress.XtraBars.BarItemLinkAlignment.Right;
             barBtnAbout.Glyph = global::BetsyNetPDF.Properties.Resources.about;
             barBtnAbout.Name = "barBtnAbout";
             barBtnAbout.ItemClick += new ItemClickEventHandler(barBtnAbout_ItemClick);

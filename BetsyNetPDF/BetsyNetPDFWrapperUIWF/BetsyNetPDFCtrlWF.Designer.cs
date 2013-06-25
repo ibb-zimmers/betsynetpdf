@@ -40,7 +40,6 @@
             this.btnRotateLeft = new System.Windows.Forms.ToolStripButton();
             this.btnRotateRight = new System.Windows.Forms.ToolStripButton();
             this.btnAbout = new System.Windows.Forms.ToolStripButton();
-            this.lblVersion = new System.Windows.Forms.ToolStripLabel();
             this.ViewerArea = new System.Windows.Forms.Panel();
             this.toolStrip1.SuspendLayout();
             this.SuspendLayout();
@@ -59,8 +58,7 @@
             this.toolStripSeparator2,
             this.btnRotateLeft,
             this.btnRotateRight,
-            this.btnAbout,
-            this.lblVersion});
+            this.btnAbout});
             this.toolStrip1.Location = new System.Drawing.Point(0, 0);
             this.toolStrip1.Name = "toolStrip1";
             this.toolStrip1.Size = new System.Drawing.Size(772, 25);
@@ -168,14 +166,6 @@
             this.btnAbout.Text = "About";
             this.btnAbout.Click += new System.EventHandler(this.btnAbout_Click);
             // 
-            // lblVersion
-            // 
-            this.lblVersion.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
-            this.lblVersion.Font = new System.Drawing.Font("Segoe UI", 6.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lblVersion.Name = "lblVersion";
-            this.lblVersion.Size = new System.Drawing.Size(35, 22);
-            this.lblVersion.Text = "Version";
-            // 
             // ViewerArea
             // 
             this.ViewerArea.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -214,7 +204,6 @@
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator1;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator2;
         protected System.Windows.Forms.ToolStrip toolStrip1;
-        private System.Windows.Forms.ToolStripLabel lblVersion;
         private System.Windows.Forms.ToolStripButton btnAbout;
     }
 }
