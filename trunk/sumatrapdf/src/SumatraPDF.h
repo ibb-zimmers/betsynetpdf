@@ -298,15 +298,15 @@ public:
 	void ProcessOverlayObjects(WindowInfo* win, char* objects);
 	void RemoveOverlayObject(WindowInfo* win, char* id);
 	void SetSelectedOverlayObjects(WindowInfo* win, char* objectIds);
-	bool CheckSelectionChanged(WindowInfo* win, WPARAM key);
+	bool CheckSelectionChanged(WindowInfo* win, bool ctrlPressed);
 	char* GetSelectedOverlayObjectIds();
 	char* GetSelectedOverlayObjects();
 	void DeselectOverlayObjects();
 	char* GetAllOverlayObjects();
 	// x,y coords on screen
-	void CheckMouseClick(WindowInfo* win, int x, int y, WPARAM key);
+	void CheckMouseClick(WindowInfo* win, int x, int y, bool ctrlPressed);
 	void CheckDeleteOverlayObject();
-	void CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrl, bool moveObj = true);
+	void CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrlPressed, bool moveObj = true);
 	void ClearOverlayObjectList(WindowInfo* win);
 	void MoveSelectedOverlayObjectsBy(WindowInfo* win, int x, int y);
 	void CheckOverlayObjectMoved(WindowInfo* win, int x, int y);
