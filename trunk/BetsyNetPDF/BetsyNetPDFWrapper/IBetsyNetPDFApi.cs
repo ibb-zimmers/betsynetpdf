@@ -58,6 +58,7 @@ namespace BetsyNetPDF
         void SetMouseOverEnabled(IntPtr win, bool enabled);
         void SetMeasureModeEnabled(IntPtr win, bool enabled);
         void SetLineModeEnabled(IntPtr win, bool enabled);
+        void SetDeactivateTextSelection(IntPtr win, bool value);
         PointF CvtScreen2Doc(IntPtr win, Point screenCoords);
         Point CvtDoc2Screen(IntPtr win, PointF docCoords);
 

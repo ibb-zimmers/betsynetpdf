@@ -42,6 +42,6 @@ namespace BetsyNetPDF
 {
     public class AssemblyInfo
     {
-        public const string VERSION = "6";
+        public const string VERSION = "7";
     }
 }
