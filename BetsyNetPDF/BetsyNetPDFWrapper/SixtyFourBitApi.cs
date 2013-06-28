@@ -162,6 +162,14 @@ namespace BetsyNetPDF
             SetLineModeEnabled_EXT(obj, enabled);
         }
 
+        [DllImport(DLL, EntryPoint = "CallSetDeactivateTextSelection", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetDeactivateTextSelection_EXT(IntPtr obj, bool value);
+
+        public void SetDeactivateTextSelection(IntPtr obj, bool value)
+        {
+            SetDeactivateTextSelection_EXT(obj, value);
+        }
+
         [DllImport(DLL, EntryPoint = "CallSaveAs", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         static private extern void SaveAs_EXT(IntPtr obj);
 

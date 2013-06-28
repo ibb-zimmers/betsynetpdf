@@ -176,5 +176,10 @@ namespace BetsyNetPDF
 
             ctrl.SetSelectedOverlayObjects(string.Format("|{0}|", lastID));
         }
+
+        private void barChkDeactivateTS_CheckedChanged(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            ctrl.SetDeactivateTextSelection(barChkDeactivateTS.Checked);
+        }
     }
 }

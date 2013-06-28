@@ -135,6 +135,7 @@ namespace BetsyNetPDF
         public void SetMouseOverEnabled(bool enabled) { wrapper.SetMouseOverEnabled(enabled); }
         public void SetMeasureModeEnabled(bool enabled) { wrapper.SetMeasureModeEnabled(enabled); }
         public void SetLineModeEnabled(bool enabled) { wrapper.SetLineModeEnabled(enabled); }
+        public void SetDeactivateTextSelection(bool value) { wrapper.SetDeactivateTextSelection(value); }
         public PointF CvtScreen2Doc(Point screenCoords) { return wrapper.CvtScreen2Doc(screenCoords); }
         public Point CvtDoc2Screen(PointF docCoords) { return wrapper.CvtDoc2Screen(docCoords); }
 

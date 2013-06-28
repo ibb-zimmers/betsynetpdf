@@ -147,6 +147,13 @@ namespace BetsyNetPDF
             api.SetLineModeEnabled(win, enabled);
         }
 
+        public void SetDeactivateTextSelection(bool value)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+            api.SetDeactivateTextSelection(win, value);
+        }
+
         public PointF CvtScreen2Doc(Point screenCoords)
         {
             if (api == null || win == IntPtr.Zero)
