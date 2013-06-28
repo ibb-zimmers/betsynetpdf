@@ -366,7 +366,7 @@ void OnSelectionStart(WindowInfo *win, int x, int y, WPARAM key)
     win->RepaintAsync();
 }
 
-void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted)
+void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted, bool shiftPressed)
 {
     if (GetCapture() == win->hwndCanvas)
         ReleaseCapture();
@@ -384,7 +384,7 @@ void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted)
         win->selectionOnPage = SelectionOnPage::FromRectangle(win->dm, win->selectionRect);
         win->showSelection = win->selectionOnPage != NULL;
 	}
-	else if (win->mouseAction == MA_SELECTING && win->dm->deactivateTextSelection) 
+	else if (win->mouseAction == MA_SELECTING && win->dm->deactivateTextSelection && shiftPressed) 
 	{
 		win->selectionOnPage = SelectionOnPage::FromRectangle(win->dm, win->selectionRect);
         win->showSelection = win->selectionOnPage != NULL;
