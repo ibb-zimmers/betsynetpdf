@@ -181,11 +181,11 @@ void ZoomToSelection(WindowInfo *win, float factor, bool scrollToFit, bool relat
         }
 
         ClientRect rc(win->hwndCanvas);
-        pt.x = 2 * selRect.x + selRect.dx - rc.dx / 2;
-        pt.y = 2 * selRect.y + selRect.dy - rc.dy / 2;
+		pt.x = selRect.x + selRect.dx / 2;
+		pt.y = selRect.y + selRect.dy / 2;
 
-        pt.x = limitValue(pt.x, selRect.x, selRect.x + selRect.dx);
-        pt.y = limitValue(pt.y, selRect.y, selRect.y + selRect.dy);
+        /*pt.x = limitValue(pt.x, selRect.x, selRect.x + selRect.dx);
+        pt.y = limitValue(pt.y, selRect.y, selRect.y + selRect.dy);*/
 
         int pageNo = win->dm->GetPageNoByPoint(pt);
         if (!win->dm->ValidPageNo(pageNo) || !win->dm->PageVisible(pageNo))
@@ -352,7 +352,8 @@ void OnSelectionStart(WindowInfo *win, int x, int y, WPARAM key)
     // Ctrl+drag forces a rectangular selection
     if (!(key & MK_CONTROL) || (key & MK_SHIFT)) {
         int pageNo = win->dm->GetPageNoByPoint(PointI(x, y));
-        if (win->dm->ValidPageNo(pageNo)) {
+		if (win->dm->ValidPageNo(pageNo) && !win->dm->deactivateTextSelection) 
+		{
             PointD pt = win->dm->CvtFromScreen(PointI(x, y), pageNo);
             win->dm->textSelection->StartAt(pageNo, pt.x, pt.y);
             win->mouseAction = MA_SELECTING_TEXT;
@@ -378,9 +379,24 @@ void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted)
     win->selectionRect = RectI::FromXY(win->selectionRect.x, win->selectionRect.y, x, y);
     if (aborted || (MA_SELECTING == win->mouseAction ? win->selectionRect.IsEmpty() : !win->selectionOnPage))
         DeleteOldSelectionInfo(win, true);
-    else if (win->mouseAction == MA_SELECTING) {
+	else if (win->mouseAction == MA_SELECTING && !win->dm->deactivateTextSelection) 
+	{
         win->selectionOnPage = SelectionOnPage::FromRectangle(win->dm, win->selectionRect);
         win->showSelection = win->selectionOnPage != NULL;
-    }
+	}
+	else if (win->mouseAction == MA_SELECTING && win->dm->deactivateTextSelection) 
+	{
+		win->selectionOnPage = SelectionOnPage::FromRectangle(win->dm, win->selectionRect);
+        win->showSelection = win->selectionOnPage != NULL;
+		//calc zoom factor
+		ClientRect rc(win->hwndCanvas);
+		double factorW = (double)rc.dx / (double)win->selectionRect.dx;
+		double factorH = (double)rc.dy / (double)win->selectionRect.dy;
+		double zoom = factorW < factorH ? factorW : factorH;
+
+		ZoomToSelection(win, win->dm->ZoomAbsolute() * zoom);
+
+		win->showSelection = false;
+	}
     win->RepaintAsync();
 }
