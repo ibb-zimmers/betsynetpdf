@@ -2414,7 +2414,7 @@ static void OnMouseLeftButtonUp(WindowInfo& win, int x, int y, WPARAM key)
 	}
     else
 	{
-        OnSelectionStop(&win, x, y, !didDragMouse);
+        OnSelectionStop(&win, x, y, !didDragMouse, (key & MK_SHIFT));
 		if(betsyApi != NULL && !(key & MK_SHIFT))
 			betsyApi->CheckSelectionChanged(&win, key & MK_CONTROL);
 	}
