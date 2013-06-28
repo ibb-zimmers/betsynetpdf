@@ -357,6 +357,7 @@ extern "C" {
 	extern UNMANAGED_API void __stdcall CallSetMouseOverEnabled(WindowInfo* win, bool enabled);
 	extern UNMANAGED_API void __stdcall CallSetMeasureModeEnabled(WindowInfo* win, bool enabled);
 	extern UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, bool enabled);
+	extern UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInfo* win, bool value);
 	extern UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords);
 	extern UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords);
 

@@ -6268,8 +6268,9 @@ void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objec
 		pos = sobjects.find_first_of("}");
 	}
 	
-	InvalidateRect(win->hwndCanvas, NULL, true);
-	UpdateWindow(win->hwndCanvas);
+	/*InvalidateRect(win->hwndCanvas, NULL, true);
+	UpdateWindow(win->hwndCanvas);*/
+	win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
@@ -6290,8 +6291,9 @@ void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
 
 	if(repaint)
 	{
-		InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);
+		/*InvalidateRect(win->hwndCanvas, NULL, true);
+		UpdateWindow(win->hwndCanvas);*/
+		win->RepaintAsync();
 	}
 }
 
@@ -6333,8 +6335,9 @@ void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* o
 
 	if(repaint)
 	{
-		InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);
+		/*InvalidateRect(win->hwndCanvas, NULL, true);
+		UpdateWindow(win->hwndCanvas);*/
+		win->RepaintAsync();
 	}
 
 	if(firstObj != NULL)
@@ -6386,8 +6389,9 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, WPARAM key)
 	{
 		win->showSelection = false;
 
-		InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);
+		/*InvalidateRect(win->hwndCanvas, NULL, true);
+		UpdateWindow(win->hwndCanvas);*/
+		win->RepaintAsync();
 
 		this->notifySelectionChanged();
 	}
@@ -6486,7 +6490,7 @@ void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, WPA
 		else
 			if(this->lineMode)
 			{
-				// notif start/end point coords
+				// notify start/end point coords
 				double p1x = (this->lineStart->x / 72.0) * 2540.0;
 				double p1y = win->dm->GetPageInfo(1)->page.dy - this->lineStart->y;
 				p1y = (p1y / 72.0) * 2540.0;
@@ -6619,8 +6623,9 @@ void BetsyNetPDFUnmanagedApi::MoveSelectedOverlayObjectsBy(WindowInfo* win, int 
 
 	if(repaint)
 	{
-		InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);
+		/*InvalidateRect(win->hwndCanvas, NULL, true);
+		UpdateWindow(win->hwndCanvas);*/
+		win->RepaintAsync();
 	}
 }
 
@@ -6674,8 +6679,9 @@ void BetsyNetPDFUnmanagedApi::ClearOverlayObjectList(WindowInfo* win)
 {
 	this->overlayObjects.clear();
 	
-	InvalidateRect(win->hwndCanvas, NULL, true);
-	UpdateWindow(win->hwndCanvas);
+	/*InvalidateRect(win->hwndCanvas, NULL, true);
+	UpdateWindow(win->hwndCanvas);*/
+	win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd)
@@ -6919,8 +6925,9 @@ extern "C" UNMANAGED_API void __stdcall CallSetMeasureModeEnabled(WindowInfo* wi
 		if(enabled)
 		{
 			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
-			InvalidateRect(win->hwndCanvas, NULL, true);
-			UpdateWindow(win->hwndCanvas);
+			/*InvalidateRect(win->hwndCanvas, NULL, true);
+			UpdateWindow(win->hwndCanvas);*/
+			win->RepaintAsync();
 		}
 	}
 }
@@ -6933,9 +6940,18 @@ extern "C" UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, 
 		if(enabled)
 		{
 			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
-			InvalidateRect(win->hwndCanvas, NULL, true);
-			UpdateWindow(win->hwndCanvas);
+			/*InvalidateRect(win->hwndCanvas, NULL, true);
+			UpdateWindow(win->hwndCanvas);*/
+			win->RepaintAsync();
 		}
+	}
+}
+
+extern "C" UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInfo* win, bool value)
+{
+	if(win != NULL && win->dm != NULL)
+	{
+		win->dm->deactivateTextSelection = value;
 	}
 }
 
