@@ -2306,7 +2306,7 @@ static void OnMouseMove(WindowInfo& win, int x, int y, WPARAM flags)
 	case MA_IDLE:
 		betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
 		if(betsyApi != NULL && betsyApi->mouseOverEnabled)
-			betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, flags == MK_CONTROL, false);
+			betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, flags & MK_CONTROL, false);
 		if(betsyApi != NULL && (betsyApi->measureMode || betsyApi->lineMode))
 			betsyApi->SetCurrentLineEnd(&win, x, y);
 		break;
@@ -2348,7 +2348,7 @@ static void OnMouseLeftButtonDown(WindowInfo& win, int x, int y, WPARAM key)
 
 	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
 	if(betsyApi != NULL)
-		betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, key == MK_CONTROL);
+		betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, key & MK_CONTROL);
 
     // - without modifiers, clicking on text starts a text selection
     //   and clicking somewhere else starts a drag
@@ -2409,14 +2409,14 @@ static void OnMouseLeftButtonUp(WindowInfo& win, int x, int y, WPARAM key)
 			if(didDragMouse && betsyApi->hitLabelForDragging)
 				betsyApi->CheckOverlayObjectMoved(&win, x, y);
 			if(!didDragMouse)
-				betsyApi->CheckMouseClick(&win,x,y,key);
+				betsyApi->CheckMouseClick(&win, x, y, key & MK_CONTROL);
 		}
 	}
     else
 	{
         OnSelectionStop(&win, x, y, !didDragMouse);
-		if(betsyApi != NULL)
-			betsyApi->CheckSelectionChanged(&win, key);
+		if(betsyApi != NULL && !(key & MK_SHIFT))
+			betsyApi->CheckSelectionChanged(&win, key & MK_CONTROL);
 	}
 
     PointD ptPage = win.dm->CvtFromScreen(PointI(x, y));
@@ -6344,7 +6344,7 @@ void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* o
 		firstObj->MakeVisible(win);
 }
 
-bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, WPARAM key)
+bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPressed)
 {
 	if(win->selectionRect.dx == 0 && win->selectionRect.dy == 0)
 		win->selectionRect = RectI(win->selectionRect.x, win->selectionRect.y, 1, 1);
@@ -6359,7 +6359,7 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, WPARAM key)
 	{
 		curObj = this->overlayObjects[i];
 		prevSelectedState = curObj->selected;
-		if(key == MK_CONTROL)
+		if(ctrlPressed)
 		{
 			if(curObj->CheckIsInSelection(win))
 			{
@@ -6465,7 +6465,7 @@ char* BetsyNetPDFUnmanagedApi::GetAllOverlayObjects()
 	return ret;
 }
 
-void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, WPARAM key)
+void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, bool ctrlPressed)
 {
 	if(this->measureMode || this->lineMode)
 	{
@@ -6513,7 +6513,7 @@ void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, WPA
 	}
 
 	win->selectionRect = RectI(x, y, 1, 1);
-	bool selChanged = this->CheckSelectionChanged(win, key);
+	bool selChanged = this->CheckSelectionChanged(win, ctrlPressed);
 
 	if(!selChanged)
 	{
@@ -6546,7 +6546,7 @@ void BetsyNetPDFUnmanagedApi::CheckDeleteOverlayObject()
 		this->notifyDelete();
 }
 
-void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrl, bool moveObj)
+void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrlPressed, bool moveObj)
 {
 	if(this->measureMode || this->lineMode)
 		return;
@@ -6582,7 +6582,7 @@ void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int 
 		}
 	}
 
-	if(!moveObj && ctrl)
+	if(!moveObj && ctrlPressed)
 	{
 		if(oo == NULL)
 			this->lastObj = NULL;
