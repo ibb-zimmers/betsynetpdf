@@ -3843,6 +3843,10 @@ bool FrameOnKeydown(WindowInfo *win, WPARAM key, LPARAM lparam, bool inTextfield
 		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
 		if(betsyApi != NULL)
 			betsyApi->CheckDeleteOverlayObject();
+	} else if (VK_ESCAPE == key) {
+		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+		if(betsyApi != NULL)
+			betsyApi->Escape(win);
     } else {
         return false;
     }
@@ -5497,7 +5501,7 @@ void CrashHandlerMessage()
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF overlay objects
 ///////////////////////////////////////////////////////////////////////////////
-OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double angle, float fontSize, Color foreGround, Color backGround)
+OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, float fontSize, Color foreGround, Color backGround)
 {
 	this->id = id;
 	this->label = label;
@@ -5517,6 +5521,8 @@ OverlayObject::OverlayObject(std::string id, std::string label, std::string font
 	this->SetDY(dy);
 	this->SetLX(lx);
 	this->SetLY(ly);
+	this->SetRX(rx);
+	this->SetRY(ry);
 }
 
 void OverlayObject::Clone(OverlayObject* oo)
@@ -5534,6 +5540,8 @@ void OverlayObject::Clone(OverlayObject* oo)
 	this->SetDY(oo->GetDY());
 	this->SetLX(oo->GetLX());
 	this->SetLY(oo->GetLY());
+	this->SetRX(oo->GetRX());
+	this->SetRY(oo->GetRY());
 }
 
 double OverlayObject::GetX()
@@ -5578,6 +5586,16 @@ double OverlayObject::GetLY()
 	return (this->ly_dpi / 72.0) * 2540.0;
 }
 
+double OverlayObject::GetRX()
+{
+	return (this->rx_dpi / 72.0) * 2540.0;
+}
+
+double OverlayObject::GetRY()
+{
+	return (this->ry_dpi / 72.0) * 2540.0;
+}
+
 void OverlayObject::SetX(double x)
 {
 	this->x_dpi = (x / 2540.0) * 72.0;
@@ -5620,30 +5638,27 @@ void OverlayObject::SetLY(double ly)
 		this->ly_dpi = (ly / 2540.0) * 72.0;
 }
 
-void OverlayObject::InitLXY(WindowInfo* win)
+void OverlayObject::SetRX(double rx)
 {
-	if((lx_dpi >= 0.0 && ly_dpi >= 0.0) || this->currentLabelLocation.size() == 0)
-		return;
+	this->rx_dpi = (rx / 2540.0) * 72.0;
+}
 
-	double pageHeight = win->dm->GetPageInfo(1)->page.dy;
-	PointI pointOnScreen(this->currentLabelLocation[0].X, this->currentLabelLocation[0].Y);
-	PointD pointOnPage = win->dm->CvtFromScreen(pointOnScreen, 1);
-
-	lx_dpi = pointOnPage.x;
-	ly_dpi = pageHeight - pointOnPage.y;
+void OverlayObject::SetRY(double ry)
+{
+	this->ry_dpi = (ry / 2540.0) * 72.0;
 }
 
 void OverlayObject::Move(double deltaX, double deltaY, bool moveLabel)
 {
-	if(!moveLabel)
-	{
-		this->x_dpi -= deltaX;
-		this->y_dpi += deltaY;
-	}
-	if(lx_dpi >= 0.0 && ly_dpi >= 0.0)
+	if(moveLabel)
 	{
 		this->lx_dpi -= deltaX;
 		this->ly_dpi += deltaY;
+	}
+	else
+	{
+		this->x_dpi -= deltaX;
+		this->y_dpi += deltaY;
 	}
 }
 
@@ -5652,11 +5667,16 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 	if(this->page!=pageNo)
 		return;
 
+	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+
 	double pageHeight = win->dm->GetPageInfo(1)->page.dy;
 	float zoom = win->dm->ZoomReal(pageNo);
 
-	PointD pointOnPage(this->x_dpi, pageHeight - this->y_dpi);
-	PointI pointOnScreen = win->dm->CvtToScreen(pageNo, pointOnPage);
+	PointD ulOnPage(this->x_dpi - this->rx_dpi, pageHeight - this->y_dpi + this->ry_dpi);
+	PointI ulOnScreen = win->dm->CvtToScreen(pageNo, ulOnPage);
+
+	PointD rotOnPage(this->x_dpi, pageHeight - this->y_dpi);
+	PointI rotOnScreen = win->dm->CvtToScreen(pageNo, rotOnPage);
 
 	// calc size on screen
 	Widen<wchar_t> to_wstring;
@@ -5666,9 +5686,10 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 	FontFamily  fontFamily(wsfont.c_str());
 	float fsize = this->fontSize * zoom;
 	Font        font(&fontFamily, fsize, this->selected ? FontStyleBold : FontStyleRegular, Gdiplus::Unit::UnitPoint);
-	PointF      pointF(pointOnScreen.x, pointOnScreen.y);
+	PointF      ulEdge(ulOnScreen.x, ulOnScreen.y);
+	PointF      rotPoint(rotOnScreen.x, rotOnScreen.y);
 	RectF		bbox( 0, 0, 0, 0);
-	g->MeasureString(wslabel.c_str(), -1, &font, pointF, &bbox);
+	g->MeasureString(wslabel.c_str(), -1, &font, ulEdge, &bbox);
 
 	if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
 	{
@@ -5676,26 +5697,44 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 		bbox.Height = this->dy_dpi * zoom;
 	}
 
-	if((pointOnScreen.x + bbox.Width) < bounds.x || pointOnScreen.x > (bounds.x + bounds.dx))
+	if((ulOnScreen.x + bbox.Width) < bounds.x || ulOnScreen.x > (bounds.x + bounds.dx))
 		return;
 
-	if((pointOnScreen.y + bbox.Height) < bounds.y || pointOnScreen.y > (bounds.y + bounds.dy))
+	if((ulOnScreen.y + bbox.Height) < bounds.y || ulOnScreen.y > (bounds.y + bounds.dy))
 		return;
 	
 	PointF points[4] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height) };
 
 	// calc rotation
-	double angle = win->dm->Rotation() - this->angle;
-	Matrix rotation;
-	if(angle != 0.0)
+	Matrix rotation, elemRotation;
+	if(win->dm->Rotation() != 0)
 	{
-		rotation.RotateAt(angle, pointF, Gdiplus::MatrixOrderAppend);
+		rotation.RotateAt(win->dm->Rotation(), ulEdge, Gdiplus::MatrixOrderAppend);
 		rotation.TransformPoints(points, 4);
+		g->SetTransform(&rotation);
+	}
+	if(this->angle != 0.0)
+	{
+		elemRotation.RotateAt(-this->angle, rotPoint, Gdiplus::MatrixOrderAppend);
+		elemRotation.TransformPoints(points, 4);
+		rotation.Multiply(&elemRotation, Gdiplus::MatrixOrderAppend);
 		g->SetTransform(&rotation);
 	}
 
 	//store current location
-	this->currentScreenLocation.assign(points, points + 4);
+	GraphicsPath* objPath = new GraphicsPath();
+	objPath->StartFigure();
+	objPath->AddLine(points[0], points[1]);
+	objPath->AddLine(points[1], points[2]);
+	objPath->AddLine(points[2], points[3]);
+	objPath->AddLine(points[3], points[0]);
+	objPath->CloseFigure();
+	this->currentRegion.Union(objPath);
+	
+	Region* overlapping = betsyApi->objectsRegion.Clone();
+	overlapping->Intersect(objPath);
+
+	betsyApi->objectsRegion.Union(objPath);
 
 	// paint lable bg
 	SolidBrush  bbrush(this->backGround);
@@ -5714,9 +5753,23 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 	if(this->dx_dpi <= 0.0 && this->dy_dpi <= 0.0)
 	{
 		g->DrawString(wslabel.c_str(), -1, &font, bbox, &sformat, &fbrush);
+
+		// reset rotation
+		if(!rotation.IsIdentity())
+		{
+			rotation.Reset();
+			g->SetTransform(&rotation);
+		}
 	}
 	else
 	{
+		// reset rotation
+		if(!rotation.IsIdentity())
+		{
+			rotation.Reset();
+			g->SetTransform(&rotation);
+		}
+		
 		PointF labelPoint, llineStart, llineEnd;
 		
 		// draw label below object
@@ -5731,12 +5784,25 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 			labelPoint = PointF(bbox.X + bbox.Width + 25 * zoom, bbox.Y + bbox.Height / 2);
 			llineStart = PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2);
 		}
-		if(lx_dpi >= 0.0 && ly_dpi >= 0.0)
+
+		if(lx_dpi > 0.0 && ly_dpi > 0.0)
 		{
 			PointD lpointOnPage(this->lx_dpi, pageHeight - this->ly_dpi);
 			PointI lpointOnScreen = win->dm->CvtToScreen(pageNo, lpointOnPage);
 
 			labelPoint = PointF(lpointOnScreen.x, lpointOnScreen.y);
+		}
+		else
+		{
+			PointD lpointOnPage = win->dm->CvtFromScreen(PointI((int)labelPoint.X, (int)labelPoint.Y));
+			this->lx_dpi = lpointOnPage.x;
+			this->ly_dpi = pageHeight - lpointOnPage.y;
+		}
+
+		if(win->dm->Rotation() != 0)
+		{
+			rotation.RotateAt(win->dm->Rotation(), labelPoint, Gdiplus::MatrixOrderAppend);
+			g->SetTransform(&rotation);
 		}
 
 		// calc label position & size
@@ -5744,10 +5810,24 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 		g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
 
 		PointF lpoints[4] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height) };
-		if(angle != 0.0)
+		if(!rotation.IsIdentity())
 			rotation.TransformPoints(lpoints, 4);
 
-		this->currentLabelLocation.assign(lpoints, lpoints + 4);
+		GraphicsPath* lblPath = new GraphicsPath();
+		lblPath->StartFigure();
+		lblPath->AddLine(lpoints[0], lpoints[1]);
+		lblPath->AddLine(lpoints[1], lpoints[2]);
+		lblPath->AddLine(lpoints[2], lpoints[3]);
+		lblPath->AddLine(lpoints[3], lpoints[0]);
+		lblPath->CloseFigure();
+		this->currentLabelRegion.Union(lblPath);
+
+		Region* lblOverlapping = betsyApi->objectsRegion.Clone();
+		lblOverlapping->Intersect(lblPath);
+		overlapping->Union(lblOverlapping);
+
+		betsyApi->objectsRegion.Union(lblPath);
+		//this->currentLabelLocation.assign(lpoints, lpoints + 4);
 
 		if(bbox.Width > bbox.Height)
 			llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y);
@@ -5791,14 +5871,18 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 
 		Pen linePen(Color::Black);
 		g->DrawLine(&linePen, llineStart, llineEnd);
+
+		// reset rotation
+		if(!rotation.IsIdentity())
+		{
+			rotation.Reset();
+			g->SetTransform(&rotation);
+		}
 	}
 
-	// reset rotation
-	if(angle != 0)
-	{
-		Matrix reset;
-		g->SetTransform(&reset);
-	}
+	Color ovColor(170, 255 - this->backGround.GetR(), 255 - this->backGround.GetG(), 255 - this->backGround.GetB()); 
+	SolidBrush ovBrush(ovColor);
+	g->FillRegion(&ovBrush, overlapping);
 }
 
 void OverlayObject::MakeVisible(WindowInfo* win)
@@ -5839,138 +5923,14 @@ bool OverlayObject::CheckIsInSelection(WindowInfo* win)
 
 bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
 {
-	RectF objRect;
+	Region* checkRegion;
 	if(label)
-		objRect = this->GetRect(this->currentLabelLocation);
+		checkRegion = this->currentLabelRegion.Clone();
 	else
-		objRect = this->GetRect(this->currentScreenLocation);
+		checkRegion = this->currentRegion.Clone();
 
-	if(objRect.Width == 0.0 && objRect.Height == 0)
-		return false;
-
-	double angle = win->dm->Rotation() - this->angle;
-	//it is a rectangle, so it s enough to check the intersection
-	if((((int)angle) % 90) == 0)
-	{
-		RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
-		return objRect.IntersectsWith(selOnScreen);
-	}
-	// it is a ploygon
-	else
-	{
-		return this->CheckIsPolyInSelection(win, label);
-	}
-}
-
-bool OverlayObject::CheckIsPolyInSelection(WindowInfo* win, bool label)
-{
-	int j = 1;
-
-	PointF objPoints[4];
-	RectF objRect;
-	if(label)
-	{
-		objPoints[0] = this->currentLabelLocation[0];
-		objPoints[1] = this->currentLabelLocation[1];
-		objPoints[2] = this->currentLabelLocation[2];
-		objPoints[3] = this->currentLabelLocation[3];
-
-		objRect = this->GetRect(this->currentLabelLocation);
-	}
-	else
-	{
-		objPoints[0] = this->currentScreenLocation[0];
-		objPoints[1] = this->currentScreenLocation[1];
-		objPoints[2] = this->currentScreenLocation[2];
-		objPoints[3] = this->currentScreenLocation[3];
-
-		objRect = this->GetRect(this->currentScreenLocation);
-	}
-
-	if( win->selectionRect.dx > 1 || win->selectionRect.dy > 1)
-	{
-		j = 4;
-		RectF selectionRectf(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
-		if(!objRect.IntersectsWith(selectionRectf))
-			return false;
-
-		if(selectionRectf.Contains(objPoints[0]) ||
-			selectionRectf.Contains(objPoints[1]) ||
-			selectionRectf.Contains(objPoints[2]) ||
-			selectionRectf.Contains(objPoints[3]))
-			return true;
-	}
-
-	PointF selectionPoints[4] = 
-	{ 
-		PointF(win->selectionRect.x, win->selectionRect.y), 
-		PointF(win->selectionRect.x + win->selectionRect.dx, win->selectionRect.y), 
-		PointF(win->selectionRect.x + win->selectionRect.dx, win->selectionRect.y + win->selectionRect.dy),
-		PointF(win->selectionRect.x, win->selectionRect.y + win->selectionRect.dy)
-	};
-
-	int x, i;
-	int countCollision = 0;
-	PointF p0, p1, p2, p3;
-	for(x = 0; x < j; x++)
-	{
-		p0 = selectionPoints[x];
-		if(j == 1)
-			p1 = PointF(win->dm->viewPort.dx, win->selectionRect.y);
-		else
-		{
-			if(x == 3)
-				p1 = selectionPoints[0];
-			else
-				p1 = selectionPoints[x + 1];
-		}
-
-		for(i = 0; i < 4; i++)
-		{
-			p2 = objPoints[i];
-			if(i == 3)
-				p3 = objPoints[0];
-			else
-				p3 = objPoints[i + 1];
-
-			if(OverlayObject::CheckSegementIntersection(p0.X, p0.Y, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y))
-				countCollision++;
-		}
-	}
-
-	if(j == 1)
-		return countCollision == 1;
-
-	return countCollision > 1;
-}
-
-RectF OverlayObject::GetRect(std::vector<PointF> points)
-{
-	float minX = 0, minY = 0, maxX = 0, maxY = 0;
-
-	int i;
-	PointF curPoint;
-	for(i = 0; i < points.size(); i++)
-	{
-		curPoint = points[i]; 
-		if(i == 0)
-		{
-			minX = maxX = curPoint.X;
-			minY = maxY = curPoint.Y;
-		}
-
-		if(curPoint.X < minX)
-			minX = curPoint.X;
-		if(curPoint.X > maxX)
-			maxX = curPoint.X;
-
-		if(curPoint.Y < minY)
-			minY = curPoint.Y;
-		if(curPoint.Y > maxY)
-			maxY = curPoint.Y;
-	}
-
-	return RectF(minX, minY, maxX - minX, maxY -  minY);
+	RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
+	return checkRegion->IsVisible(selOnScreen);
 }
 
 std::string OverlayObject::ToString()
@@ -5994,6 +5954,8 @@ std::string OverlayObject::ToString()
 	stream << this->GetDY() << "|";
 	stream << this->GetLX() << "|";
 	stream << this->GetLY() << "|";
+	stream << this->GetRX() << "|";
+	stream << this->GetRY() << "|";
 	stream << this->angle << "|";
 	stream << this->font << "|";
 	stream << this->fontSize << "|";
@@ -6019,7 +5981,7 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 	std::stringstream stream;
 	std::string stoken, id, label, font;
 	int bb, bg, br, fr, fg, fb;
-	double x, y, dx, dy, lx, ly, angle;
+	double x, y, dx, dy, lx, ly, rx, ry, angle;
 	float fontSize;
 	while(pos != std::string::npos)
 	{
@@ -6065,34 +6027,42 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 			break;
 
 		case 8:
-			stream >> angle;
+			stream >> rx;
 			break;
 
 		case 9:
-			font = stream.str();
+			stream >> ry;
 			break;
 
 		case 10:
-			stream >> fontSize;
+			stream >> angle;
 			break;
 
 		case 11:
-			stream >> fr;
+			font = stream.str();
 			break;
 
 		case 12:
-			stream >> fg;
+			stream >> fontSize;
 			break;
 
 		case 13:
-			stream >> fb;
+			stream >> fr;
 			break;
 
 		case 14:
-			stream >> br;
+			stream >> fg;
 			break;
 
 		case 15:
+			stream >> fb;
+			break;
+
+		case 16:
+			stream >> br;
+			break;
+
+		case 17:
 			stream >> bg;
 			break;
 		}
@@ -6105,30 +6075,7 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 	stream << obj;
 	stream >> bb;
 
-	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, angle, fontSize, Color(fr, fg, fb), Color(br, bg, bb));
-}
-
-bool OverlayObject::CheckSegementIntersection(float p0_x, float p0_y, float p1_x, float p1_y, float p2_x, float p2_y, float p3_x, float p3_y)
-{
-    float s1_x, s1_y, s2_x, s2_y;
-    s1_x = p1_x - p0_x;     s1_y = p1_y - p0_y;
-    s2_x = p3_x - p2_x;     s2_y = p3_y - p2_y;
-
-    float s, t;
-    s = (-s1_y * (p0_x - p2_x) + s1_x * (p0_y - p2_y)) / (-s2_x * s1_y + s1_x * s2_y);
-    t = ( s2_x * (p0_y - p2_y) - s2_y * (p0_x - p2_x)) / (-s2_x * s1_y + s1_x * s2_y);
-
-    if (s >= 0 && s <= 1 && t >= 0 && t <= 1)
-    {
-        // Collision detected
-        /*if (i_x != NULL)
-            *i_x = p0_x + (t * s1_x);
-        if (i_y != NULL)
-            *i_y = p0_y + (t * s1_y);*/
-        return true;
-    }
-
-    return false; // No collision
+	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, fontSize, Color(fr, fg, fb), Color(br, bg, bb));
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF overlay objects
@@ -6146,6 +6093,7 @@ BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
 	this->lineMode = false;
 	this->moveLabel = false;
 	this->useExternContextMenu = false;
+	this->preventOverlayObjectSelection = false;
 	this->lastObj = NULL;
 	this->lineStart = NULL;
 	this->lineEnd = NULL;
@@ -6197,11 +6145,13 @@ void BetsyNetPDFUnmanagedApi::DrawOverlayObjets(HDC* hdc, WindowInfo* win, int p
 	int i;
 	OverlayObject *curObj;
 	Graphics g(*hdc);
-	for(i=0;i< this->overlayObjects.size();i++)
+	this->objectsRegion.MakeEmpty();
+	this->labelsRegion.MakeEmpty();
+	for(i = 0; i < this->overlayObjects.size(); i++)
 	{
 		curObj = this->overlayObjects.at(i);
-		curObj->currentScreenLocation.clear();
-		curObj->currentLabelLocation.clear();
+		curObj->currentRegion.MakeEmpty();
+		curObj->currentLabelRegion.MakeEmpty();
 		curObj->Paint(&g, win, pageNo, bounds);
 	}
 }
@@ -6231,8 +6181,17 @@ void BetsyNetPDFUnmanagedApi::SetCurrentLineEnd(WindowInfo* win, int x, int y)
 		return;
 
 	this->curLineEnd = new Point(x, y);
-	InvalidateRect(win->hwndCanvas, NULL, true);
-	UpdateWindow(win->hwndCanvas);
+	win->RepaintAsync();
+}
+
+void BetsyNetPDFUnmanagedApi::Escape(WindowInfo* win)
+{
+	// reset
+	this->lineEnd = NULL;
+	this->curLineEnd = NULL;
+	this->lineStart = NULL;
+
+	win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objects)
@@ -6267,9 +6226,7 @@ void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objec
 		
 		pos = sobjects.find_first_of("}");
 	}
-	
-	/*InvalidateRect(win->hwndCanvas, NULL, true);
-	UpdateWindow(win->hwndCanvas);*/
+
 	win->RepaintAsync();
 }
 
@@ -6290,11 +6247,7 @@ void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
 	}
 
 	if(repaint)
-	{
-		/*InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);*/
 		win->RepaintAsync();
-	}
 }
 
 void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* objectIds)
@@ -6334,11 +6287,7 @@ void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* o
 	}
 
 	if(repaint)
-	{
-		/*InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);*/
 		win->RepaintAsync();
-	}
 
 	if(firstObj != NULL)
 		firstObj->MakeVisible(win);
@@ -6389,8 +6338,6 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 	{
 		win->showSelection = false;
 
-		/*InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);*/
 		win->RepaintAsync();
 
 		this->notifySelectionChanged();
@@ -6467,7 +6414,7 @@ char* BetsyNetPDFUnmanagedApi::GetAllOverlayObjects()
 
 void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, bool ctrlPressed)
 {
-	if(this->measureMode || this->lineMode)
+	if((this->measureMode || this->lineMode))
 	{
 		PointI onScreen(x, y);
 		if(this->lineStart == NULL)
@@ -6485,6 +6432,14 @@ void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, boo
 			double b = lineStart->y - lineEnd->y;
 
 			double length_dpi = sqrt((a * a) + (b * b));
+
+			// reset 
+			this->lineMode = false;
+			this->measureMode = false;
+			this->lineEnd = NULL;
+			this->curLineEnd = NULL;
+			this->lineStart = NULL;
+
 			this->notifyDistanceMeasured((length_dpi / 72.0) * 2540.0);
 		}
 		else
@@ -6499,22 +6454,27 @@ void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, boo
 				double p2y = win->dm->GetPageInfo(1)->page.dy - this->lineEnd->y;
 				p2y = (p2y / 72.0) * 2540.0;
 
+				// reset 
+				this->lineMode = false;
+				this->measureMode = false;
+				this->lineEnd = NULL;
+				this->curLineEnd = NULL;
+				this->lineStart = NULL;
+
 				this->notifyLineDrawn(p1x, p1y, p2x, p2y);
 			}
 
-		// reset 
-		this->lineMode = false;
-		this->measureMode = false;
-		this->lineEnd = NULL;
-		this->curLineEnd = NULL;
-		this->lineStart = NULL;
-
-		return;
+			return;
 	}
 
-	win->selectionRect = RectI(x, y, 1, 1);
-	bool selChanged = this->CheckSelectionChanged(win, ctrlPressed);
+	bool selChanged = false;
 
+	if(!preventOverlayObjectSelection)
+	{
+		win->selectionRect = RectI(x, y, 1, 1);
+		selChanged = this->CheckSelectionChanged(win, ctrlPressed);
+	}
+	
 	if(!selChanged)
 	{
 		PointI pointOnScreen(x, y);
@@ -6572,16 +6532,6 @@ void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int 
 		oo = NULL;
 	}
 
-	if(moveObj && this->moveLabel)
-	{
-		for(i = 0; i < this->overlayObjects.size(); i++)
-		{
-			oo = this->overlayObjects[i];
-			if(oo->selected)
-				oo->InitLXY(win);
-		}
-	}
-
 	if(!moveObj && ctrlPressed)
 	{
 		if(oo == NULL)
@@ -6622,11 +6572,7 @@ void BetsyNetPDFUnmanagedApi::MoveSelectedOverlayObjectsBy(WindowInfo* win, int 
 	this->lastDragLoc = currentLoc;
 
 	if(repaint)
-	{
-		/*InvalidateRect(win->hwndCanvas, NULL, true);
-		UpdateWindow(win->hwndCanvas);*/
 		win->RepaintAsync();
-	}
 }
 
 void BetsyNetPDFUnmanagedApi::CheckOverlayObjectMoved(WindowInfo* win, int x, int y)
@@ -6678,9 +6624,7 @@ void BetsyNetPDFUnmanagedApi::CheckOnRequestContextMenu(WindowInfo* win, int x, 
 void BetsyNetPDFUnmanagedApi::ClearOverlayObjectList(WindowInfo* win)
 {
 	this->overlayObjects.clear();
-	
-	/*InvalidateRect(win->hwndCanvas, NULL, true);
-	UpdateWindow(win->hwndCanvas);*/
+
 	win->RepaintAsync();
 }
 
@@ -6855,7 +6799,7 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
         win = CreateAndShowWindowInfo();
     }
 
-    UpdateUITextForLanguage(); // needed for RTL languages
+    //UpdateUITextForLanguage(); // needed for RTL languages
     if (isFirstWin)
         UpdateToolbarAndScrollbarState(*win);
 
@@ -6952,6 +6896,14 @@ extern "C" UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInf
 	if(win != NULL && win->dm != NULL)
 	{
 		win->dm->deactivateTextSelection = value;
+	}
+}
+
+extern "C" UNMANAGED_API void __stdcall CallSetPreventOverlayObjectSelection(WindowInfo* win, bool value)
+{
+	if(win != NULL && win->betsyApi != NULL)
+	{
+		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->preventOverlayObjectSelection = value;
 	}
 }
 
@@ -7110,6 +7062,16 @@ extern "C" UNMANAGED_API void __stdcall CallClearOverlayObjectList(WindowInfo* w
 	{
 		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ClearOverlayObjectList(win);
 	}
+}
+
+extern "C" UNMANAGED_API int __stdcall CallGetDocumentRotation(WindowInfo* win)
+{
+	if(win != NULL && win->IsDocLoaded())
+	{
+		return win->dm->Rotation();
+	}
+	else
+		return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF unmanged api callers
