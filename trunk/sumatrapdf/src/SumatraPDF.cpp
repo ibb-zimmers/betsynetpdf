@@ -6100,6 +6100,43 @@ BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
 	this->curLineEnd = NULL;
 }
 
+void BetsyNetPDFUnmanagedApi::PutSelectedOverlayObjectsOnTop()
+{
+	std::vector<OverlayObject*> selectedObjects;
+
+	OverlayObject* cObj = this->RemoveSelectedOverlayObject();
+	while(cObj != NULL)
+	{
+		selectedObjects.push_back(cObj);
+		cObj = this->RemoveSelectedOverlayObject();
+	}
+
+	for(int i = 0; i < selectedObjects.size(); i++)
+		this->overlayObjects.push_back(selectedObjects.at(i));
+}
+
+OverlayObject* BetsyNetPDFUnmanagedApi::RemoveSelectedOverlayObject()
+{
+	OverlayObject* ret = NULL;
+	OverlayObject* cObj;
+	std::vector<OverlayObject*>::iterator iter;
+
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+	{
+		cObj = *iter;
+		if(cObj->selected)
+		{
+			ret = cObj;
+			break;
+		}
+	}
+
+	if(ret != NULL)
+		this->overlayObjects.erase(iter);
+
+	return ret;
+}
+
 void BetsyNetPDFUnmanagedApi::UpdateViewer(WindowInfo* win, char* hwnd)
 {
 	if(!gPluginMode)
@@ -6281,10 +6318,10 @@ void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* o
 				repaint = true;
 				curObj->selected = true;
 			}
-
-
 		}
 	}
+
+	this->PutSelectedOverlayObjectsOnTop();
 
 	if(repaint)
 		win->RepaintAsync();
@@ -6312,7 +6349,7 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 		{
 			if(curObj->CheckIsInSelection(win))
 			{
-				curObj->selected = !curObj->selected;
+				curObj->selected = true;
 				notify = true;
 			}
 		}
@@ -6336,6 +6373,8 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 
 	if(notify)
 	{
+		this->PutSelectedOverlayObjectsOnTop();
+
 		win->showSelection = false;
 
 		win->RepaintAsync();
