@@ -136,6 +136,7 @@ namespace BetsyNetPDF
         public void SetMeasureModeEnabled(bool enabled) { wrapper.SetMeasureModeEnabled(enabled); }
         public void SetLineModeEnabled(bool enabled) { wrapper.SetLineModeEnabled(enabled); }
         public void SetDeactivateTextSelection(bool value) { wrapper.SetDeactivateTextSelection(value); }
+        public void SetPreventOverlayObjectSelection(bool value) { wrapper.SetPreventOverlayObjectSelection(value); }
         public PointF CvtScreen2Doc(Point screenCoords) { return wrapper.CvtScreen2Doc(screenCoords); }
         public Point CvtDoc2Screen(PointF docCoords) { return wrapper.CvtDoc2Screen(docCoords); }
 
@@ -184,6 +185,11 @@ namespace BetsyNetPDF
         public void RotateCounterClockWise(int angle)
         {
             wrapper.RotateCounterClockWise(angle);
+        }
+
+        public int GetDocumentRotation()
+        {
+            return wrapper.GetDocumentRotation();
         }
         #endregion
 
@@ -414,7 +420,7 @@ namespace BetsyNetPDF
                 if (sfd.ShowDialog() == DialogResult.OK)
                 {
                     string sobjects = this.GetAllOverlayObjects();
-                    BetsyNetPDFEditor.ExportOverlayObjects2PDF(currentFile, outputFile, sobjects, layerTitle);
+                    BetsyNetPDFEditor.ExportOverlayObjects2PDF(currentFile, sfd.FileName, sobjects, layerTitle);
                 }
             }
         }
