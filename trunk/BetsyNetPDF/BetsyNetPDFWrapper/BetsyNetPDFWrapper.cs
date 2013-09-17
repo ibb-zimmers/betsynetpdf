@@ -154,6 +154,13 @@ namespace BetsyNetPDF
             api.SetDeactivateTextSelection(win, value);
         }
 
+        public void SetPreventOverlayObjectSelection(bool value)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+            api.SetPreventOverlayObjectSelection(win, value);
+        }
+
         public PointF CvtScreen2Doc(Point screenCoords)
         {
             if (api == null || win == IntPtr.Zero)
@@ -238,6 +245,13 @@ namespace BetsyNetPDF
             if (api == null || win == IntPtr.Zero)
                 return;
             api.RotateCounterClockWise(win, angle);
+        }
+
+        public int GetDocumentRotation()
+        {
+            if (api == null || win == IntPtr.Zero)
+                return 0;
+            return api.GetDocumentRotation(win);
         }
 
         //public void ProcessOverlayObject(string id, string label, string font, double x, double y, double dx, double dy, double angle, int fontSize, Color foreColor, Color backColor, bool update)

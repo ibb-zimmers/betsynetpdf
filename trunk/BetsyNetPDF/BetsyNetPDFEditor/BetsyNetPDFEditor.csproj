@@ -66,10 +66,6 @@
     <ErrorReport>prompt</ErrorReport>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="itextsharp, Version=5.4.2.0, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\..\Betsy.Net3.0\bin\itextsharp.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core">
       <RequiredTargetFramework>3.5</RequiredTargetFramework>
@@ -86,10 +82,16 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BetsyNetPDFEditor.cs" />
+    <Compile Include="Parser\LocatedObject.cs" />
+    <Compile Include="Parser\LocatedText.cs" />
     <Compile Include="Parser\TextPositionExtractionStrategy.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\itextsharp-all-5.4.3\itextsharp-src-core\itextsharp.csproj">
+      <Project>{84C4FDD9-3ED7-453B-B9DA-B3ED52CB071C}</Project>
+      <Name>itextsharp</Name>
+    </ProjectReference>
     <ProjectReference Include="..\BetsyNetPDFWrapper\BetsyNetPDFWrapper.csproj">
       <Project>{93A034B5-4467-4565-9F86-EB6083379A01}</Project>
       <Name>BetsyNetPDFWrapper</Name>

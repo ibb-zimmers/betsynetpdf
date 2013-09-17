@@ -159,6 +159,9 @@
   <data name="barChkDeactivateTS.Caption" xml:space="preserve">
     <value>Deactivate text selection</value>
   </data>
+  <data name="barBtnTextCoordsLayer.Caption" xml:space="preserve">
+    <value>Get text and coords from layer</value>
+  </data>
   <data name="bar2.Text" xml:space="preserve">
     <value>Main menu</value>
   </data>
@@ -174,7 +177,7 @@
     <value>0, 0</value>
   </data>
   <data name="barDockControlTop.Size" type="System.Drawing.Size, System.Drawing">
-    <value>950, 51</value>
+    <value>1186, 51</value>
   </data>
   <data name="&gt;&gt;barDockControlTop.Name" xml:space="preserve">
     <value>barDockControlTop</value>
@@ -195,7 +198,7 @@
     <value>0, 527</value>
   </data>
   <data name="barDockControlBottom.Size" type="System.Drawing.Size, System.Drawing">
-    <value>950, 23</value>
+    <value>1186, 23</value>
   </data>
   <data name="&gt;&gt;barDockControlBottom.Name" xml:space="preserve">
     <value>barDockControlBottom</value>
@@ -234,7 +237,7 @@
     <value>Right</value>
   </data>
   <data name="barDockControlRight.Location" type="System.Drawing.Point, System.Drawing">
-    <value>950, 51</value>
+    <value>1186, 51</value>
   </data>
   <data name="barDockControlRight.Size" type="System.Drawing.Size, System.Drawing">
     <value>0, 476</value>
@@ -258,7 +261,7 @@
     <value>6, 13</value>
   </data>
   <data name="$this.ClientSize" type="System.Drawing.Size, System.Drawing">
-    <value>950, 550</value>
+    <value>1186, 550</value>
   </data>
   <data name="$this.Text" xml:space="preserve">
     <value>BetsyNetPDF</value>
@@ -347,6 +350,18 @@
   <data name="&gt;&gt;barButtonItem6.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
+  <data name="&gt;&gt;barChkDeactivateTS.Name" xml:space="preserve">
+    <value>barChkDeactivateTS</value>
+  </data>
+  <data name="&gt;&gt;barChkDeactivateTS.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarCheckItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barBtnTextCoordsLayer.Name" xml:space="preserve">
+    <value>barBtnTextCoordsLayer</value>
+  </data>
+  <data name="&gt;&gt;barBtnTextCoordsLayer.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
   <data name="&gt;&gt;bar3.Name" xml:space="preserve">
     <value>bar3</value>
   </data>
@@ -370,12 +385,6 @@
   </data>
   <data name="&gt;&gt;barButtonItem4.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
-  </data>
-  <data name="&gt;&gt;barChkDeactivateTS.Name" xml:space="preserve">
-    <value>barChkDeactivateTS</value>
-  </data>
-  <data name="&gt;&gt;barChkDeactivateTS.Type" xml:space="preserve">
-    <value>DevExpress.XtraBars.BarCheckItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;$this.Name" xml:space="preserve">
     <value>BetsyNetPDFViewer</value>

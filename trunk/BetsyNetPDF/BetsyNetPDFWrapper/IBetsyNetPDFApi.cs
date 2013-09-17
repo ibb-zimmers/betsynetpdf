@@ -59,6 +59,7 @@ namespace BetsyNetPDF
         void SetMeasureModeEnabled(IntPtr win, bool enabled);
         void SetLineModeEnabled(IntPtr win, bool enabled);
         void SetDeactivateTextSelection(IntPtr win, bool value);
+        void SetPreventOverlayObjectSelection(IntPtr win, bool value);
         PointF CvtScreen2Doc(IntPtr win, Point screenCoords);
         Point CvtDoc2Screen(IntPtr win, PointF docCoords);
 
@@ -71,6 +72,7 @@ namespace BetsyNetPDF
         void RotateLeft(IntPtr win);
         void RotateRight(IntPtr win);
         void RotateCounterClockWise(IntPtr win, int angle);
+        int GetDocumentRotation(IntPtr win);
 
         //void ProcessOverlayObject(IntPtr win, string id, string label, string font, double x, double y, double dx, double dy, double angle, float fontSize, Color foreGround, Color backGround, bool update);
         void ProcessOverlayObjects(IntPtr win, string objs);

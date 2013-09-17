@@ -170,6 +170,14 @@ namespace BetsyNetPDF
             SetDeactivateTextSelection_EXT(obj, value);
         }
 
+        [DllImport(DLL, EntryPoint = "CallSetPreventOverlayObjectSelection", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetPreventOverlayObjectSelection_EXT(IntPtr obj, bool value);
+
+        public void SetPreventOverlayObjectSelection(IntPtr obj, bool value)
+        {
+            SetPreventOverlayObjectSelection_EXT(obj, value);
+        }
+
         [DllImport(DLL, EntryPoint = "CallSaveAs", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         static private extern void SaveAs_EXT(IntPtr obj);
 
@@ -240,6 +248,14 @@ namespace BetsyNetPDF
         public void RotateCounterClockWise(IntPtr obj, int angle)
         {
             RotateCounterClockWise_EXT(obj, angle);
+        }
+
+        [DllImport(DLL, EntryPoint = "CallGetDocumentRotation", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern int GetDocumentRotation_EXT(IntPtr obj);
+
+        public int GetDocumentRotation(IntPtr obj)
+        {
+            return GetDocumentRotation_EXT(obj);
         }
 
         //[DllImport(DLL, EntryPoint = "CallProcessOverlayObject", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]

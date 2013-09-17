@@ -33,22 +33,26 @@ Sie sollten eine Kopie der GNU Lesser General Public License zusammen mit diesem
 Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
 */
 
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Text.RegularExpressions;
+using BetsyNetPDF.Parser;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
-using System.IO;
-using System.Drawing.Drawing2D;
-using System.Drawing;
 using iTextSharp.text.pdf.parser;
-using System.Text.RegularExpressions;
+using System;
 
 namespace BetsyNetPDF
 {
     public class BetsyNetPDFEditor
     {
+        public static void ExportOverlayObjects2PDF(string input, string output, string sobjects, string layerTitle)
+        {
+            ExportOverlayObjects2PDF(input, output, OverlayObject.CreateOverlayObjectListFromString(sobjects), layerTitle);
+        }
+
         public static void ExportOverlayObjects2PDF(string input, string output, List<OverlayObject> objects, string layerTitle)
         {
             if (input.StartsWith("\""))
@@ -57,14 +61,10 @@ namespace BetsyNetPDF
                 input = input.Substring(0, input.Length - 1);
 
             using (Stream inputStream = new FileStream(input, FileMode.Open))
+            using (FileStream outputStream = new FileStream(output, FileMode.Create))
+            using (PdfReader reader = new PdfReader(inputStream))
+            using (PdfStamper stamper = CreateStamper(reader, outputStream))
             {
-                PdfReader reader = new PdfReader(inputStream);
-                PdfStamper stamper;
-                if (reader.PdfVersion < '5')
-                    stamper = new PdfStamper(reader, new FileStream(output, FileMode.Create), '5');
-                else
-                    stamper = new PdfStamper(reader, new FileStream(output, FileMode.Create));
-
                 PdfContentByte layerContent = stamper.GetOverContent(1);
                 PdfLayer objectLayer = new PdfLayer(layerTitle, stamper.Writer);
                 layerContent.BeginLayer(objectLayer);
@@ -80,6 +80,7 @@ namespace BetsyNetPDF
                 ColumnText column;
                 float pageHeight = reader.GetPageSize(1).Height;
                 float llx, lly, urx, ury, height, lineHeight, maxWidth, tmpWidth;
+                System.Drawing.Drawing2D.Matrix rotation = null;
                 foreach (OverlayObject oo in objects)
                 {
                     height = maxWidth = tmpWidth = 0;
@@ -128,98 +129,235 @@ namespace BetsyNetPDF
                     layerContent.SaveState();
 
                     //rotate
-                    System.Drawing.Drawing2D.Matrix rotation = null;
-                    if (oo.angle != 0.0)
+                    using (rotation = new System.Drawing.Drawing2D.Matrix())
                     {
-                        rotation = new System.Drawing.Drawing2D.Matrix();
-                        rotation.RotateAt((float)oo.angle, new PointF(xdpi, ydpi), MatrixOrder.Append);
-                        layerContent.Transform(rotation);
-                    }
+                        if (oo.angle != 0.0)
+                        {
+                            rotation.RotateAt((float)oo.angle, new PointF(xdpi, ydpi), MatrixOrder.Append);
+                            layerContent.Transform(rotation);
+                        }
 
-                    column = new ColumnText(layerContent);
-                    foreach (Chunk cline in lines)
-                    {
-                        column.AddText(cline);
-                        column.AddText(Chunk.NEWLINE);
-                    }
+                        column = new ColumnText(layerContent);
+                        foreach (Chunk cline in lines)
+                        {
+                            column.AddText(cline);
+                            column.AddText(Chunk.NEWLINE);
+                        }
 
-                    column.Alignment = Element.ALIGN_LEFT;
-                    column.Leading = lineHeight;
-                    column.SetSimpleColumn(llx, lly, urx, ury);
-                    column.Go();
+                        column.Alignment = Element.ALIGN_LEFT;
+                        column.Leading = lineHeight;
+                        column.SetSimpleColumn(llx, lly, urx, ury);
+                        column.Go();
 
-                    //rotate back
-                    if (oo.angle != 0.0 && rotation != null)
-                    {
-                        rotation.Invert();
-                        layerContent.Transform(rotation);
-                        rotation.Dispose();
+                        //rotate back
+                        if (oo.angle != 0.0 && !rotation.IsIdentity)
+                        {
+                            rotation.Invert();
+                            layerContent.Transform(rotation);
+                            rotation.Dispose();
+                        }
                     }
 
                     layerContent.RestoreState();
                 }
 
                 layerContent.EndLayer();
-
-                stamper.Close();
-                reader.Close();
             }
         }
 
-        public static void ExportOverlayObjects2PDF(string input, string output, string sobjects, string layerTitle)
+        public static List<LocatedObject> ExtractTextAndCoordinates(string sourceFile, string regEx)
         {
-            ExportOverlayObjects2PDF(input, output, OverlayObject.CreateOverlayObjectListFromString(sobjects), layerTitle);
+            List<LocatedObject> locObjects = new List<LocatedObject>();
+            if (string.IsNullOrEmpty(regEx))
+                regEx = ".*";
+
+            using (PdfReader reader = new PdfReader(sourceFile))
+            {
+                iTextSharp.text.Rectangle pageSizeWR = reader.GetPageSizeWithRotation(1);
+                PdfReaderContentParser parser = new PdfReaderContentParser(reader);
+                Parser.TextPositionExtractionStrategy strategy;
+                Regex oRegex = new Regex(regEx);
+                for (int i = 1; i <= reader.NumberOfPages; i++)
+                {
+                    strategy = parser.ProcessContent<Parser.TextPositionExtractionStrategy>(i, new Parser.TextPositionExtractionStrategy());
+
+                    foreach (Parser.LocatedTextChunk chunk in strategy.LocationResult)
+                        if (oRegex.IsMatch(chunk.Text))
+                            locObjects.Add(chunk.Convert2LocatedObject(pageSizeWR));
+                }
+            }
+
+            return locObjects;
         }
 
-        public static Dictionary<string, PointF> ExtractTextAndCoordinates(string sourceFile, string regEx)
+        public static List<string> GetLayers(string file)
         {
-            Dictionary<string, PointF> xyCoords = new Dictionary<string, PointF>();
+            List<string> layers = new List<string>();
 
-            PdfReader reader = new PdfReader(sourceFile);
-            int rotation = reader.GetPageRotation(1);
-            rotation = 360 - rotation;
-            iTextSharp.text.Rectangle pageSizeWR = reader.GetPageSizeWithRotation(1);
-            PdfReaderContentParser parser = new PdfReaderContentParser(reader);
-            Parser.TextPositionExtractionStrategy strategy;
-            Regex oRegex = new Regex(regEx);
-            for (int i = 1; i <= reader.NumberOfPages; i++)
+            using (PdfReader reader = new PdfReader(file))
+            using (PdfStamper stamper = new PdfStamper(reader, new MemoryStream()))
             {
-                strategy = parser.ProcessContent<Parser.TextPositionExtractionStrategy>(i, new Parser.TextPositionExtractionStrategy());
+                Dictionary<string, PdfLayer> layerDict = stamper.GetPdfLayers();
+                foreach (string l in layerDict.Keys)
+                    layers.Add(l);
+            }
 
-                foreach (Parser.MyTextChunk chunk in strategy.LocationResult)
+            return layers;
+        }
+
+        public static List<LocatedObject> ExtractTextAndCoordsFromLayer(string file, string layer, string regEx)
+        {
+            List<string> texts = new List<string>();
+            List<LocatedObject> layerObjs = new List<LocatedObject>();
+
+            if (string.IsNullOrEmpty(regEx))
+                regEx = ".*";
+
+            if (string.IsNullOrEmpty(layer))
+                return ExtractTextAndCoordinates(file, regEx);
+
+            using (PdfReader reader = new PdfReader(file))
+            using (PdfStamper stamper = new PdfStamper(reader, new MemoryStream()))
+            {
+                PdfDictionary ocProps = reader.Catalog.GetAsDict(PdfName.OCPROPERTIES);
+                PdfArray ocgs = ocProps.GetAsArray(PdfName.OCGS);
+
+                PRIndirectReference ocgRef = null;
+                PdfDictionary ocgDict = null;
+                PdfString ocgName = null;
+                foreach (PdfObject pdfo in ocgs.ArrayList)
                 {
-                    if (oRegex.IsMatch(chunk.Text))
+                    ocgRef = pdfo as PRIndirectReference;
+                    if (ocgRef == null)
+                        continue;
+
+                    ocgDict = ocgRef.Reader.GetPdfObject(ocgRef.Number) as PdfDictionary;
+                    if (ocgDict == null)
+                        continue;
+
+                    ocgName = ocgDict.GetAsString(PdfName.NAME);
+                    if (ocgName == null)
+                        continue;
+
+                    if (ocgName.ToString().Equals(layer))
+                        break;
+                    else
                     {
-                        if (rotation % 360 == 0)
+                        ocgRef = null;
+                        ocgDict = null;
+                        ocgName = null;
+                    }
+                }
+
+                if (ocgRef == null || ocgDict == null || ocgName == null)
+                    return layerObjs;
+
+                PdfDictionary page = reader.GetPageN(1);
+                if (page == null)
+                    return layerObjs;
+
+                PdfDictionary resources = page.GetAsDict(PdfName.RESOURCES);
+                PdfDictionary properties = resources.GetAsDict(PdfName.PROPERTIES);
+                PdfDictionary curDict;
+                PdfName ocgID = null;
+                foreach (PdfName key in properties.Keys)
+                {
+                    curDict = properties.GetAsDict(key);
+                    if (curDict == null)
+                        continue;
+
+                    if (curDict.Equals(ocgDict))
+                    {
+                        ocgID = key;
+                        break;
+                    }
+                }
+
+                if (ocgID == null)
+                    return layerObjs;
+
+                PdfArray content = page.GetAsArray(PdfName.CONTENTS);
+                if (content == null)
+                    return layerObjs;
+
+                PRIndirectReference streamRef;
+                PRStream stream;
+                PRTokeniser streamTok;
+                PdfContentParser parser;
+                byte[] streamBytes;
+                foreach (PdfObject pdfo in content.ArrayList)
+                {
+                    streamRef = pdfo as PRIndirectReference;
+                    if (streamRef == null)
+                        continue;
+
+                    stream = streamRef.Reader.GetPdfObject(streamRef.Number) as PRStream;
+                    if (stream == null)
+                        continue;
+
+                    streamBytes = PdfReader.GetStreamBytes(stream);
+                    if (streamBytes.Length == 0)
+                        continue;
+
+                    streamTok = new PRTokeniser(new RandomAccessFileOrArray(streamBytes));
+                    parser = new PdfContentParser(streamTok);
+                    List<PdfObject> operands = new List<PdfObject>();
+                    string oc = null, ocID = null, bdc = null, emc = null;
+                    while (parser.Parse(operands).Count > 0)
+                    {
+                        if (operands.Count > 2 && oc == null && ocID == null && bdc == null && emc == null)
                         {
-                            xyCoords.Add(chunk.Text, new PointF(FromDPI(chunk.StartLocation[Vector.I1]), FromDPI(chunk.StartLocation[Vector.I2])));
-                            continue;
+                            oc = operands[0].ToString();
+                            ocID = operands[1].ToString();
+                            bdc = operands[2].ToString();
+
+                            if (!oc.Equals("/OC") || !ocID.Equals(ocgID.ToString()) || !bdc.Equals("BDC"))
+                                oc = ocID = bdc = emc = null;
                         }
-                        if (rotation == 90)
+                        if (operands.Count == 1 && oc != null && ocID != null && bdc != null && emc == null)
                         {
-                            xyCoords.Add(chunk.Text, new PointF(FromDPI(pageSizeWR.Width - chunk.StartLocation[Vector.I2]), FromDPI(chunk.StartLocation[Vector.I1])));
-                            continue;
+                            emc = operands[0].ToString();
+                            if (emc.Equals("EMC"))
+                                oc = ocID = bdc = emc = null;
+                            else
+                                emc = null;
                         }
-                        if (rotation == 180)
+
+                        if (oc != null && ocID != null && bdc != null && emc == null)
                         {
-                            xyCoords.Add(chunk.Text, new PointF(FromDPI(pageSizeWR.Width - chunk.StartLocation[Vector.I1]), FromDPI(pageSizeWR.Height - chunk.StartLocation[Vector.I2])));
-                            continue;
-                        }
-                        if (rotation == 270)
-                        {
-                            xyCoords.Add(chunk.Text, new PointF(FromDPI(chunk.StartLocation[Vector.I2]), FromDPI(pageSizeWR.Height - chunk.StartLocation[Vector.I1])));
-                            continue;
+                            foreach (PdfObject pdfop in operands)
+                            {
+                                if (pdfop.IsString())
+                                    texts.Add(pdfop.ToString());
+                            }
                         }
                     }
                 }
             }
 
-            return xyCoords;
+            if (texts.Count <= 0)
+                return layerObjs;
+
+            List<LocatedObject> allObjs = ExtractTextAndCoordinates(file, regEx);
+            foreach (LocatedObject obj in allObjs)
+            {
+                Console.WriteLine(obj.ToString());
+                if (texts.Contains(obj.Text))
+                    layerObjs.Add(obj);
+            }
+
+            return layerObjs;
         }
 
-        private static float FromDPI(float dpi)
+        private static PdfStamper CreateStamper(PdfReader reader, FileStream output)
         {
-            return (dpi / 72.0f) * 2540.0f;
+            PdfStamper stamper;
+            if (reader.PdfVersion < '5')
+                stamper = new PdfStamper(reader, output, '5');
+            else
+                stamper = new PdfStamper(reader, output);
+
+            return stamper;
         }
     }
 }

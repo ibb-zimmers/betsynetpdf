@@ -35,16 +35,13 @@ Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
 
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Text;
-using System.Windows.Forms;
-using DevExpress.Skins;
-using DevExpress.LookAndFeel;
-using DevExpress.XtraEditors;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+using BetsyNetPDF.Parser;
+using DevExpress.XtraEditors;
 
 
 namespace BetsyNetPDF
@@ -114,7 +111,19 @@ namespace BetsyNetPDF
                 oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", -1);
                 oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", -1);
             }
-            oo.Append("-1|-1|0|Arial|10|255|255|255|0|0|0}");
+            oo.Append("-1|-1|");
+            if (barChkWithDimension.Checked)
+            {
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 500);
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", -500);
+            }
+            else
+            {
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0.0);
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0.0);
+            }
+            oo.Append(ctrl.GetDocumentRotation());
+            oo.Append("|Arial|10|255|255|255|0|0|0}");
             ctrl.ProcessOverlayObjects(oo.ToString());
         }
 
@@ -146,10 +155,10 @@ namespace BetsyNetPDF
 
         private void barButtonItem5_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
-            Dictionary<string, PointF> coords = BetsyNetPDFEditor.ExtractTextAndCoordinates(ctrl.CurrentFile, "^XY[0-9]+");
+            List<LocatedObject> locObjs = BetsyNetPDFEditor.ExtractTextAndCoordinates(ctrl.CurrentFile, ".*");
             string text = "";
-            foreach (string key in coords.Keys)
-                text += string.Format("{0}: {1} -- {2}" + Environment.NewLine, key, coords[key].X, coords[key].Y);
+            foreach (LocatedObject obj in locObjs)
+                text += string.Format("{0}: {1} -- {2}" + Environment.NewLine, obj.Text, obj.X, obj.Y);
 
             MessageBox.Show(text);
         }
@@ -180,6 +189,17 @@ namespace BetsyNetPDF
         private void barChkDeactivateTS_CheckedChanged(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
             ctrl.SetDeactivateTextSelection(barChkDeactivateTS.Checked);
+        }
+
+        private void barBtnTextCoordsLayer_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            List<LocatedObject> locObjs = BetsyNetPDFEditor.ExtractTextAndCoordsFromLayer(ctrl.CurrentFile, "BETSY", ".*");
+            IOrderedEnumerable<LocatedObject> ordered = locObjs.OrderBy(x => x.Text);
+            string text = "";
+            foreach (LocatedObject obj in ordered)
+                text += string.Format("{0}:\t{1}\t--\t{2}\t{3}" + Environment.NewLine, obj.Text, obj.X, obj.Y, obj.Angle);
+
+            MessageBox.Show(text);
         }
     }
 }
