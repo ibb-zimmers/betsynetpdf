@@ -337,6 +337,9 @@ private:
 	OnLineDrawnDelegate notifyLineDrawn;
 	OnRequestContextMenuDelegate requestContextMenu;
 
+	void PutSelectedOverlayObjectsOnTop();
+	OverlayObject* RemoveSelectedOverlayObject();
+
 	void InitViewer();
 };
 
