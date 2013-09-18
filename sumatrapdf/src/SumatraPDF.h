@@ -212,7 +212,8 @@ public:
 	int page;
 	float fontSize;
 	bool selected, bold, italic;
-	Region currentRegion, currentLabelRegion;
+	//Region currentRegion, currentLabelRegion;
+	GraphicsPath currentPath, currentLabelPath;
 	Color foreGround, backGround;
 
 	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, float fontSize, Color foreGround, Color backGround);
@@ -277,10 +278,10 @@ class UNMANAGED_API BetsyNetPDFUnmanagedApi
 public:
 	std::vector<OverlayObject*> overlayObjects;
 	OverlayObject* lastObj;
-	bool hitLabelForDragging, selectionChanging, mouseOverEnabled, measureMode, lineMode, useExternContextMenu, preventOverlayObjectSelection;
+	bool hitLabelForDragging, selectionChanging, mouseOverEnabled, measureMode, lineMode, useExternContextMenu, preventOverlayObjectSelection, showOverlapping;
 	std::string hwnd;
 	std::string file;
-	Region objectsRegion, labelsRegion;
+	//Region objectsRegion, labelsRegion;
 
 	BetsyNetPDFUnmanagedApi();
 	void BetsyNetPDFViewer(char* hwnd, char* file);
@@ -368,6 +369,7 @@ extern "C" {
 	extern UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, bool enabled);
 	extern UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetPreventOverlayObjectSelection(WindowInfo* win, bool value);
+	extern UNMANAGED_API void __stdcall CallSetShowOverlapping(WindowInfo* win, bool value);
 	extern UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords);
 	extern UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords);
 

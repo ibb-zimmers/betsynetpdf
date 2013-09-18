@@ -60,6 +60,7 @@ namespace BetsyNetPDF
         void SetLineModeEnabled(IntPtr win, bool enabled);
         void SetDeactivateTextSelection(IntPtr win, bool value);
         void SetPreventOverlayObjectSelection(IntPtr win, bool value);
+        void SetShowOverlapping(IntPtr win, bool value);
         PointF CvtScreen2Doc(IntPtr win, Point screenCoords);
         Point CvtDoc2Screen(IntPtr win, PointF docCoords);
 

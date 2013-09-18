@@ -178,6 +178,14 @@ namespace BetsyNetPDF
             SetPreventOverlayObjectSelection_EXT(obj, value);
         }
 
+        [DllImport(DLL, EntryPoint = "CallSetShowOverlapping", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetShowOverlapping_EXT(IntPtr obj, bool value);
+
+        public void SetShowOverlapping(IntPtr obj, bool value)
+        {
+            SetShowOverlapping_EXT(obj, value);
+        }
+
         [DllImport(DLL, EntryPoint = "CallSaveAs", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         static private extern void SaveAs_EXT(IntPtr obj);
 
