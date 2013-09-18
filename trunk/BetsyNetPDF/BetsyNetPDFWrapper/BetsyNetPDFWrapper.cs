@@ -161,6 +161,13 @@ namespace BetsyNetPDF
             api.SetPreventOverlayObjectSelection(win, value);
         }
 
+        public void SetShowOverlapping(bool value)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+            api.SetShowOverlapping(win, value);
+        }
+
         public PointF CvtScreen2Doc(Point screenCoords)
         {
             if (api == null || win == IntPtr.Zero)

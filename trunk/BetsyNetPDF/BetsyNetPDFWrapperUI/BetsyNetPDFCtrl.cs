@@ -137,6 +137,7 @@ namespace BetsyNetPDF
         public void SetLineModeEnabled(bool enabled) { wrapper.SetLineModeEnabled(enabled); }
         public void SetDeactivateTextSelection(bool value) { wrapper.SetDeactivateTextSelection(value); }
         public void SetPreventOverlayObjectSelection(bool value) { wrapper.SetPreventOverlayObjectSelection(value); }
+        public void SetShowOverlapping(bool value) { wrapper.SetShowOverlapping(value); }
         public PointF CvtScreen2Doc(Point screenCoords) { return wrapper.CvtScreen2Doc(screenCoords); }
         public Point CvtDoc2Screen(PointF docCoords) { return wrapper.CvtDoc2Screen(docCoords); }
 

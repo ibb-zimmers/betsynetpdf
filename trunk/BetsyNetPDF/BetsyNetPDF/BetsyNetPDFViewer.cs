@@ -201,5 +201,10 @@ namespace BetsyNetPDF
 
             MessageBox.Show(text);
         }
+
+        private void barChkShowOverlapping_CheckedChanged(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            ctrl.SetShowOverlapping(barChkShowOverlapping.Checked);
+        }
     }
 }

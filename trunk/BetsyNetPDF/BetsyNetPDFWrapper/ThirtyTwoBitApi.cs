@@ -154,6 +154,14 @@ namespace BetsyNetPDF
             SetPreventOverlayObjectSelection_EXT(obj, value);
         }
 
+        [DllImport(DLL, EntryPoint = "CallSetShowOverlapping", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetShowOverlapping_EXT(IntPtr obj, bool value);
+
+        public void SetShowOverlapping(IntPtr obj, bool value)
+        {
+            SetShowOverlapping_EXT(obj, value);
+        }
+
         [DllImport(DLL, EntryPoint = "CallCvtScreen2Doc", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         static private extern IntPtr CvtScreen2Doc_EXT(IntPtr obj, IntPtr screenCoords);
 

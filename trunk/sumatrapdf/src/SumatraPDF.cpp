@@ -2127,13 +2127,6 @@ static void DrawDocument(WindowInfo& win, HDC hdc, RECT *rcArea)
         else
             renderDelay = gRenderCache.Paint(hdc, bounds, dm, pageNo, pageInfo, &renderOutOfDateCue);
 
-		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
-		if(betsyApi != NULL)
-		{
-			betsyApi->DrawOverlayObjets(&hdc, &win, pageNo, bounds);
-			betsyApi->DrawLine(&hdc, &win);
-		}
-
         if (renderDelay) {
             ScopedFont fontRightTxt(GetSimpleFont(hdc, L"MS Shell Dlg", 14));
             HGDIOBJ hPrevFont = SelectObject(hdc, fontRightTxt);
@@ -2153,6 +2146,13 @@ static void DrawDocument(WindowInfo& win, HDC hdc, RECT *rcArea)
             SelectObject(hdc, hPrevFont);
             continue;
         }
+
+		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
+		if(betsyApi != NULL)
+		{
+			betsyApi->DrawOverlayObjets(&hdc, &win, pageNo, bounds);
+			betsyApi->DrawLine(&hdc, &win);
+		}
 
         if (!renderOutOfDateCue)
             continue;
@@ -5703,38 +5703,28 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 	if((ulOnScreen.y + bbox.Height) < bounds.y || ulOnScreen.y > (bounds.y + bounds.dy))
 		return;
 	
-	PointF points[4] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height) };
+	PointF objPoints[5] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y) };
 
 	// calc rotation
 	Matrix rotation, elemRotation;
 	if(win->dm->Rotation() != 0)
 	{
 		rotation.RotateAt(win->dm->Rotation(), ulEdge, Gdiplus::MatrixOrderAppend);
-		rotation.TransformPoints(points, 4);
+		rotation.TransformPoints(objPoints, 5);
 		g->SetTransform(&rotation);
 	}
 	if(this->angle != 0.0)
 	{
 		elemRotation.RotateAt(-this->angle, rotPoint, Gdiplus::MatrixOrderAppend);
-		elemRotation.TransformPoints(points, 4);
+		elemRotation.TransformPoints(objPoints, 5);
 		rotation.Multiply(&elemRotation, Gdiplus::MatrixOrderAppend);
 		g->SetTransform(&rotation);
 	}
 
 	//store current location
-	GraphicsPath* objPath = new GraphicsPath();
-	objPath->StartFigure();
-	objPath->AddLine(points[0], points[1]);
-	objPath->AddLine(points[1], points[2]);
-	objPath->AddLine(points[2], points[3]);
-	objPath->AddLine(points[3], points[0]);
-	objPath->CloseFigure();
-	this->currentRegion.Union(objPath);
-	
-	Region* overlapping = betsyApi->objectsRegion.Clone();
-	overlapping->Intersect(objPath);
-
-	betsyApi->objectsRegion.Union(objPath);
+	this->currentPath.StartFigure();
+	this->currentPath.AddLines(objPoints, 5);
+	this->currentPath.CloseFigure();
 
 	// paint lable bg
 	SolidBrush  bbrush(this->backGround);
@@ -5809,25 +5799,14 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 		RectF llabelBox(0, 0, 0, 0);
 		g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
 
-		PointF lpoints[4] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height) };
+		PointF lblpoints[5] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y) };
 		if(!rotation.IsIdentity())
-			rotation.TransformPoints(lpoints, 4);
+			rotation.TransformPoints(lblpoints, 5);
 
-		GraphicsPath* lblPath = new GraphicsPath();
-		lblPath->StartFigure();
-		lblPath->AddLine(lpoints[0], lpoints[1]);
-		lblPath->AddLine(lpoints[1], lpoints[2]);
-		lblPath->AddLine(lpoints[2], lpoints[3]);
-		lblPath->AddLine(lpoints[3], lpoints[0]);
-		lblPath->CloseFigure();
-		this->currentLabelRegion.Union(lblPath);
-
-		Region* lblOverlapping = betsyApi->objectsRegion.Clone();
-		lblOverlapping->Intersect(lblPath);
-		overlapping->Union(lblOverlapping);
-
-		betsyApi->objectsRegion.Union(lblPath);
-		//this->currentLabelLocation.assign(lpoints, lpoints + 4);
+		//store current label location
+		this->currentLabelPath.StartFigure();
+		this->currentLabelPath.AddLines(lblpoints, 5);
+		this->currentLabelPath.CloseFigure();
 
 		if(bbox.Width > bbox.Height)
 			llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y);
@@ -5879,10 +5858,6 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 			g->SetTransform(&rotation);
 		}
 	}
-
-	Color ovColor(170, 255 - this->backGround.GetR(), 255 - this->backGround.GetG(), 255 - this->backGround.GetB()); 
-	SolidBrush ovBrush(ovColor);
-	g->FillRegion(&ovBrush, overlapping);
 }
 
 void OverlayObject::MakeVisible(WindowInfo* win)
@@ -5925,9 +5900,9 @@ bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
 {
 	Region* checkRegion;
 	if(label)
-		checkRegion = this->currentLabelRegion.Clone();
+		checkRegion = new Region(&this->currentLabelPath);
 	else
-		checkRegion = this->currentRegion.Clone();
+		checkRegion = new Region(&this->currentPath);
 
 	RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
 	return checkRegion->IsVisible(selOnScreen);
@@ -6094,6 +6069,7 @@ BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
 	this->moveLabel = false;
 	this->useExternContextMenu = false;
 	this->preventOverlayObjectSelection = false;
+	this->showOverlapping = false;
 	this->lastObj = NULL;
 	this->lineStart = NULL;
 	this->lineEnd = NULL;
@@ -6103,6 +6079,7 @@ BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
 void BetsyNetPDFUnmanagedApi::PutSelectedOverlayObjectsOnTop()
 {
 	std::vector<OverlayObject*> selectedObjects;
+	std::vector<OverlayObject*>::iterator iter;
 
 	OverlayObject* cObj = this->RemoveSelectedOverlayObject();
 	while(cObj != NULL)
@@ -6111,8 +6088,8 @@ void BetsyNetPDFUnmanagedApi::PutSelectedOverlayObjectsOnTop()
 		cObj = this->RemoveSelectedOverlayObject();
 	}
 
-	for(int i = 0; i < selectedObjects.size(); i++)
-		this->overlayObjects.push_back(selectedObjects.at(i));
+	for(iter = selectedObjects.begin(); iter != selectedObjects.end(); iter++)
+		this->overlayObjects.push_back(*iter);
 }
 
 OverlayObject* BetsyNetPDFUnmanagedApi::RemoveSelectedOverlayObject()
@@ -6179,18 +6156,50 @@ void BetsyNetPDFUnmanagedApi::DrawOverlayObjets(HDC* hdc, WindowInfo* win, int p
 	if(this->selectionChanging)
 		return;
 
-	int i;
 	OverlayObject *curObj;
 	Graphics g(*hdc);
-	this->objectsRegion.MakeEmpty();
-	this->labelsRegion.MakeEmpty();
-	for(i = 0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		curObj = this->overlayObjects.at(i);
-		curObj->currentRegion.MakeEmpty();
-		curObj->currentLabelRegion.MakeEmpty();
+		curObj = *iter;
+		curObj->currentPath.Reset();
+		curObj->currentLabelPath.Reset();
 		curObj->Paint(&g, win, pageNo, bounds);
 	}
+
+	if(!this->showOverlapping)
+		return;
+
+	Region* allObjects = new Region();
+	Region* overlapping = new Region();
+	Region* intersection;
+
+	allObjects->MakeEmpty();
+	overlapping->MakeEmpty();
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+	{
+		curObj = *iter;
+
+		intersection = allObjects->Clone();
+		intersection->Intersect(&curObj->currentPath);
+		overlapping->Union(intersection);
+
+		intersection = allObjects->Clone();
+		intersection->Intersect(&curObj->currentLabelPath);
+		overlapping->Union(intersection);
+
+		allObjects->Union(&curObj->currentPath);
+		allObjects->Union(&curObj->currentLabelPath);
+	}
+
+	Color tmp = Color::Firebrick;
+	Color ovColor(190, tmp.GetR(), tmp.GetG(), tmp.GetB());
+	SolidBrush ovBrush(ovColor);
+	g.FillRegion(&ovBrush, overlapping);
+
+	delete allObjects;
+	delete overlapping;
+	delete intersection;
 }
 
 void BetsyNetPDFUnmanagedApi::DrawLine(HDC* hdc, WindowInfo* win)
@@ -6234,10 +6243,12 @@ void BetsyNetPDFUnmanagedApi::Escape(WindowInfo* win)
 void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objects)
 {
 	OverlayObject* oo;
+	OverlayObject* loo;
+	std::vector<OverlayObject*>::iterator iter;
+
 	std::string sobjects(objects);
 	std::string objToken;
 	size_t pos = sobjects.find_first_of("}");
-	int i;
 	bool found;
 	while(pos != std::string::npos)
 	{
@@ -6246,12 +6257,13 @@ void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objec
 
 		oo = OverlayObject::CreateFromString(objToken);
 		found = false;
-		for(i = 0; i < this->overlayObjects.size(); i++)
+		for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 		{
-			if(this->overlayObjects[i]->id == oo->id)
+			loo = *iter;
+			if(loo->id == oo->id)
 			{
 				found = true;
-				this->overlayObjects[i]->Clone(oo);
+				loo->Clone(oo);
 				break;
 			}
 		}
@@ -6271,13 +6283,15 @@ void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
 {
 	std::string sid(id);
 
-	int i;
+	std::vector<OverlayObject*>::iterator iter;
+	OverlayObject* oo;
 	bool repaint = false;
-	for(i=0;i<overlayObjects.size();i++)
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end() ; iter++)
 	{
-		if(overlayObjects[i]->id == sid)
+		oo = *iter;
+		if(oo->id == sid)
 		{
-			overlayObjects.erase(overlayObjects.begin()+i);
+			overlayObjects.erase(iter);
 			repaint = true;
 			break;
 		}
@@ -6290,14 +6304,14 @@ void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
 void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* objectIds)
 {
 	std::string sobjectIds(objectIds);
-	int i;
 	OverlayObject* curObj;
 	OverlayObject* firstObj = NULL;
 	bool repaint = false;
 	size_t pos;
-	for( i = 0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		curObj = this->overlayObjects[i];
+		curObj = *iter;
 		pos = sobjectIds.find("|" + curObj->id + "|");
 
 		if(pos == std::string::npos)
@@ -6338,12 +6352,12 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 	this->selectionChanging = true;
 
 	bool prevSelectedState, selectionChanged = false, notify = false;
-	int i;
 	OverlayObject *curObj;
 	OverlayObject *lastSelectedObject = NULL;
-	for(i=0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		curObj = this->overlayObjects[i];
+		curObj = *iter;
 		prevSelectedState = curObj->selected;
 		if(ctrlPressed)
 		{
@@ -6387,12 +6401,12 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 	
 char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjectIds()
 {
-	int i;
 	OverlayObject* oo;
 	std::stringstream objIds;
-	for(i=0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		oo = this->overlayObjects[i];
+		oo = *iter;
 		if(oo->selected)
 			objIds << oo->id << "|";
 	}
@@ -6407,12 +6421,12 @@ char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjectIds()
 
 char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjects()
 {
-	int i;
 	OverlayObject* oo;
 	std::stringstream objects;
-	for(i=0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		oo = this->overlayObjects[i];
+		oo = *iter;
 		if(oo->selected)
 			objects << oo->ToString();
 	}
@@ -6427,19 +6441,19 @@ char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjects()
 
 void BetsyNetPDFUnmanagedApi::DeselectOverlayObjects()
 {
-	int i;
-	for(i = 0; i < this->overlayObjects.size(); i++)
-		this->overlayObjects[i]->selected = false;
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+		(*iter)->selected = false;
 }
 
 char* BetsyNetPDFUnmanagedApi::GetAllOverlayObjects()
 {
-	int i;
 	OverlayObject* oo;
 	std::stringstream objects;
-	for(i=0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		oo = this->overlayObjects[i];
+		oo = *iter;
 		objects << oo->ToString();
 	}
 
@@ -6527,13 +6541,12 @@ void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, boo
 
 void BetsyNetPDFUnmanagedApi::CheckDeleteOverlayObject()
 {
-	int i;
 	OverlayObject* oo;
 	bool selection = false;
-	
-	for(i=0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		oo = this->overlayObjects[i];
+		oo = *iter;
 		if(oo->selected)
 		{
 			selection = true;
@@ -6550,12 +6563,12 @@ void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int 
 	if(this->measureMode || this->lineMode)
 		return;
 
-	int i;
 	OverlayObject* oo;
 	win->selectionRect = RectI(x, y, 1, 1);
-	for(i = 0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		oo = this->overlayObjects[i];
+		oo = *iter;
 		
 		if(moveObj && oo->selected && oo->CheckIsInSelection(win))
 		{
@@ -6595,12 +6608,12 @@ void BetsyNetPDFUnmanagedApi::MoveSelectedOverlayObjectsBy(WindowInfo* win, int 
 	double deltaX = lastDragLoc.x - currentLoc.x;
 	double deltaY = lastDragLoc.y - currentLoc.y;
 
-	int i;
 	OverlayObject* oo;
 	bool repaint = false;
-	for(i = 0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		oo = this->overlayObjects[i];
+		oo = *iter;
 		if(oo->selected)
 		{
 			oo->Move(deltaX, deltaY, this->moveLabel);
@@ -6636,11 +6649,11 @@ void BetsyNetPDFUnmanagedApi::CheckOnRequestContextMenu(WindowInfo* win, int x, 
 {
 	win->selectionRect = RectI(x, y, 1, 1);
 
-	int i;
 	OverlayObject *curObj = NULL;
-	for(i = 0; i < this->overlayObjects.size(); i++)
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
-		curObj = this->overlayObjects[i];
+		curObj = *iter;
 		if(curObj->selected && curObj->CheckIsInSelection(win))
 			break;
 
@@ -6943,6 +6956,14 @@ extern "C" UNMANAGED_API void __stdcall CallSetPreventOverlayObjectSelection(Win
 	if(win != NULL && win->betsyApi != NULL)
 	{
 		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->preventOverlayObjectSelection = value;
+	}
+}
+
+extern "C" UNMANAGED_API void __stdcall CallSetShowOverlapping(WindowInfo* win, bool value)
+{
+	if(win != NULL && win->betsyApi != NULL)
+	{
+		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->showOverlapping = value;
 	}
 }
 
