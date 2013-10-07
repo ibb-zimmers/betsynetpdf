@@ -208,15 +208,15 @@ class OverlayObject
 {
 public:
 	std::string id, label, font;
-	double angle;
+	double angle, labelAngle;
 	int page;
 	float fontSize;
-	bool selected, bold, italic;
+	bool selected, bold, italic, moveAll;
 	//Region currentRegion, currentLabelRegion;
 	GraphicsPath currentPath, currentLabelPath;
 	Color foreGround, backGround;
 
-	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, float fontSize, Color foreGround, Color backGround);
+	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround);
 	void Clone(OverlayObject* oo);
 	double GetX();
 	double GetY();
@@ -236,7 +236,7 @@ public:
 	void SetRY(double ry);
 	//void InitLXY(WindowInfo* win);
 	void Move(double deltaX, double deltaY, bool moveLabel);
-	void Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds);
+	void Paint(Graphics* g, WindowInfo* win, int pageNo, Region* bounds, Region* objRegion, Matrix* rotation, Matrix* elemRotation);
 	void MakeVisible(WindowInfo* win);
 	bool CheckSelectionChanged(WindowInfo* win);
 	bool CheckIsInSelection(WindowInfo* win);
@@ -249,6 +249,8 @@ public:
 
 private:
 	double x_dpi, y_dpi, dx_dpi, dy_dpi, lx_dpi, ly_dpi, rx_dpi, ry_dpi;
+
+	void DrawLabelLine(Graphics* g, PointF* startPoints, PointF* endPoints, float zoom);
 };
 
 #ifndef __BetsyNetPDFUnmanagedApi_h__
@@ -278,7 +280,7 @@ class UNMANAGED_API BetsyNetPDFUnmanagedApi
 public:
 	std::vector<OverlayObject*> overlayObjects;
 	OverlayObject* lastObj;
-	bool hitLabelForDragging, selectionChanging, mouseOverEnabled, measureMode, lineMode, useExternContextMenu, preventOverlayObjectSelection, showOverlapping;
+	bool hitLabelForDragging, selectionChanging, mouseOverEnabled, measureMode, lineMode, useExternContextMenu, preventOverlayObjectSelection, showOverlapping, hideLabels, transparantOverlayObjects;
 	std::string hwnd;
 	std::string file;
 	//Region objectsRegion, labelsRegion;
@@ -370,6 +372,8 @@ extern "C" {
 	extern UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetPreventOverlayObjectSelection(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetShowOverlapping(WindowInfo* win, bool value);
+	extern UNMANAGED_API void __stdcall CallSetHideLabels(WindowInfo* win, bool value);
+	extern UNMANAGED_API void __stdcall CallSetTransparantOverlayObjects(WindowInfo* win, bool value);
 	extern UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords);
 	extern UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords);
 

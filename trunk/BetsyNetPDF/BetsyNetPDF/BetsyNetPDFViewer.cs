@@ -123,6 +123,7 @@ namespace BetsyNetPDF
                 oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0.0);
             }
             oo.Append(ctrl.GetDocumentRotation());
+            oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0.0);
             oo.Append("|Arial|10|255|255|255|0|0|0}");
             ctrl.ProcessOverlayObjects(oo.ToString());
         }
@@ -205,6 +206,11 @@ namespace BetsyNetPDF
         private void barChkShowOverlapping_CheckedChanged(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
             ctrl.SetShowOverlapping(barChkShowOverlapping.Checked);
+        }
+
+        private void barCheckItem4_CheckedChanged(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            ctrl.SetTransparantOverlayObjects(barCheckItem4.Checked);
         }
     }
 }

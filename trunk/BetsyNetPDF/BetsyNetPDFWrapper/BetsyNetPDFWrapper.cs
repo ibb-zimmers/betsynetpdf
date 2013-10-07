@@ -168,6 +168,20 @@ namespace BetsyNetPDF
             api.SetShowOverlapping(win, value);
         }
 
+        public void SetHideLabels(bool value)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+            api.SetHideLabels(win, value);
+        }
+
+        public void SetTransparantOverlayObjects(bool value)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+            api.SetTransparantOverlayObjects(win, value);
+        }
+
         public PointF CvtScreen2Doc(Point screenCoords)
         {
             if (api == null || win == IntPtr.Zero)
@@ -268,7 +282,7 @@ namespace BetsyNetPDF
         //    api.ProcessOverlayObject(win, id, label, font, x, y, dx, dy, angle, fontSize, foreColor, backColor, update);
         //}
 
-        // {id|label|x|y|dx|dy|lx|ly|angle|font|fontSize|fgR|fgG|fgB|bgR|bgG|bgB}
+        // {id|label|x|y|dx|dy|lx|ly|rx|ry|angle|labelAngle|font|fontSize|fgR|fgG|fgB|bgR|bgG|bgB}
         public void ProcessOverlayObjects(string objs)
         {
             if (api == null || win == IntPtr.Zero)

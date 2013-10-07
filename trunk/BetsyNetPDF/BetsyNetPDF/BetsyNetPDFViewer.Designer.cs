@@ -46,6 +46,7 @@ namespace BetsyNetPDF
             this.barButtonItem6 = new DevExpress.XtraBars.BarButtonItem();
             this.barChkDeactivateTS = new DevExpress.XtraBars.BarCheckItem();
             this.barBtnTextCoordsLayer = new DevExpress.XtraBars.BarButtonItem();
+            this.barChkShowOverlapping = new DevExpress.XtraBars.BarCheckItem();
             this.bar3 = new DevExpress.XtraBars.Bar();
             this.barDockControlTop = new DevExpress.XtraBars.BarDockControl();
             this.barDockControlBottom = new DevExpress.XtraBars.BarDockControl();
@@ -54,7 +55,7 @@ namespace BetsyNetPDF
             this.barButtonItem2 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem3 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem4 = new DevExpress.XtraBars.BarButtonItem();
-            this.barChkShowOverlapping = new DevExpress.XtraBars.BarCheckItem();
+            this.barCheckItem4 = new DevExpress.XtraBars.BarCheckItem();
             ((System.ComponentModel.ISupportInitialize)(this.barManager1)).BeginInit();
             this.SuspendLayout();
             // 
@@ -86,9 +87,10 @@ namespace BetsyNetPDF
             this.barButtonItem6,
             this.barChkDeactivateTS,
             this.barBtnTextCoordsLayer,
-            this.barChkShowOverlapping});
+            this.barChkShowOverlapping,
+            this.barCheckItem4});
             this.barManager1.MainMenu = this.bar2;
-            this.barManager1.MaxItemId = 23;
+            this.barManager1.MaxItemId = 24;
             this.barManager1.StatusBar = this.bar3;
             // 
             // bar1
@@ -118,7 +120,8 @@ namespace BetsyNetPDF
             new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem6),
             new DevExpress.XtraBars.LinkPersistInfo(this.barChkDeactivateTS),
             new DevExpress.XtraBars.LinkPersistInfo(this.barBtnTextCoordsLayer),
-            new DevExpress.XtraBars.LinkPersistInfo(this.barChkShowOverlapping)});
+            new DevExpress.XtraBars.LinkPersistInfo(this.barChkShowOverlapping),
+            new DevExpress.XtraBars.LinkPersistInfo(this.barCheckItem4)});
             this.bar2.OptionsBar.MultiLine = true;
             this.bar2.OptionsBar.UseWholeRow = true;
             resources.ApplyResources(this.bar2, "bar2");
@@ -216,6 +219,13 @@ namespace BetsyNetPDF
             this.barBtnTextCoordsLayer.Name = "barBtnTextCoordsLayer";
             this.barBtnTextCoordsLayer.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barBtnTextCoordsLayer_ItemClick);
             // 
+            // barChkShowOverlapping
+            // 
+            resources.ApplyResources(this.barChkShowOverlapping, "barChkShowOverlapping");
+            this.barChkShowOverlapping.Id = 22;
+            this.barChkShowOverlapping.Name = "barChkShowOverlapping";
+            this.barChkShowOverlapping.CheckedChanged += new DevExpress.XtraBars.ItemClickEventHandler(this.barChkShowOverlapping_CheckedChanged);
+            // 
             // bar3
             // 
             this.bar3.BarName = "Status bar";
@@ -267,12 +277,12 @@ namespace BetsyNetPDF
             this.barButtonItem4.Id = 8;
             this.barButtonItem4.Name = "barButtonItem4";
             // 
-            // barChkShowOverlapping
+            // barCheckItem4
             // 
-            resources.ApplyResources(this.barChkShowOverlapping, "barChkShowOverlapping");
-            this.barChkShowOverlapping.Id = 22;
-            this.barChkShowOverlapping.Name = "barChkShowOverlapping";
-            this.barChkShowOverlapping.CheckedChanged += new DevExpress.XtraBars.ItemClickEventHandler(this.barChkShowOverlapping_CheckedChanged);
+            resources.ApplyResources(this.barCheckItem4, "barCheckItem4");
+            this.barCheckItem4.Id = 23;
+            this.barCheckItem4.Name = "barCheckItem4";
+            this.barCheckItem4.CheckedChanged += new DevExpress.XtraBars.ItemClickEventHandler(this.barCheckItem4_CheckedChanged);
             // 
             // BetsyNetPDFViewer
             // 
@@ -315,6 +325,7 @@ namespace BetsyNetPDF
         private DevExpress.XtraBars.BarCheckItem barChkDeactivateTS;
         private DevExpress.XtraBars.BarButtonItem barBtnTextCoordsLayer;
         private DevExpress.XtraBars.BarCheckItem barChkShowOverlapping;
+        private DevExpress.XtraBars.BarCheckItem barCheckItem4;
 
 
     }

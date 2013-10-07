@@ -5501,15 +5501,17 @@ void CrashHandlerMessage()
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF overlay objects
 ///////////////////////////////////////////////////////////////////////////////
-OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, float fontSize, Color foreGround, Color backGround)
+OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround)
 {
 	this->id = id;
 	this->label = label;
 	this->font = font;
 	this->page = 1;
 	this->angle = angle;
+	this->labelAngle = labelAngle;
 	this->fontSize = fontSize;
 	this->selected = false;
+	this->moveAll = false;
 	this->bold = false;
 	this->italic = false;
 	this->foreGround = foreGround;
@@ -5530,6 +5532,7 @@ void OverlayObject::Clone(OverlayObject* oo)
 	this->label = oo->label;
 	this->font = oo->font;
 	this->angle = oo->angle;
+	this->labelAngle = oo->labelAngle;
 	this->fontSize = oo->fontSize;
 	this->foreGround = oo->foreGround;
 	this->backGround = oo->backGround;
@@ -5650,6 +5653,16 @@ void OverlayObject::SetRY(double ry)
 
 void OverlayObject::Move(double deltaX, double deltaY, bool moveLabel)
 {
+	if(this->moveAll)
+	{
+		this->lx_dpi -= deltaX;
+		this->ly_dpi += deltaY;
+
+		this->x_dpi -= deltaX;
+		this->y_dpi += deltaY;
+
+		return;
+	}
 	if(moveLabel)
 	{
 		this->lx_dpi -= deltaX;
@@ -5662,7 +5675,7 @@ void OverlayObject::Move(double deltaX, double deltaY, bool moveLabel)
 	}
 }
 
-void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds)
+void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* bounds, Region* objRegion, Matrix* rotation, Matrix* elemRotation)
 {
 	if(this->page!=pageNo)
 		return;
@@ -5697,34 +5710,51 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 		bbox.Height = this->dy_dpi * zoom;
 	}
 
-	if((ulOnScreen.x + bbox.Width) < bounds.x || ulOnScreen.x > (bounds.x + bounds.dx))
-		return;
-
-	if((ulOnScreen.y + bbox.Height) < bounds.y || ulOnScreen.y > (bounds.y + bounds.dy))
-		return;
-	
 	PointF objPoints[5] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y) };
+	PointF labelLineStartPoints[8] = 
+	{ 
+		PointF(bbox.X, bbox.Y), 
+		PointF(bbox.X + bbox.Width / 2.0f, bbox.Y), 
+		PointF(bbox.X + bbox.Width, bbox.Y), 
+		PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2.0f),
+		PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height),		
+		PointF(bbox.X + bbox.Width / 2.0f, bbox.Y + bbox.Height),
+		PointF(bbox.X, bbox.Y + bbox.Height),
+		PointF(bbox.X, bbox.Y + bbox.Height / 2.0f)
+	};
 
-	// calc rotation
-	Matrix rotation, elemRotation;
+	// calc rotation	
 	if(win->dm->Rotation() != 0)
 	{
-		rotation.RotateAt(win->dm->Rotation(), ulEdge, Gdiplus::MatrixOrderAppend);
-		rotation.TransformPoints(objPoints, 5);
-		g->SetTransform(&rotation);
+		rotation->RotateAt(win->dm->Rotation(), ulEdge, Gdiplus::MatrixOrderAppend);
+		rotation->TransformPoints(objPoints, 5);
+		rotation->TransformPoints(labelLineStartPoints, 8);
+		g->SetTransform(rotation);
 	}
 	if(this->angle != 0.0)
 	{
-		elemRotation.RotateAt(-this->angle, rotPoint, Gdiplus::MatrixOrderAppend);
-		elemRotation.TransformPoints(objPoints, 5);
-		rotation.Multiply(&elemRotation, Gdiplus::MatrixOrderAppend);
-		g->SetTransform(&rotation);
+		elemRotation->RotateAt(-this->angle, rotPoint, Gdiplus::MatrixOrderAppend);
+		elemRotation->TransformPoints(objPoints, 5);
+		elemRotation->TransformPoints(labelLineStartPoints, 8);
+		rotation->Multiply(elemRotation, Gdiplus::MatrixOrderAppend);
+		g->SetTransform(rotation);
 	}
 
 	//store current location
 	this->currentPath.StartFigure();
 	this->currentPath.AddLines(objPoints, 5);
 	this->currentPath.CloseFigure();
+
+	objRegion = new Region(&(this->currentPath));
+	objRegion->Intersect(bounds);
+	if(objRegion->IsEmpty(g))
+	{
+		if(!rotation->IsIdentity())
+			g->ResetTransform();
+
+		this->currentPath.Reset();
+		return;
+	}
 
 	// paint lable bg
 	SolidBrush  bbrush(this->backGround);
@@ -5733,6 +5763,14 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 	{
 		bbrush.SetColor(Color::Purple);
 		fbrush.SetColor(Color::White);
+	}
+
+	if(betsyApi->transparantOverlayObjects)
+	{
+		Color curBg;
+		bbrush.GetColor(&curBg);
+		Color transpBg(168, curBg.GetR(), curBg.GetG(), curBg.GetB());
+		bbrush.SetColor(transpBg);
 	}
 
 	g->FillRectangle(&bbrush, bbox);
@@ -5745,119 +5783,139 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, RectI bounds
 		g->DrawString(wslabel.c_str(), -1, &font, bbox, &sformat, &fbrush);
 
 		// reset rotation
-		if(!rotation.IsIdentity())
+		if(!rotation->IsIdentity())
 		{
-			rotation.Reset();
-			g->SetTransform(&rotation);
+			rotation->Reset();
+			g->ResetTransform();
 		}
 	}
 	else
 	{
 		// reset rotation
-		if(!rotation.IsIdentity())
+		if(!rotation->IsIdentity())
 		{
-			rotation.Reset();
-			g->SetTransform(&rotation);
-		}
-		
-		PointF labelPoint, llineStart, llineEnd;
-		
-		// draw label below object
-		if(bbox.Width > bbox.Height)
-		{
-			labelPoint = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height + 25 * zoom);
-			llineStart = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height);
-		}
-		//draw label left of object
-		else
-		{
-			labelPoint = PointF(bbox.X + bbox.Width + 25 * zoom, bbox.Y + bbox.Height / 2);
-			llineStart = PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2);
+			rotation->Reset();
+			g->ResetTransform();
 		}
 
-		if(lx_dpi > 0.0 && ly_dpi > 0.0)
+		if(!betsyApi->hideLabels)
 		{
-			PointD lpointOnPage(this->lx_dpi, pageHeight - this->ly_dpi);
-			PointI lpointOnScreen = win->dm->CvtToScreen(pageNo, lpointOnPage);
+			PointF labelPoint;
 
-			labelPoint = PointF(lpointOnScreen.x, lpointOnScreen.y);
-		}
-		else
-		{
-			PointD lpointOnPage = win->dm->CvtFromScreen(PointI((int)labelPoint.X, (int)labelPoint.Y));
-			this->lx_dpi = lpointOnPage.x;
-			this->ly_dpi = pageHeight - lpointOnPage.y;
-		}
+			// draw label below object
+			if(bbox.Width > bbox.Height)
+				labelPoint = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height + 25 * zoom);
+			//draw label left of object
+			else
+				labelPoint = PointF(bbox.X + bbox.Width + 25 * zoom, bbox.Y + bbox.Height / 2);
 
-		if(win->dm->Rotation() != 0)
-		{
-			rotation.RotateAt(win->dm->Rotation(), labelPoint, Gdiplus::MatrixOrderAppend);
-			g->SetTransform(&rotation);
-		}
-
-		// calc label position & size
-		RectF llabelBox(0, 0, 0, 0);
-		g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
-
-		PointF lblpoints[5] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y) };
-		if(!rotation.IsIdentity())
-			rotation.TransformPoints(lblpoints, 5);
-
-		//store current label location
-		this->currentLabelPath.StartFigure();
-		this->currentLabelPath.AddLines(lblpoints, 5);
-		this->currentLabelPath.CloseFigure();
-
-		if(bbox.Width > bbox.Height)
-			llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y);
-		else
-			llineEnd = PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2);
-
-		if(lx_dpi >= 0.0 && ly_dpi >= 0.0)
-		{
-			// set linestart/lineend according to label position
-			if(llabelBox.Y + llabelBox.Height <= bbox.Y)
+			if(lx_dpi > 0.0 && ly_dpi > 0.0)
 			{
-				llineStart = PointF(bbox.X + bbox.Width / 2, bbox.Y);
-				llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y + llabelBox.Height);
+				PointD lpointOnPage(this->lx_dpi, pageHeight - this->ly_dpi);
+				PointI lpointOnScreen = win->dm->CvtToScreen(pageNo, lpointOnPage);
+
+				labelPoint = PointF(lpointOnScreen.x, lpointOnScreen.y);
 			}
 			else
 			{
-				if(labelPoint.Y >= bbox.Y + bbox.Height)
-				{
-					llineStart = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height);
-					llineEnd = PointF(llabelBox.X + llabelBox.Width / 2, llabelBox.Y);
-				}
-				else
-				{
-					if(labelPoint.X <= bbox.X)
-					{
-						llineStart = PointF(bbox.X, bbox.Y + bbox.Height / 2);
-						llineEnd = PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height / 2);
-					}
-					else
-					{
-						llineStart = PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2);
-						llineEnd = PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2);
-					}
-				}
+				PointD lpointOnPage = win->dm->CvtFromScreen(PointI((int)labelPoint.X, (int)labelPoint.Y));
+				this->lx_dpi = lpointOnPage.x;
+				this->ly_dpi = pageHeight - lpointOnPage.y;
 			}
-		}		
 
-		g->FillRectangle(&bbrush, llabelBox);
+			double lblRotation = win->dm->Rotation() - this->labelAngle;
+			if(lblRotation != 0.0)
+			{
+				rotation->RotateAt(lblRotation, labelPoint, Gdiplus::MatrixOrderAppend);
+				g->SetTransform(rotation);
+			}
 
-		g->DrawString(wslabel.c_str(), -1, &font, llabelBox, &sformat, &fbrush);
+			// calc label position & size
+			RectF llabelBox(0, 0, 0, 0);
+			g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
 
-		Pen linePen(Color::Black);
-		g->DrawLine(&linePen, llineStart, llineEnd);
+			PointF lblpoints[5] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y) };
+			PointF labelLineEndPoints[8] =
+			{
+				PointF(llabelBox.X, llabelBox.Y), 
+				PointF(llabelBox.X + llabelBox.Width / 2.0f, llabelBox.Y),
+				PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), 
+				PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height / 2.0f), 
+				PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), 
+				PointF(llabelBox.X + llabelBox.Width/ 2.0f, llabelBox.Y + llabelBox.Height), 
+				PointF(llabelBox.X, llabelBox.Y + llabelBox.Height),
+				PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2.0f)
+			};
 
-		// reset rotation
-		if(!rotation.IsIdentity())
-		{
-			rotation.Reset();
-			g->SetTransform(&rotation);
+			if(!rotation->IsIdentity())
+			{
+				rotation->TransformPoints(lblpoints, 5);
+				rotation->TransformPoints(labelLineEndPoints, 8);
+			}
+
+			//store current label location
+			this->currentLabelPath.StartFigure();
+			this->currentLabelPath.AddLines(lblpoints, 5);
+			this->currentLabelPath.CloseFigure();
+
+			g->FillRectangle(&bbrush, llabelBox);
+
+			g->DrawString(wslabel.c_str(), -1, &font, llabelBox, &sformat, &fbrush);
+
+			// reset rotation
+			if(!rotation->IsIdentity())
+			{
+				rotation->Reset();
+				g->ResetTransform();
+			}
+
+			this->DrawLabelLine(g, labelLineStartPoints, labelLineEndPoints, zoom);
 		}
 	}
+}
+
+void OverlayObject::DrawLabelLine(Graphics* g, PointF* startPoints, PointF* endPoints, float zoom)
+{
+	Region objRegion(&(this->currentPath));
+	objRegion.Intersect(&(this->currentLabelPath));
+	bool noIntersection = objRegion.IsEmpty(g);	
+
+	if(!noIntersection)
+		return;
+
+	double curDist, minDist, a, b;
+	PointF ps, pe, curStartPoint, curEndPoint;
+	for(int i = 0; i < 8; i++)
+	{
+		ps = startPoints[i];
+
+		for(int j = 0; j < 8; j++)
+		{
+			pe = endPoints[j];
+
+			a = pe.X - ps.X;
+			b = pe.Y - ps.Y;
+
+			curDist = a * a + b * b;
+
+			if(i == 0 && j == 0)
+			{
+				minDist = curDist;
+				curStartPoint = ps;
+				curEndPoint = pe;
+			}
+
+			if(curDist < minDist)
+			{
+				minDist = curDist;
+				curStartPoint = ps;
+				curEndPoint = pe;
+			}
+		}
+	}
+
+	Pen linePen(Color::Black, zoom);
+	g->DrawLine(&linePen, curStartPoint, curEndPoint);
 }
 
 void OverlayObject::MakeVisible(WindowInfo* win)
@@ -5900,9 +5958,9 @@ bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
 {
 	Region* checkRegion;
 	if(label)
-		checkRegion = new Region(&this->currentLabelPath);
+		checkRegion = ::new Region(&this->currentLabelPath);
 	else
-		checkRegion = new Region(&this->currentPath);
+		checkRegion = ::new Region(&this->currentPath);
 
 	RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
 	return checkRegion->IsVisible(selOnScreen);
@@ -5932,6 +5990,7 @@ std::string OverlayObject::ToString()
 	stream << this->GetRX() << "|";
 	stream << this->GetRY() << "|";
 	stream << this->angle << "|";
+	stream << this->labelAngle << "|";
 	stream << this->font << "|";
 	stream << this->fontSize << "|";
 	stream << fgR << "|";
@@ -5956,7 +6015,7 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 	std::stringstream stream;
 	std::string stoken, id, label, font;
 	int bb, bg, br, fr, fg, fb;
-	double x, y, dx, dy, lx, ly, rx, ry, angle;
+	double x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle;
 	float fontSize;
 	while(pos != std::string::npos)
 	{
@@ -6014,30 +6073,34 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 			break;
 
 		case 11:
-			font = stream.str();
+			stream >> labelAngle;
 			break;
 
 		case 12:
-			stream >> fontSize;
+			font = stream.str();
 			break;
 
 		case 13:
-			stream >> fr;
+			stream >> fontSize;
 			break;
 
 		case 14:
-			stream >> fg;
+			stream >> fr;
 			break;
 
 		case 15:
-			stream >> fb;
+			stream >> fg;
 			break;
 
 		case 16:
-			stream >> br;
+			stream >> fb;
 			break;
 
 		case 17:
+			stream >> br;
+			break;
+
+		case 18:
 			stream >> bg;
 			break;
 		}
@@ -6050,7 +6113,7 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 	stream << obj;
 	stream >> bb;
 
-	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, fontSize, Color(fr, fg, fb), Color(br, bg, bb));
+	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle, fontSize, Color(fr, fg, fb), Color(br, bg, bb));
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF overlay objects
@@ -6070,6 +6133,8 @@ BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
 	this->useExternContextMenu = false;
 	this->preventOverlayObjectSelection = false;
 	this->showOverlapping = false;
+	this->hideLabels = false;
+	this->transparantOverlayObjects = false;
 	this->lastObj = NULL;
 	this->lineStart = NULL;
 	this->lineEnd = NULL;
@@ -6159,19 +6224,24 @@ void BetsyNetPDFUnmanagedApi::DrawOverlayObjets(HDC* hdc, WindowInfo* win, int p
 	OverlayObject *curObj;
 	Graphics g(*hdc);
 	std::vector<OverlayObject*>::iterator iter;
+	Matrix rotation, elemRotation;
+	Region boundsRegion(bounds.ToGdipRect());
+	Region objRegion;
 	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
 	{
 		curObj = *iter;
 		curObj->currentPath.Reset();
 		curObj->currentLabelPath.Reset();
-		curObj->Paint(&g, win, pageNo, bounds);
+		rotation.Reset();
+		elemRotation.Reset();
+		curObj->Paint(&g, win, pageNo, &boundsRegion, &objRegion, &rotation, &elemRotation);
 	}
 
 	if(!this->showOverlapping)
 		return;
 
-	Region* allObjects = new Region();
-	Region* overlapping = new Region();
+	Region* allObjects = ::new Region();
+	Region* overlapping = ::new Region();
 	Region* intersection;
 
 	allObjects->MakeEmpty();
@@ -6369,6 +6439,11 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 		}
 		else
 			selectionChanged = curObj->CheckSelectionChanged(win);
+
+		if(curObj->selected && win->selectionRect.dx > 1.0 && win->selectionRect.dy > 1.0 && curObj->CheckIsInSelection(win, true) && curObj->CheckIsInSelection(win, false))
+			curObj->moveAll = true;
+		else
+			curObj->moveAll = false;
 
 		if(selectionChanged)
 		{
@@ -6964,6 +7039,25 @@ extern "C" UNMANAGED_API void __stdcall CallSetShowOverlapping(WindowInfo* win, 
 	if(win != NULL && win->betsyApi != NULL)
 	{
 		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->showOverlapping = value;
+		win->RepaintAsync();
+	}
+}
+
+extern "C" UNMANAGED_API void __stdcall CallSetHideLabels(WindowInfo* win, bool value)
+{
+	if(win != NULL && win->betsyApi != NULL)
+	{
+		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->hideLabels = value;
+		win->RepaintAsync();
+	}
+}
+
+extern "C" UNMANAGED_API void __stdcall CallSetTransparantOverlayObjects(WindowInfo* win, bool value)
+{
+	if(win != NULL && win->betsyApi != NULL)
+	{
+		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->transparantOverlayObjects = value;
+		win->RepaintAsync();
 	}
 }
 
