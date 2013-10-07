@@ -186,6 +186,22 @@ namespace BetsyNetPDF
             SetShowOverlapping_EXT(obj, value);
         }
 
+        [DllImport(DLL, EntryPoint = "CallSetHideLabels", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetHideLabels_EXT(IntPtr obj, bool value);
+
+        public void SetHideLabels(IntPtr obj, bool value)
+        {
+            SetHideLabels_EXT(obj, value);
+        }
+
+        [DllImport(DLL, EntryPoint = "CallSetTransparantOverlayObjects", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetTransparantOverlayObjects_EXT(IntPtr obj, bool value);
+
+        public void SetTransparantOverlayObjects(IntPtr obj, bool value)
+        {
+            SetTransparantOverlayObjects_EXT(obj, value);
+        }
+
         [DllImport(DLL, EntryPoint = "CallSaveAs", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         static private extern void SaveAs_EXT(IntPtr obj);
 

@@ -138,15 +138,12 @@ namespace BetsyNetPDF
         public void SetDeactivateTextSelection(bool value) { wrapper.SetDeactivateTextSelection(value); }
         public void SetPreventOverlayObjectSelection(bool value) { wrapper.SetPreventOverlayObjectSelection(value); }
         public void SetShowOverlapping(bool value) { wrapper.SetShowOverlapping(value); }
+        public void SetHideLabels(bool value) { wrapper.SetHideLabels(value); }
+        public void SetTransparantOverlayObjects(bool value) { wrapper.SetTransparantOverlayObjects(value); }
         public PointF CvtScreen2Doc(Point screenCoords) { return wrapper.CvtScreen2Doc(screenCoords); }
         public Point CvtDoc2Screen(PointF docCoords) { return wrapper.CvtDoc2Screen(docCoords); }
 
         public void FocusViewer() { wrapper.FocusViewer(); }
-
-        //public void ProcessOverlayObject(string id, string label, string font, double x, double y, double dx, double dy, double angle, int fontSize, Color foreColor, Color backColor, bool update)
-        //{
-        //    wrapper.ProcessOverlayObject(id, label, font, x, y, dx, dy, angle, fontSize, foreColor, backColor, update);
-        //}
 
         public void ProcessOverlayObjects(string objs) { wrapper.ProcessOverlayObjects(objs); }
         public void SetSelectedOverlayObjects(string objectIds) { wrapper.SetSelectedOverlayObjects(objectIds); }

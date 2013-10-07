@@ -45,7 +45,7 @@ namespace BetsyNetPDF
     public class OverlayObject
     {
         public string id, label, font;
-        public double x, y, dx, dy, lx, ly, rx, ry, angle;
+        public double x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle;
         public float fontSize;
         public Color foreGround, backGround;
 
@@ -59,7 +59,7 @@ namespace BetsyNetPDF
             return (y / 2540) * 72;
         }
 
-        // {id|label|x|y|dx|dy|lx|ly|rx|ry|angle|font|fontSize|fgR|fgG|fgB|bgR|bgG|bgB}
+        // {id|label|x|y|dx|dy|lx|ly|rx|ry|angle|labelAngle|font|fontSize|fgR|fgG|fgB|bgR|bgG|bgB}
         public override string ToString()
         {
             StringBuilder obj = new StringBuilder();
@@ -76,6 +76,7 @@ namespace BetsyNetPDF
             obj.AppendFormat(CultureInfo.InvariantCulture, "{0}|", rx);
             obj.AppendFormat(CultureInfo.InvariantCulture, "{0}|", ry);
             obj.AppendFormat(CultureInfo.InvariantCulture, "{0}|", angle);
+            obj.AppendFormat(CultureInfo.InvariantCulture, "{0}|", labelAngle);
             obj.AppendFormat("{0}|", font);
             obj.AppendFormat(CultureInfo.InvariantCulture, "{0}|", fontSize);
             obj.AppendFormat("{0}|", foreGround.R);
@@ -150,34 +151,38 @@ namespace BetsyNetPDF
                         break;
 
                     case 11:
-                        oo.font = token;
+                        double.TryParse(token, System.Globalization.NumberStyles.Any, CultureInfo.InvariantCulture, out oo.labelAngle);
                         break;
 
                     case 12:
-                        float.TryParse(token, System.Globalization.NumberStyles.Any, CultureInfo.InvariantCulture, out oo.fontSize);
+                        oo.font = token;
                         break;
 
                     case 13:
-                        int.TryParse(token, out fgR);
+                        float.TryParse(token, System.Globalization.NumberStyles.Any, CultureInfo.InvariantCulture, out oo.fontSize);
                         break;
 
                     case 14:
-                        int.TryParse(token, out fgG);
+                        int.TryParse(token, out fgR);
                         break;
 
                     case 15:
-                        int.TryParse(token, out fgB);
+                        int.TryParse(token, out fgG);
                         break;
 
                     case 16:
-                        int.TryParse(token, out bgR);
+                        int.TryParse(token, out fgB);
                         break;
 
                     case 17:
-                        int.TryParse(token, out bgG);
+                        int.TryParse(token, out bgR);
                         break;
 
                     case 18:
+                        int.TryParse(token, out bgG);
+                        break;
+
+                    case 19:
                         int.TryParse(token, out bgB);
                         break;
                 }
