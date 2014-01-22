@@ -5501,7 +5501,7 @@ void CrashHandlerMessage()
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF overlay objects
 ///////////////////////////////////////////////////////////////////////////////
-OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround)
+OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround, std::string subObjects)
 {
 	this->id = id;
 	this->label = label;
@@ -5517,14 +5517,9 @@ OverlayObject::OverlayObject(std::string id, std::string label, std::string font
 	this->foreGround = foreGround;
 	this->backGround = backGround;
 
-	this->SetX(x);
-	this->SetY(y);
-	this->SetDX(dx);
-	this->SetDY(dy);
-	this->SetLX(lx);
-	this->SetLY(ly);
-	this->SetRX(rx);
-	this->SetRY(ry);
+	this->SetDimensions(x, y, dx, dy, lx, ly, rx, ry);
+
+	this->CreateSubObjects(subObjects);
 }
 
 void OverlayObject::Clone(OverlayObject* oo)
@@ -5537,14 +5532,30 @@ void OverlayObject::Clone(OverlayObject* oo)
 	this->foreGround = oo->foreGround;
 	this->backGround = oo->backGround;
 
-	this->SetX(oo->GetX());
-	this->SetY(oo->GetY());
-	this->SetDX(oo->GetDX());
-	this->SetDY(oo->GetDY());
-	this->SetLX(oo->GetLX());
-	this->SetLY(oo->GetLY());
-	this->SetRX(oo->GetRX());
-	this->SetRY(oo->GetRY());
+	this->SetDimensions(oo->GetX(), oo->GetY(), oo->GetDX(), oo->GetDY(), oo->GetLX(), oo->GetLY(), oo->GetRX(), oo->GetRY());
+}
+
+void OverlayObject::CreateSubObjects(std::string subObjects)
+{
+	this->subObjects.clear();
+
+	if(subObjects.length() < 1)
+		return;
+
+	SubObject* so;
+	std::string objToken;
+	size_t pos = subObjects.find_first_of(">");
+	bool found;
+	while(pos != std::string::npos)
+	{
+		objToken = subObjects.substr(0, pos + 1);
+		subObjects = subObjects.substr(pos + 1);
+
+		so = SubObject::CreateFromString(objToken);
+		this->subObjects.push_back(so);
+		
+		pos = subObjects.find_first_of(">");
+	}
 }
 
 double OverlayObject::GetX()
@@ -5599,55 +5610,37 @@ double OverlayObject::GetRY()
 	return (this->ry_dpi / 72.0) * 2540.0;
 }
 
-void OverlayObject::SetX(double x)
+void OverlayObject::SetDimensions(double x, double y, double dx, double dy, double lx, double ly, double rx, double ry)
 {
 	this->x_dpi = (x / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetY(double y)
-{
 	this->y_dpi = (y / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetDX(double dx)
-{
 	if(dx <= 0.0)
-		this->dx_dpi = -1;
+	{
+		if(dy > 0.0)
+			this->dx_dpi = 1;
+		else
+			this->dx_dpi = -1;
+	}
 	else
 		this->dx_dpi = (dx / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetDY(double dy)
-{
 	if(dy <= 0.0)
-		this->dy_dpi = -1;
+	{
+		if(dx > 0.0)
+			this->dy_dpi = 1;
+		else
+			this->dy_dpi = -1;
+	}
 	else
 		this->dy_dpi = (dy / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetLX(double lx)
-{
 	if(lx <= 0.0)
 		this->lx_dpi = -1;
 	else
 		this->lx_dpi = (lx / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetLY(double ly)
-{
 	if(ly <= 0.0)
 		this->ly_dpi = -1;
 	else
 		this->ly_dpi = (ly / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetRX(double rx)
-{
 	this->rx_dpi = (rx / 2540.0) * 72.0;
-}
-
-void OverlayObject::SetRY(double ry)
-{
 	this->ry_dpi = (ry / 2540.0) * 72.0;
 }
 
@@ -5709,6 +5702,10 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* boun
 		bbox.Width = this->dx_dpi * zoom;
 		bbox.Height = this->dy_dpi * zoom;
 	}
+	if(bbox.Width <= 1.0)
+		bbox.Width = 1.0;
+	if(bbox.Height <= 1.0)
+		bbox.Height = 1.0;
 
 	PointF objPoints[5] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y) };
 	PointF labelLineStartPoints[8] = 
@@ -5745,7 +5742,7 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* boun
 	this->currentPath.AddLines(objPoints, 5);
 	this->currentPath.CloseFigure();
 
-	objRegion = new Region(&(this->currentPath));
+	objRegion = ::new Region(&(this->currentPath));
 	objRegion->Intersect(bounds);
 	if(objRegion->IsEmpty(g))
 	{
@@ -5765,10 +5762,11 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* boun
 		fbrush.SetColor(Color::White);
 	}
 
+
+	Color curBg;
+	bbrush.GetColor(&curBg);
 	if(betsyApi->transparantOverlayObjects)
-	{
-		Color curBg;
-		bbrush.GetColor(&curBg);
+	{		
 		Color transpBg(168, curBg.GetR(), curBg.GetG(), curBg.GetB());
 		bbrush.SetColor(transpBg);
 	}
@@ -5777,31 +5775,42 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* boun
 
 	StringFormat sformat;
 	sformat.SetAlignment(StringAlignmentNear);
+	if(this->dy_dpi == 1.0)
+	{
+		PointF startPoint(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2.0);
+		PointF end1(startPoint.X - 10.0 * zoom, startPoint.Y - 5.0 * zoom);
+		PointF end2(end1.X, startPoint.Y + 5.0 * zoom);
+		g->DrawLine(new Pen(&bbrush, bbox.Height), startPoint, end1);
+		g->DrawLine(new Pen(&bbrush, bbox.Height), startPoint, end2);
+	}
+
+	std::vector<SubObject*>::iterator iter;
+	SubObject* curObj;
+	for(iter = this->subObjects.begin(); iter != this->subObjects.end(); iter++)
+	{
+		curObj = *iter;
+		curObj->Paint(g, win, bbox, curBg);
+	}
+
+	// reset rotation
+	if(!rotation->IsIdentity())
+	{
+		rotation->Reset();
+		g->ResetTransform();
+	}
+
 	// paint lable fg
 	if(this->dx_dpi <= 0.0 && this->dy_dpi <= 0.0)
 	{
 		g->DrawString(wslabel.c_str(), -1, &font, bbox, &sformat, &fbrush);
-
-		// reset rotation
-		if(!rotation->IsIdentity())
-		{
-			rotation->Reset();
-			g->ResetTransform();
-		}
 	}
 	else
 	{
-		// reset rotation
-		if(!rotation->IsIdentity())
-		{
-			rotation->Reset();
-			g->ResetTransform();
-		}
-
 		if(!betsyApi->hideLabels)
 		{
 			PointF labelPoint;
 
+			this->currentPath.GetBounds(&bbox);
 			// draw label below object
 			if(bbox.Width > bbox.Height)
 				labelPoint = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height + 25 * zoom);
@@ -5968,8 +5977,7 @@ bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
 
 std::string OverlayObject::ToString()
 {
-	std::stringstream stream;
-
+	std::stringstream stream;	
 	int fgR, fgG, fgB, bgR, bgG, bgB;
 	fgR = this->foreGround.GetR();
 	fgG = this->foreGround.GetG();
@@ -5998,7 +6006,7 @@ std::string OverlayObject::ToString()
 	stream << fgB << "|";
 	stream << bgR << "|";	
 	stream << bgG << "|";
-	stream << bgB;	
+	stream << bgB << "|";
 	stream << "}";
 
 	return stream.str();
@@ -6013,7 +6021,7 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 	int loop = 0;
 	size_t pos = obj.find_first_of("|");
 	std::stringstream stream;
-	std::string stoken, id, label, font;
+	std::string stoken, id, label, font, subObjects;
 	int bb, bg, br, fr, fg, fb;
 	double x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle;
 	float fontSize;
@@ -6103,7 +6111,13 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 		case 18:
 			stream >> bg;
 			break;
+
+		case 19:
+			stream >> bb;
+			break;
 		}
+
+		if( loop == 19)	break;
 
 		loop++;
 		pos = obj.find_first_of("|");
@@ -6111,12 +6125,130 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 
 	stream = std::stringstream("");
 	stream << obj;
-	stream >> bb;
+	stream >> subObjects;
 
-	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle, fontSize, Color(fr, fg, fb), Color(br, bg, bb));
+	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle, fontSize, Color(fr, fg, fb), Color(br, bg, bb), subObjects);
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF overlay objects
+///////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////
+// BetsyNetPDF sub objects
+///////////////////////////////////////////////////////////////////////////////
+SubObject::SubObject(double x, double y, double dx, double dy, double angle)
+{
+	this->angle = angle;
+	this->SetDimensions(x, y, dx, dy);
+}
+
+void SubObject::SetDimensions(double x, double y, double dx, double dy)
+{
+	this->x_dpi = (x / 2540.0) * 72.0;
+	this->y_dpi = (y / 2540.0) * 72.0;
+	if(dx <= 0.0)
+		this->dx_dpi = 1;
+	else
+		this->dx_dpi = (dx / 2540.0) * 72.0;
+	if(dy <= 0.0)
+		this->dy_dpi = 1;
+	else
+		this->dy_dpi = (dy / 2540.0) * 72.0;
+}
+
+void SubObject::Paint(Graphics* g, WindowInfo* win, RectF oobox, Color ooColor)
+{
+	float zoom = win->dm->ZoomReal();
+
+	RectF		bbox( oobox.X + (this->x_dpi * zoom), (oobox.Y + oobox.Height) - (this->y_dpi * zoom), 0, 0);
+
+	if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
+	{
+		bbox.Width = this->dx_dpi * zoom;
+		bbox.Height = this->dy_dpi * zoom;
+		bbox.Y = bbox.Y - bbox.Height;
+	}
+
+	if(bbox.Width <= 1.0)
+		bbox.Width = 1.0;
+	if(bbox.Height <= 1.0)
+		bbox.Height = 1.0;
+
+	// calc rotation
+	Matrix subRotation;
+	Matrix currentWolrdRot;
+	if(this->angle != 0.0)
+	{
+		subRotation.RotateAt(-this->angle, PointF(bbox.X, bbox.Y), Gdiplus::MatrixOrderAppend);
+		g->GetTransform(&currentWolrdRot);
+		currentWolrdRot.Multiply(&subRotation);
+		g->SetTransform(&currentWolrdRot);
+	}
+
+	Color col = Color((ooColor.GetR() + 128) % 256, (ooColor.GetG() + 128) % 256, (ooColor.GetB() + 128) % 256);
+	float width = 1.0;
+	Pen pen(col, width * zoom);
+	g->DrawRectangle(&pen, bbox);
+
+	if(this->angle != 0.0)
+	{
+		subRotation.Invert();
+		currentWolrdRot.Multiply(&subRotation);
+		g->SetTransform(&currentWolrdRot);
+	}
+}
+
+SubObject* SubObject::CreateFromString(std::string sobj)
+{
+	// remove <...>
+	sobj = sobj.substr(1, sobj.length() - 1);
+	sobj = sobj.substr(0, sobj.length() - 1);
+
+	int loop = 0;
+	size_t pos = sobj.find_first_of("|");
+	std::stringstream stream;
+	std::string stoken;
+	double x, y, dx, dy, angle;
+	while(pos != std::string::npos)
+	{
+		stream = std::stringstream("");
+
+		stoken = sobj.substr(0, pos);
+		sobj = sobj.substr(pos + 1);
+
+		stream << stoken;
+
+		switch(loop)
+		{
+			case 0:
+				stream >> x;
+				break;
+
+			case 1:
+				stream >> y;
+				break;
+
+			case 2:
+				stream >> dx;
+				break;
+
+			case 3:
+				stream >> dy;
+				break;
+		}
+
+		loop++;
+		pos = sobj.find_first_of("|");
+	}
+
+	stream = std::stringstream("");
+	stream << sobj;
+	stream >> angle;
+
+	return new SubObject(x, y, dx, dy, angle);
+}
+///////////////////////////////////////////////////////////////////////////////
+// end BetsyNetPDF sub objects
 ///////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -6433,7 +6565,10 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 		{
 			if(curObj->CheckIsInSelection(win))
 			{
-				curObj->selected = true;
+				if(win->selectionRect.dx == 1 && win->selectionRect.dy == 1 && curObj->selected)
+					curObj->selected = false;
+				else
+					curObj->selected = true;
 				notify = true;
 			}
 		}
@@ -6530,6 +6665,33 @@ char* BetsyNetPDFUnmanagedApi::GetAllOverlayObjects()
 	{
 		oo = *iter;
 		objects << oo->ToString();
+	}
+
+	std::string sobjects = objects.str();
+	size_t len = sobjects.length() + 1;
+	char* ret = new char[len];
+	strcpy(ret, sobjects.c_str());
+
+	return ret;
+}
+
+char* BetsyNetPDFUnmanagedApi::GetOverlayObjectAtPosition(WindowInfo* win, double x, double y)
+{
+	x = (x / 2540.0) * 72.0;
+	y = (y / 2540.0) * 72.0;
+	y = win->dm->GetPageInfo(1)->page.dy - y;
+	PointI val = win->dm->CvtToScreen(1, PointD(x, y));
+
+	win->selectionRect = RectI(val.x, val.y, 1, 1);
+
+	OverlayObject* oo;
+	std::stringstream objects;
+	std::vector<OverlayObject*>::iterator iter;
+	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+	{
+		oo = *iter;
+		if(oo->CheckIsInSelection(win))
+			objects << oo->ToString();
 	}
 
 	std::string sobjects = objects.str();
@@ -6755,7 +6917,7 @@ void BetsyNetPDFUnmanagedApi::ClearOverlayObjectList(WindowInfo* win)
 	win->RepaintAsync();
 }
 
-void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd)
+void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting)
 {
 	i.bgColor = gGlobalPrefs->mainWindowBackground;
     i.forwardSearch = gGlobalPrefs->forwardSearch;
@@ -6772,7 +6934,12 @@ void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, 
 
 	std::string ssumatra("\"BetsyNetPDF.dll\" ");
 	std::string splugin(" -plugin ");
-	std::string scmd = ssumatra + "\"" + file + "\"" + splugin + hwnd;
+	std::string sprinting(" -print-dialog -exit-on-print");
+	std::string scmd;
+	if(directPrinting)
+		scmd = ssumatra + "\"" + file + "\"" + sprinting;
+	else
+		scmd = ssumatra + "\"" + file + "\"" + splugin + hwnd;
 
 	Widen<wchar_t> to_wstring;
 	std::wstring wscmd = to_wstring(scmd);
@@ -6786,7 +6953,7 @@ void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, 
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF unmanged api callers
 ///////////////////////////////////////////////////////////////////////////////
-extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu,
+extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting,
 	OnSelectionChangedDelegate selChangedPtr, 
 	OnMouseClickDelegate mouseClickPointer, 
 	OnDeleteDelegate onDeletePointer, 
@@ -6848,7 +7015,7 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
 	}
 
     CommandLineInfo i;
-	BetsyNetPDFUnmanagedApi::GetFakedCmd(i, file, hwnd);
+	BetsyNetPDFUnmanagedApi::GetFakedCmd(i, file, hwnd, directPrinting);
 
     SetCurrentLang(i.lang ? i.lang : gGlobalPrefs->uiLanguage);
 
@@ -7207,6 +7374,14 @@ extern "C" UNMANAGED_API char* __stdcall CallGetAllOverlayObjects(WindowInfo* wi
 	if(win != NULL && win->betsyApi != NULL)
 	{
 		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetAllOverlayObjects();
+	}
+}
+
+extern "C" UNMANAGED_API char* __stdcall CallGetOverlayObjectAtPosition(WindowInfo* win, double x, double y)
+{
+	if(win != NULL && win->betsyApi != NULL)
+	{
+		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetOverlayObjectAtPosition(win, x, y);
 	}
 }
 
