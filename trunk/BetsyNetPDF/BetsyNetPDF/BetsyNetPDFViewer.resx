@@ -132,11 +132,17 @@
   <data name="barBtnQuit.Caption" xml:space="preserve">
     <value>Quit</value>
   </data>
+  <data name="barButtonItem8.Caption" xml:space="preserve">
+    <value>Print with labels</value>
+  </data>
+  <data name="barButtonItem9.Caption" xml:space="preserve">
+    <value>Activated pdf ctrl</value>
+  </data>
+  <data name="barButtonItem10.Caption" xml:space="preserve">
+    <value>direct printing</value>
+  </data>
   <data name="barButtonItem1.Caption" xml:space="preserve">
     <value>Rotate selected + 10°</value>
-  </data>
-  <data name="barButtonItem5.Caption" xml:space="preserve">
-    <value>Get XY-Coords</value>
   </data>
   <data name="barCheckItem1.Caption" xml:space="preserve">
     <value>MouseOver</value>
@@ -159,14 +165,11 @@
   <data name="barChkDeactivateTS.Caption" xml:space="preserve">
     <value>Deactivate text selection</value>
   </data>
-  <data name="barBtnTextCoordsLayer.Caption" xml:space="preserve">
-    <value>Get text and coords from layer</value>
+  <data name="barSubItem2.Caption" xml:space="preserve">
+    <value>Coords + Layers</value>
   </data>
-  <data name="barChkShowOverlapping.Caption" xml:space="preserve">
-    <value>Show overlapping</value>
-  </data>
-  <data name="barCheckItem4.Caption" xml:space="preserve">
-    <value>Transparency</value>
+  <data name="barSubItem3.Caption" xml:space="preserve">
+    <value>Presentation</value>
   </data>
   <data name="bar2.Text" xml:space="preserve">
     <value>Main menu</value>
@@ -183,7 +186,7 @@
     <value>0, 0</value>
   </data>
   <data name="barDockControlTop.Size" type="System.Drawing.Size, System.Drawing">
-    <value>1186, 73</value>
+    <value>1366, 51</value>
   </data>
   <data name="&gt;&gt;barDockControlTop.Name" xml:space="preserve">
     <value>barDockControlTop</value>
@@ -204,7 +207,7 @@
     <value>0, 527</value>
   </data>
   <data name="barDockControlBottom.Size" type="System.Drawing.Size, System.Drawing">
-    <value>1186, 23</value>
+    <value>1366, 23</value>
   </data>
   <data name="&gt;&gt;barDockControlBottom.Name" xml:space="preserve">
     <value>barDockControlBottom</value>
@@ -222,10 +225,10 @@
     <value>Left</value>
   </data>
   <data name="barDockControlLeft.Location" type="System.Drawing.Point, System.Drawing">
-    <value>0, 73</value>
+    <value>0, 51</value>
   </data>
   <data name="barDockControlLeft.Size" type="System.Drawing.Size, System.Drawing">
-    <value>0, 454</value>
+    <value>0, 476</value>
   </data>
   <data name="&gt;&gt;barDockControlLeft.Name" xml:space="preserve">
     <value>barDockControlLeft</value>
@@ -243,10 +246,10 @@
     <value>Right</value>
   </data>
   <data name="barDockControlRight.Location" type="System.Drawing.Point, System.Drawing">
-    <value>1186, 73</value>
+    <value>1366, 51</value>
   </data>
   <data name="barDockControlRight.Size" type="System.Drawing.Size, System.Drawing">
-    <value>0, 454</value>
+    <value>0, 476</value>
   </data>
   <data name="&gt;&gt;barDockControlRight.Name" xml:space="preserve">
     <value>barDockControlRight</value>
@@ -267,7 +270,7 @@
     <value>6, 13</value>
   </data>
   <data name="$this.ClientSize" type="System.Drawing.Size, System.Drawing">
-    <value>1186, 550</value>
+    <value>1366, 550</value>
   </data>
   <data name="$this.Text" xml:space="preserve">
     <value>BetsyNetPDF</value>
@@ -308,16 +311,16 @@
   <data name="&gt;&gt;barBtnQuit.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
+  <data name="&gt;&gt;barButtonItem8.Name" xml:space="preserve">
+    <value>barButtonItem8</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem8.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
   <data name="&gt;&gt;barButtonItem1.Name" xml:space="preserve">
     <value>barButtonItem1</value>
   </data>
   <data name="&gt;&gt;barButtonItem1.Type" xml:space="preserve">
-    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
-  </data>
-  <data name="&gt;&gt;barButtonItem5.Name" xml:space="preserve">
-    <value>barButtonItem5</value>
-  </data>
-  <data name="&gt;&gt;barButtonItem5.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;barCheckItem1.Name" xml:space="preserve">
@@ -362,11 +365,41 @@
   <data name="&gt;&gt;barChkDeactivateTS.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarCheckItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
+  <data name="&gt;&gt;barSubItem2.Name" xml:space="preserve">
+    <value>barSubItem2</value>
+  </data>
+  <data name="&gt;&gt;barSubItem2.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarSubItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem5.Name" xml:space="preserve">
+    <value>barButtonItem5</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem5.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
   <data name="&gt;&gt;barBtnTextCoordsLayer.Name" xml:space="preserve">
     <value>barBtnTextCoordsLayer</value>
   </data>
   <data name="&gt;&gt;barBtnTextCoordsLayer.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem7.Name" xml:space="preserve">
+    <value>barButtonItem7</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem7.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barSubItem3.Name" xml:space="preserve">
+    <value>barSubItem3</value>
+  </data>
+  <data name="&gt;&gt;barSubItem3.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarSubItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barCheckItem4.Name" xml:space="preserve">
+    <value>barCheckItem4</value>
+  </data>
+  <data name="&gt;&gt;barCheckItem4.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarCheckItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;barChkShowOverlapping.Name" xml:space="preserve">
     <value>barChkShowOverlapping</value>
@@ -398,11 +431,17 @@
   <data name="&gt;&gt;barButtonItem4.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
-  <data name="&gt;&gt;barCheckItem4.Name" xml:space="preserve">
-    <value>barCheckItem4</value>
+  <data name="&gt;&gt;barButtonItem9.Name" xml:space="preserve">
+    <value>barButtonItem9</value>
   </data>
-  <data name="&gt;&gt;barCheckItem4.Type" xml:space="preserve">
-    <value>DevExpress.XtraBars.BarCheckItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  <data name="&gt;&gt;barButtonItem9.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem10.Name" xml:space="preserve">
+    <value>barButtonItem10</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem10.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;$this.Name" xml:space="preserve">
     <value>BetsyNetPDFViewer</value>
@@ -418,5 +457,20 @@
   </data>
   <data name="barButtonItem4.Caption" xml:space="preserve">
     <value>Editor Test</value>
+  </data>
+  <data name="barButtonItem5.Caption" xml:space="preserve">
+    <value>Get XY-Coords</value>
+  </data>
+  <data name="barBtnTextCoordsLayer.Caption" xml:space="preserve">
+    <value>Get text and coords from layer</value>
+  </data>
+  <data name="barChkShowOverlapping.Caption" xml:space="preserve">
+    <value>Show overlapping</value>
+  </data>
+  <data name="barCheckItem4.Caption" xml:space="preserve">
+    <value>Transparency</value>
+  </data>
+  <data name="barButtonItem7.Caption" xml:space="preserve">
+    <value>Get Layers</value>
   </data>
 </root>

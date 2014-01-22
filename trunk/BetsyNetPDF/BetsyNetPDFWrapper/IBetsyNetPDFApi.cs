@@ -42,7 +42,7 @@ namespace BetsyNetPDF
 {
     interface IBetsyNetPDFApi
     {
-        IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu,
+        IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting,
             BetsyNetPDFWrapper.CallBackOnSelectionChanged onSelectionChangedDelegate,
             BetsyNetPDFWrapper.CallBackOnMouseClick onMouseClickDelegate,
             BetsyNetPDFWrapper.CallBackOnDelete onDeleteDelegate,
@@ -84,6 +84,7 @@ namespace BetsyNetPDF
         string GetSelectedOverlayObjectIds(IntPtr win);
         string GetSelectedOverlayObjects(IntPtr win);
         string GetAllOverlayObjects(IntPtr win);
+        string GetOverlayObjectAtPosition(IntPtr win, double x, double y);
         void ClearOverlayObjectList(IntPtr win);
     }
 }
