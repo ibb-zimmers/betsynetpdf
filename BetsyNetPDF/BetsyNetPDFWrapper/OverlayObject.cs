@@ -84,7 +84,8 @@ namespace BetsyNetPDF
             obj.AppendFormat("{0}|", foreGround.B);
             obj.AppendFormat("{0}|", backGround.R);
             obj.AppendFormat("{0}|", backGround.G);
-            obj.AppendFormat("{0}", backGround.B);
+            obj.AppendFormat("{0}|", backGround.B);
+            obj.Append("");
             obj.Append("}");
 
             return obj.ToString();

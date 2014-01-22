@@ -48,6 +48,11 @@ namespace BetsyNetPDF
 {
     public class BetsyNetPDFEditor
     {
+        public static void AttachFiles2PDF(string pdfFile, List<string> attachments)
+        {
+
+        }
+
         public static void ExportOverlayObjects2PDF(string input, string output, string sobjects, string layerTitle)
         {
             ExportOverlayObjects2PDF(input, output, OverlayObject.CreateOverlayObjectListFromString(sobjects), layerTitle);
@@ -276,16 +281,24 @@ namespace BetsyNetPDF
                 if (ocgID == null)
                     return layerObjs;
 
-                PdfArray content = page.GetAsArray(PdfName.CONTENTS);
-                if (content == null)
-                    return layerObjs;
+                List<PdfObject> contents;
+                PdfArray contentArray = page.GetAsArray(PdfName.CONTENTS);
+                if (contentArray != null)
+                    contents = contentArray.ArrayList;
+                else
+                {
+                    contents = new List<PdfObject>();
+                    PdfObject contentStream = page.Get(PdfName.CONTENTS);
+                    if (contentStream != null)
+                        contents.Add(contentStream);
+                }
 
                 PRIndirectReference streamRef;
                 PRStream stream;
                 PRTokeniser streamTok;
                 PdfContentParser parser;
                 byte[] streamBytes;
-                foreach (PdfObject pdfo in content.ArrayList)
+                foreach (PdfObject pdfo in contents)
                 {
                     streamRef = pdfo as PRIndirectReference;
                     if (streamRef == null)

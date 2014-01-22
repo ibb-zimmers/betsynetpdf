@@ -42,6 +42,7 @@ using System.Text;
 using System.Windows.Forms;
 using BetsyNetPDF.Parser;
 using DevExpress.XtraEditors;
+using System.IO;
 
 
 namespace BetsyNetPDF
@@ -54,7 +55,10 @@ namespace BetsyNetPDF
         public BetsyNetPDFViewer()
         {
             InitializeComponent();
+        }
 
+        private void InitPdfCtrl()
+        {
             ctrl = new BetsyNetPDFCtrl(null);
             ctrl.Dock = DockStyle.Fill;
             ctrl.BetsyNetPDFMouseClickEvent += new BetsyNetPDFCtrl.BetsyNetPDFMouseClickEventHandler(ctrl_BetsyNetPDFMouseClickEvent);
@@ -103,8 +107,8 @@ namespace BetsyNetPDF
             oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", y);
             if (barChkWithDimension.Checked)
             {
-                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 1000);
-                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 1000);
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 2000);
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0);
             }
             else
             {
@@ -114,8 +118,8 @@ namespace BetsyNetPDF
             oo.Append("-1|-1|");
             if (barChkWithDimension.Checked)
             {
-                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 500);
-                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", -500);
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0);
+                oo.AppendFormat(CultureInfo.InvariantCulture, "{0}|", 0);
             }
             else
             {
@@ -194,7 +198,8 @@ namespace BetsyNetPDF
 
         private void barBtnTextCoordsLayer_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
-            List<LocatedObject> locObjs = BetsyNetPDFEditor.ExtractTextAndCoordsFromLayer(ctrl.CurrentFile, "BETSY", ".*");
+            string layer = FormTextInput.ShowInputDialog("Enter layer...", "Layer:", "");
+            List<LocatedObject> locObjs = BetsyNetPDFEditor.ExtractTextAndCoordsFromLayer(ctrl.CurrentFile, layer, ".*");
             IOrderedEnumerable<LocatedObject> ordered = locObjs.OrderBy(x => x.Text);
             string text = "";
             foreach (LocatedObject obj in ordered)
@@ -211,6 +216,45 @@ namespace BetsyNetPDF
         private void barCheckItem4_CheckedChanged(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
             ctrl.SetTransparantOverlayObjects(barCheckItem4.Checked);
+        }
+
+        private void barButtonItem7_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            List<string> layers = BetsyNetPDFEditor.GetLayers(ctrl.CurrentFile);
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Available layers:");
+            foreach (string l in layers)
+                sb.AppendLine(l);
+
+            MessageBox.Show(sb.ToString(), "Layers", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void barButtonItem8_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            ctrl.PrintWithLabels();
+        }
+
+        private void barButtonItem9_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            InitPdfCtrl();
+        }
+
+        private void barButtonItem10_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            String[] pdffiles = Directory.GetFiles(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "*.pdf");
+            string files = "";
+            foreach (string f in pdffiles)
+            {
+                if (string.IsNullOrEmpty(files))
+                {
+                    files += f;
+                    continue;
+                }
+
+                files += "\" \"" + f;
+            }
+
+            BetsyNetPDFCtrl.DirectPrinting(files);
         }
     }
 }

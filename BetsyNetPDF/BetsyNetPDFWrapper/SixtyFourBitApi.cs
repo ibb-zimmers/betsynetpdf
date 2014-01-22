@@ -48,7 +48,7 @@ namespace BetsyNetPDF
         #region IBetsyNetPDFApi Member
 
         [DllImport(DLL, EntryPoint = "CallBetsyNetPDFViewer", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
-        static private extern IntPtr BetsyNetPDFViewer_EXT(string hwnd, string file, bool useExternContextMenu,
+        static private extern IntPtr BetsyNetPDFViewer_EXT(string hwnd, string file, bool useExternContextMenu, bool directPrinting,
             IntPtr onSelectionChangedDelegate,
             IntPtr onMouseClickDelegate,
             IntPtr onDeleteDelegate,
@@ -58,7 +58,7 @@ namespace BetsyNetPDF
             IntPtr onDistanceMeasuredDelegate,
             IntPtr onLineDrawnDelegate);
 
-        public IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu,
+        public IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting,
             BetsyNetPDFWrapper.CallBackOnSelectionChanged onSelectionChangedDelegate,
             BetsyNetPDFWrapper.CallBackOnMouseClick onMouseClickDelegate,
             BetsyNetPDFWrapper.CallBackOnDelete onDeleteDelegate,
@@ -77,7 +77,7 @@ namespace BetsyNetPDF
             IntPtr distancePtr = Marshal.GetFunctionPointerForDelegate(onDistanceMeasuredDelegate);
             IntPtr linePtr = Marshal.GetFunctionPointerForDelegate(onLineDrawnDelegate);
 
-            return BetsyNetPDFViewer_EXT(hwnd, file, useExternContextMenu, onSelectionChangedDelegatePtr, onMouseClickDelegatePtr, onDeleteDelegatePtr, onObjectMovedDelegatePtr, onReqContextMenuPtr, onMouseOverPtr, distancePtr, linePtr);
+            return BetsyNetPDFViewer_EXT(hwnd, file, useExternContextMenu, directPrinting, onSelectionChangedDelegatePtr, onMouseClickDelegatePtr, onDeleteDelegatePtr, onObjectMovedDelegatePtr, onReqContextMenuPtr, onMouseOverPtr, distancePtr, linePtr);
         }
 
         [DllImport(DLL, EntryPoint = "CallOpenNewFile", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
@@ -334,6 +334,17 @@ namespace BetsyNetPDF
         public string GetAllOverlayObjects(IntPtr obj)
         {
             IntPtr ptr = GetAllOverlayObjects_EXT(obj);
+            string value = Marshal.PtrToStringAnsi(ptr);
+
+            return value;
+        }
+
+        [DllImport(DLL, EntryPoint = "CallGetOverlayObjectAtPosition", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern IntPtr GetOverlayObjectAtPosition_EXT(IntPtr obj, double x, double y);
+
+        public string GetOverlayObjectAtPosition(IntPtr obj, double x, double y)
+        {
+            IntPtr ptr = GetOverlayObjectAtPosition_EXT(obj, x, y);
             string value = Marshal.PtrToStringAnsi(ptr);
 
             return value;

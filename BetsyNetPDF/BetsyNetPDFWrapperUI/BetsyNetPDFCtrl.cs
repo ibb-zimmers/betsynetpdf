@@ -127,6 +127,28 @@ namespace BetsyNetPDF
             currentFile = file;
         }
 
+        public void PrintWithLabels()
+        {
+            if (string.IsNullOrEmpty(currentFile))
+                return;
+
+            string fName = Path.GetFileNameWithoutExtension(currentFile);
+            string ext = Path.GetExtension(currentFile);
+            string file = fName + "_BetsyNetPDF" + ext;
+
+            string sobjects = this.GetAllOverlayObjects();
+            BetsyNetPDFEditor.ExportOverlayObjects2PDF(currentFile, Path.GetTempPath() + file, sobjects, "BetsyNetPDF");
+
+            BetsyNetPDFWrapper pwrapper = new BetsyNetPDFWrapper();
+            pwrapper.DirectPrinting(Path.GetTempPath() + file);
+        }
+
+        public static void DirectPrinting(string file)
+        {
+            BetsyNetPDFWrapper pwrapper = new BetsyNetPDFWrapper();
+            pwrapper.DirectPrinting(file);
+        }
+
         public bool IsDocOpen()
         {
             return wrapper.IsDocOpen();
@@ -152,6 +174,7 @@ namespace BetsyNetPDF
         public string GetSelectedOverlayObjectIds() { return wrapper.GetSelectedOverlayObjectIds(); }
         public string GetSelectedOverlayObjects() { return wrapper.GetSelectedOverlayObjects(); }
         public string GetAllOverlayObjects() { return wrapper.GetAllOverlayObjects(); }
+        public string GetOverlayObjectAtPosition(double x, double y) { return wrapper.GetOverlayObjectAtPosition(x, y); }
         public void ClearOverlayObjects() { wrapper.ClearOverlayObjectList(); }
 
         public void RotateSelectedOverlayObjects(double angle)
