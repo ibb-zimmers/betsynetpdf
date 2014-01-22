@@ -202,7 +202,22 @@ WindowInfo *CreateAndShowWindowInfo();
          pCType_->widen(pSrcBeg, pSrcBeg + srcLen, &tmp[0]); 
          return std::basic_string<E, T, A>(&tmp[0], srcLen); 
      } 
- }; 
+ };
+
+class SubObject
+{
+public:
+	double angle;
+
+	SubObject(double x, double y, double dx, double dy, double angle);
+	void SetDimensions(double x, double y, double dx, double dy);
+	void Paint(Graphics* g, WindowInfo* win, RectF oobox, Color ooColor);
+	std::string ToString();
+	static SubObject* CreateFromString(std::string sobj);
+
+private:
+	double x_dpi, y_dpi, dx_dpi, dy_dpi;
+};
 
 class OverlayObject
 {
@@ -212,12 +227,12 @@ public:
 	int page;
 	float fontSize;
 	bool selected, bold, italic, moveAll;
-	//Region currentRegion, currentLabelRegion;
 	GraphicsPath currentPath, currentLabelPath;
 	Color foreGround, backGround;
 
-	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround);
+	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround, std::string subObjects);
 	void Clone(OverlayObject* oo);
+	void CreateSubObjects(std::string subObjects);
 	double GetX();
 	double GetY();
 	double GetDX();
@@ -226,15 +241,7 @@ public:
 	double GetLY();
 	double GetRX();
 	double GetRY();
-	void SetX(double x);
-	void SetY(double y);
-	void SetDX(double dx);
-	void SetDY(double dy);
-	void SetLX(double lx);
-	void SetLY(double ly);
-	void SetRX(double rx);
-	void SetRY(double ry);
-	//void InitLXY(WindowInfo* win);
+	void SetDimensions(double x, double y, double dx, double dy, double lx, double ly, double rx, double ry);
 	void Move(double deltaX, double deltaY, bool moveLabel);
 	void Paint(Graphics* g, WindowInfo* win, int pageNo, Region* bounds, Region* objRegion, Matrix* rotation, Matrix* elemRotation);
 	void MakeVisible(WindowInfo* win);
@@ -249,6 +256,7 @@ public:
 
 private:
 	double x_dpi, y_dpi, dx_dpi, dy_dpi, lx_dpi, ly_dpi, rx_dpi, ry_dpi;
+	std::vector<SubObject*> subObjects; 
 
 	void DrawLabelLine(Graphics* g, PointF* startPoints, PointF* endPoints, float zoom);
 };
@@ -312,6 +320,7 @@ public:
 	char* GetSelectedOverlayObjects();
 	void DeselectOverlayObjects();
 	char* GetAllOverlayObjects();
+	char* GetOverlayObjectAtPosition(WindowInfo* win, double x, double y);
 	// x,y coords on screen
 	void CheckMouseClick(WindowInfo* win, int x, int y, bool ctrlPressed);
 	void CheckDeleteOverlayObject();
@@ -322,7 +331,7 @@ public:
 
 	void CheckOnRequestContextMenu(WindowInfo* win, int x, int y);
 
-	static void GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd);
+	static void GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting);
 
 private:
 	PointD dragStart;
@@ -353,7 +362,7 @@ private:
 
 extern "C" {
 	
-	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu,
+	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting,
 		OnSelectionChangedDelegate selChangedPtr, 
 		OnMouseClickDelegate mouseClickPointer, 
 		OnDeleteDelegate onDeletePointer, 
@@ -384,6 +393,7 @@ extern "C" {
 	extern UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjectIds(WindowInfo* win);
 	extern UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjects(WindowInfo* win);
 	extern UNMANAGED_API char* __stdcall CallGetAllOverlayObjects(WindowInfo* win);
+	extern UNMANAGED_API char* __stdcall CallGetOverlayObjectAtPosition(WindowInfo* win, double x, double y);
 	extern UNMANAGED_API void __stdcall CallClearOverlayObjectList(WindowInfo* win);
 
 	extern UNMANAGED_API void __stdcall CallSaveAs(WindowInfo* win);
