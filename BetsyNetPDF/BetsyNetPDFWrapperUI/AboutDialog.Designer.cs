@@ -73,9 +73,9 @@
             // 
             this.labelControl2.Location = new System.Drawing.Point(12, 37);
             this.labelControl2.Name = "labelControl2";
-            this.labelControl2.Size = new System.Drawing.Size(204, 13);
+            this.labelControl2.Size = new System.Drawing.Size(201, 13);
             this.labelControl2.TabIndex = 2;
-            this.labelControl2.Text = "Copyright 2012, 2013 IBB Ehlert-Wolf GbR";
+            this.labelControl2.Text = "Copyright 2012-2014 IBB Ehlert-Wolf GbR";
             // 
             // linkLabel1
             // 

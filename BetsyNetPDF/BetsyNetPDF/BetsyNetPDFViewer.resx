@@ -132,14 +132,14 @@
   <data name="barBtnQuit.Caption" xml:space="preserve">
     <value>Quit</value>
   </data>
-  <data name="barButtonItem8.Caption" xml:space="preserve">
-    <value>Print with labels</value>
-  </data>
   <data name="barButtonItem9.Caption" xml:space="preserve">
     <value>Activated pdf ctrl</value>
   </data>
   <data name="barButtonItem10.Caption" xml:space="preserve">
     <value>direct printing</value>
+  </data>
+  <data name="barButtonItem8.Caption" xml:space="preserve">
+    <value>direct printing(PDF)</value>
   </data>
   <data name="barButtonItem1.Caption" xml:space="preserve">
     <value>Rotate selected + 10°</value>
@@ -168,8 +168,23 @@
   <data name="barSubItem2.Caption" xml:space="preserve">
     <value>Coords + Layers</value>
   </data>
+  <data name="barButtonItem5.Caption" xml:space="preserve">
+    <value>Get XY-Coords</value>
+  </data>
+  <data name="barBtnTextCoordsLayer.Caption" xml:space="preserve">
+    <value>Get text and coords from layer</value>
+  </data>
+  <data name="barButtonItem7.Caption" xml:space="preserve">
+    <value>Get Layers</value>
+  </data>
   <data name="barSubItem3.Caption" xml:space="preserve">
     <value>Presentation</value>
+  </data>
+  <data name="barCheckItem4.Caption" xml:space="preserve">
+    <value>Transparency</value>
+  </data>
+  <data name="barChkShowOverlapping.Caption" xml:space="preserve">
+    <value>Show overlapping</value>
   </data>
   <data name="bar2.Text" xml:space="preserve">
     <value>Main menu</value>
@@ -311,10 +326,16 @@
   <data name="&gt;&gt;barBtnQuit.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
-  <data name="&gt;&gt;barButtonItem8.Name" xml:space="preserve">
-    <value>barButtonItem8</value>
+  <data name="&gt;&gt;barButtonItem9.Name" xml:space="preserve">
+    <value>barButtonItem9</value>
   </data>
-  <data name="&gt;&gt;barButtonItem8.Type" xml:space="preserve">
+  <data name="&gt;&gt;barButtonItem9.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem10.Name" xml:space="preserve">
+    <value>barButtonItem10</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem10.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;barButtonItem1.Name" xml:space="preserve">
@@ -431,16 +452,10 @@
   <data name="&gt;&gt;barButtonItem4.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
-  <data name="&gt;&gt;barButtonItem9.Name" xml:space="preserve">
-    <value>barButtonItem9</value>
+  <data name="&gt;&gt;barButtonItem8.Name" xml:space="preserve">
+    <value>barButtonItem8</value>
   </data>
-  <data name="&gt;&gt;barButtonItem9.Type" xml:space="preserve">
-    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
-  </data>
-  <data name="&gt;&gt;barButtonItem10.Name" xml:space="preserve">
-    <value>barButtonItem10</value>
-  </data>
-  <data name="&gt;&gt;barButtonItem10.Type" xml:space="preserve">
+  <data name="&gt;&gt;barButtonItem8.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;$this.Name" xml:space="preserve">
@@ -457,20 +472,5 @@
   </data>
   <data name="barButtonItem4.Caption" xml:space="preserve">
     <value>Editor Test</value>
-  </data>
-  <data name="barButtonItem5.Caption" xml:space="preserve">
-    <value>Get XY-Coords</value>
-  </data>
-  <data name="barBtnTextCoordsLayer.Caption" xml:space="preserve">
-    <value>Get text and coords from layer</value>
-  </data>
-  <data name="barChkShowOverlapping.Caption" xml:space="preserve">
-    <value>Show overlapping</value>
-  </data>
-  <data name="barCheckItem4.Caption" xml:space="preserve">
-    <value>Transparency</value>
-  </data>
-  <data name="barButtonItem7.Caption" xml:space="preserve">
-    <value>Get Layers</value>
   </data>
 </root>

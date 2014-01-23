@@ -1,5 +1,5 @@
 /*
-Copyright 2012, 2013 IBB Ehlert&Wolf GbR
+Copyright 2012 - 2014 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -229,11 +229,6 @@ namespace BetsyNetPDF
             MessageBox.Show(sb.ToString(), "Layers", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private void barButtonItem8_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
-        {
-            ctrl.PrintWithLabels();
-        }
-
         private void barButtonItem9_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
             InitPdfCtrl();
@@ -254,7 +249,26 @@ namespace BetsyNetPDF
                 files += "\" \"" + f;
             }
 
-            BetsyNetPDFCtrl.DirectPrinting(files);
+            DialogResult res = MessageBox.Show("Print to default printer?", "Print to default printer?", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            BetsyNetPDFCtrl.DirectPrinting(files, res == DialogResult.Yes, "");
+        }
+
+        private void barButtonItem8_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            String[] pdffiles = Directory.GetFiles(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "*.pdf");
+            string files = "";
+            foreach (string f in pdffiles)
+            {
+                if (string.IsNullOrEmpty(files))
+                {
+                    files += f;
+                    continue;
+                }
+
+                files += "\" \"" + f;
+            }
+
+            BetsyNetPDFCtrl.DirectPrinting(files, false, "PDFCreator");
         }
     }
 }

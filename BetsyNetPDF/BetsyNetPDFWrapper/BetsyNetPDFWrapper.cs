@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012, 2013 IBB Ehlert&Wolf GbR
+Copyright 2012-2014 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -106,17 +106,17 @@ namespace BetsyNetPDF
                 return;
 
             if (win == IntPtr.Zero)
-                win = api.BetsyNetPDFViewer(hwnd, file, useExternContextMenu, false, this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
+                win = api.BetsyNetPDFViewer(hwnd, file, useExternContextMenu, false, false, "", this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
             else
                 api.OpenNewFile(win, file);
         }
 
-        public void DirectPrinting(string file)
+        public void DirectPrinting(string file, bool defaultPrinter, string printerName)
         {
             if (api == null)
                 return;
 
-            win = api.BetsyNetPDFViewer("", file, false, true, this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
+            win = api.BetsyNetPDFViewer("", file, false, true, defaultPrinter, printerName, this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
         }
 
         public bool IsDocOpen()
