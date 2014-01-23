@@ -331,7 +331,7 @@ public:
 
 	void CheckOnRequestContextMenu(WindowInfo* win, int x, int y);
 
-	static void GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting);
+	static void GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting, bool defaultPrinter, std::string printerName);
 
 private:
 	PointD dragStart;
@@ -362,7 +362,7 @@ private:
 
 extern "C" {
 	
-	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting,
+	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName,
 		OnSelectionChangedDelegate selChangedPtr, 
 		OnMouseClickDelegate mouseClickPointer, 
 		OnDeleteDelegate onDeletePointer, 
