@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012, 2013 IBB Ehlert&Wolf GbR
+Copyright 2012-2014 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -42,6 +42,6 @@ namespace BetsyNetPDF
 {
     public class AssemblyInfo
     {
-        public const string VERSION = "17";
+        public const string VERSION = "19";
     }
 }

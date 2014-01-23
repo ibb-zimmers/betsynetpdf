@@ -36,7 +36,8 @@ namespace BetsyNetPDF
             this.barSubItem1 = new DevExpress.XtraBars.BarSubItem();
             this.barBtnOpen = new DevExpress.XtraBars.BarButtonItem();
             this.barBtnQuit = new DevExpress.XtraBars.BarButtonItem();
-            this.barButtonItem8 = new DevExpress.XtraBars.BarButtonItem();
+            this.barButtonItem9 = new DevExpress.XtraBars.BarButtonItem();
+            this.barButtonItem10 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem1 = new DevExpress.XtraBars.BarButtonItem();
             this.barCheckItem1 = new DevExpress.XtraBars.BarCheckItem();
             this.barCheckItem2 = new DevExpress.XtraBars.BarCheckItem();
@@ -60,8 +61,7 @@ namespace BetsyNetPDF
             this.barButtonItem2 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem3 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem4 = new DevExpress.XtraBars.BarButtonItem();
-            this.barButtonItem9 = new DevExpress.XtraBars.BarButtonItem();
-            this.barButtonItem10 = new DevExpress.XtraBars.BarButtonItem();
+            this.barButtonItem8 = new DevExpress.XtraBars.BarButtonItem();
             ((System.ComponentModel.ISupportInitialize)(this.barManager1)).BeginInit();
             this.SuspendLayout();
             // 
@@ -98,11 +98,11 @@ namespace BetsyNetPDF
             this.barButtonItem7,
             this.barSubItem2,
             this.barSubItem3,
-            this.barButtonItem8,
             this.barButtonItem9,
-            this.barButtonItem10});
+            this.barButtonItem10,
+            this.barButtonItem8});
             this.barManager1.MainMenu = this.bar2;
-            this.barManager1.MaxItemId = 30;
+            this.barManager1.MaxItemId = 31;
             this.barManager1.StatusBar = this.bar3;
             // 
             // bar1
@@ -143,9 +143,9 @@ namespace BetsyNetPDF
             this.barSubItem1.LinksPersistInfo.AddRange(new DevExpress.XtraBars.LinkPersistInfo[] {
             new DevExpress.XtraBars.LinkPersistInfo(this.barBtnOpen),
             new DevExpress.XtraBars.LinkPersistInfo(this.barBtnQuit),
-            new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem8),
             new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem9),
-            new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem10)});
+            new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem10),
+            new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem8)});
             this.barSubItem1.Name = "barSubItem1";
             // 
             // barBtnOpen
@@ -164,13 +164,19 @@ namespace BetsyNetPDF
             this.barBtnQuit.Name = "barBtnQuit";
             this.barBtnQuit.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barBtnQuit_ItemClick);
             // 
-            // barButtonItem8
+            // barButtonItem9
             // 
-            resources.ApplyResources(this.barButtonItem8, "barButtonItem8");
-            this.barButtonItem8.Id = 27;
-            this.barButtonItem8.ItemShortcut = new DevExpress.XtraBars.BarShortcut((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.P));
-            this.barButtonItem8.Name = "barButtonItem8";
-            this.barButtonItem8.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem8_ItemClick);
+            resources.ApplyResources(this.barButtonItem9, "barButtonItem9");
+            this.barButtonItem9.Id = 28;
+            this.barButtonItem9.Name = "barButtonItem9";
+            this.barButtonItem9.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem9_ItemClick);
+            // 
+            // barButtonItem10
+            // 
+            resources.ApplyResources(this.barButtonItem10, "barButtonItem10");
+            this.barButtonItem10.Id = 29;
+            this.barButtonItem10.Name = "barButtonItem10";
+            this.barButtonItem10.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem10_ItemClick);
             // 
             // barButtonItem1
             // 
@@ -331,19 +337,12 @@ namespace BetsyNetPDF
             this.barButtonItem4.Id = 8;
             this.barButtonItem4.Name = "barButtonItem4";
             // 
-            // barButtonItem9
+            // barButtonItem8
             // 
-            resources.ApplyResources(this.barButtonItem9, "barButtonItem9");
-            this.barButtonItem9.Id = 28;
-            this.barButtonItem9.Name = "barButtonItem9";
-            this.barButtonItem9.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem9_ItemClick);
-            // 
-            // barButtonItem10
-            // 
-            resources.ApplyResources(this.barButtonItem10, "barButtonItem10");
-            this.barButtonItem10.Id = 29;
-            this.barButtonItem10.Name = "barButtonItem10";
-            this.barButtonItem10.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem10_ItemClick);
+            resources.ApplyResources(this.barButtonItem8, "barButtonItem8");
+            this.barButtonItem8.Id = 30;
+            this.barButtonItem8.Name = "barButtonItem8";
+            this.barButtonItem8.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem8_ItemClick);
             // 
             // BetsyNetPDFViewer
             // 
@@ -389,10 +388,10 @@ namespace BetsyNetPDF
         private DevExpress.XtraBars.BarCheckItem barCheckItem4;
         private DevExpress.XtraBars.BarButtonItem barButtonItem7;
         private DevExpress.XtraBars.BarSubItem barSubItem2;
-        private DevExpress.XtraBars.BarButtonItem barButtonItem8;
         private DevExpress.XtraBars.BarSubItem barSubItem3;
         private DevExpress.XtraBars.BarButtonItem barButtonItem9;
         private DevExpress.XtraBars.BarButtonItem barButtonItem10;
+        private DevExpress.XtraBars.BarButtonItem barButtonItem8;
 
 
     }

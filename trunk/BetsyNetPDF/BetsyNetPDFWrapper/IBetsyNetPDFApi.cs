@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012, 2013 IBB Ehlert&Wolf GbR
+Copyright 2012-2014 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -42,7 +42,7 @@ namespace BetsyNetPDF
 {
     interface IBetsyNetPDFApi
     {
-        IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting,
+        IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, string printerName,
             BetsyNetPDFWrapper.CallBackOnSelectionChanged onSelectionChangedDelegate,
             BetsyNetPDFWrapper.CallBackOnMouseClick onMouseClickDelegate,
             BetsyNetPDFWrapper.CallBackOnDelete onDeleteDelegate,

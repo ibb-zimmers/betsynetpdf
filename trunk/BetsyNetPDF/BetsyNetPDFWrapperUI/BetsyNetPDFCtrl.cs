@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012, 2013 IBB Ehlert&Wolf GbR
+Copyright 2012-2014 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -66,7 +66,7 @@ namespace BetsyNetPDF
 
         private BetsyNetPDFWrapper wrapper;
         private bool useExternContextMenu, printOnPlotter;
-        private string currentFile, outputFile, layerTitle;
+        private string currentFile, outputFile, layerTitle, printOverlayObjectsQuestion = "Print with overlay objects?";
 
         public string OutputFile { get { return outputFile; } set { outputFile = value; } }
         public string LayerTitle { get { return layerTitle; } set { layerTitle = value; } }
@@ -107,6 +107,7 @@ namespace BetsyNetPDF
         public bool ShowPrintBtn { set { barBtnPrint.Visibility = value ? BarItemVisibility.Always : BarItemVisibility.Never; } }
         public bool UseExternContextMenu { get { return this.useExternContextMenu; } set { this.useExternContextMenu = value; } }
         public bool PrintOnPlotter { get { return printOnPlotter; } set { printOnPlotter = value; } }
+        public string PrintOverlayObjectsQuestion { set { printOverlayObjectsQuestion = value; } }
         #endregion
 
         #region delegates
@@ -127,26 +128,10 @@ namespace BetsyNetPDF
             currentFile = file;
         }
 
-        public void PrintWithLabels()
-        {
-            if (string.IsNullOrEmpty(currentFile))
-                return;
-
-            string fName = Path.GetFileNameWithoutExtension(currentFile);
-            string ext = Path.GetExtension(currentFile);
-            string file = fName + "_BetsyNetPDF" + ext;
-
-            string sobjects = this.GetAllOverlayObjects();
-            BetsyNetPDFEditor.ExportOverlayObjects2PDF(currentFile, Path.GetTempPath() + file, sobjects, "BetsyNetPDF");
-
-            BetsyNetPDFWrapper pwrapper = new BetsyNetPDFWrapper();
-            pwrapper.DirectPrinting(Path.GetTempPath() + file);
-        }
-
-        public static void DirectPrinting(string file)
+        public static void DirectPrinting(string file, bool defaultPrinter, string printerName)
         {
             BetsyNetPDFWrapper pwrapper = new BetsyNetPDFWrapper();
-            pwrapper.DirectPrinting(file);
+            pwrapper.DirectPrinting(file, defaultPrinter, printerName);
         }
 
         public bool IsDocOpen()
@@ -367,6 +352,22 @@ namespace BetsyNetPDF
             if (BetsyNetPDFLineDrawnEvent != null)
                 BetsyNetPDFLineDrawnEvent(p1x, p1y, p2x, p2y);
         }
+
+        private void PrintWithLabels()
+        {
+            if (string.IsNullOrEmpty(currentFile))
+                return;
+
+            string fName = Path.GetFileNameWithoutExtension(currentFile);
+            string ext = Path.GetExtension(currentFile);
+            string file = fName + "_BetsyNetPDF" + ext;
+
+            string sobjects = this.GetAllOverlayObjects();
+            BetsyNetPDFEditor.ExportOverlayObjects2PDF(currentFile, Path.GetTempPath() + file, sobjects, "BetsyNetPDF");
+
+            BetsyNetPDFWrapper pwrapper = new BetsyNetPDFWrapper();
+            pwrapper.DirectPrinting(Path.GetTempPath() + file, false, "");
+        }
         #endregion
 
         #region events
@@ -448,7 +449,11 @@ namespace BetsyNetPDF
 
         private void barBtnPrint_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
         {
-            wrapper.Print(PrintOnPlotter);
+            DialogResult res = MessageBox.Show(printOverlayObjectsQuestion, printOverlayObjectsQuestion, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (res == DialogResult.Yes)
+                PrintWithLabels();
+            else
+                wrapper.Print(PrintOnPlotter);
         }
 
         private void barBtnOpenExt_ItemClick(object sender, ItemClickEventArgs e)

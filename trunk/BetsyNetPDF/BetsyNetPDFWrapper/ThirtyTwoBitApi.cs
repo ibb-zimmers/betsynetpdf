@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012, 2013 IBB Ehlert&Wolf GbR
+Copyright 2012-2014 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -50,7 +50,7 @@ namespace BetsyNetPDF
         #region IBetsyNetPDFApi Member
 
         [DllImport(DLL, EntryPoint = "CallBetsyNetPDFViewer", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
-        static private extern IntPtr BetsyNetPDFViewer_EXT(string hwnd, string file, bool useExternContextMenu, bool directPrinting,
+        static private extern IntPtr BetsyNetPDFViewer_EXT(string hwnd, string file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, string printerName,
             IntPtr onSelectionChangedDelegate,
             IntPtr onMouseClickDelegate,
             IntPtr onDeleteDelegate,
@@ -60,7 +60,7 @@ namespace BetsyNetPDF
             IntPtr onDistanceMeasuredDelegate,
             IntPtr onLineDrawnDelegate);
 
-        public IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting,
+        public IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, string printerName,
             BetsyNetPDFWrapper.CallBackOnSelectionChanged onSelectionChangedDelegate,
             BetsyNetPDFWrapper.CallBackOnMouseClick onMouseClickDelegate,
             BetsyNetPDFWrapper.CallBackOnDelete onDeleteDelegate,
@@ -79,7 +79,7 @@ namespace BetsyNetPDF
             IntPtr distancePtr = Marshal.GetFunctionPointerForDelegate(onDistanceMeasuredDelegate);
             IntPtr linePtr = Marshal.GetFunctionPointerForDelegate(onLineDrawnDelegate);
 
-            return BetsyNetPDFViewer_EXT(hwnd, file, useExternContextMenu, directPrinting, onSelectionChangedDelegatePtr, onMouseClickDelegatePtr, onDeleteDelegatePtr, onObjectMovedDelegatePtr, onReqContextMenuPtr, onMouseOverPtr, distancePtr, linePtr);
+            return BetsyNetPDFViewer_EXT(hwnd, file, useExternContextMenu, directPrinting, defaultPrinter, printerName, onSelectionChangedDelegatePtr, onMouseClickDelegatePtr, onDeleteDelegatePtr, onObjectMovedDelegatePtr, onReqContextMenuPtr, onMouseOverPtr, distancePtr, linePtr);
         }
 
         [DllImport(DLL, EntryPoint = "CallOpenNewFile", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
