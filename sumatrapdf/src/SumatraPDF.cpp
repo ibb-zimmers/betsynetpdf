@@ -5742,7 +5742,7 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* boun
 	this->currentPath.AddLines(objPoints, 5);
 	this->currentPath.CloseFigure();
 
-	objRegion = ::new Region(&(this->currentPath));
+	objRegion = new Region(&(this->currentPath));
 	objRegion->Intersect(bounds);
 	if(objRegion->IsEmpty(g))
 	{
@@ -5967,9 +5967,9 @@ bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
 {
 	Region* checkRegion;
 	if(label)
-		checkRegion = ::new Region(&this->currentLabelPath);
+		checkRegion = new Region(&this->currentLabelPath);
 	else
-		checkRegion = ::new Region(&this->currentPath);
+		checkRegion = new Region(&this->currentPath);
 
 	RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
 	return checkRegion->IsVisible(selOnScreen);
@@ -6372,8 +6372,8 @@ void BetsyNetPDFUnmanagedApi::DrawOverlayObjets(HDC* hdc, WindowInfo* win, int p
 	if(!this->showOverlapping)
 		return;
 
-	Region* allObjects = ::new Region();
-	Region* overlapping = ::new Region();
+	Region* allObjects = new Region();
+	Region* overlapping = new Region();
 	Region* intersection;
 
 	allObjects->MakeEmpty();
@@ -6917,29 +6917,47 @@ void BetsyNetPDFUnmanagedApi::ClearOverlayObjectList(WindowInfo* win)
 	win->RepaintAsync();
 }
 
-void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting)
+void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting, bool defaultPrinter, std::string printerName)
 {
 	i.bgColor = gGlobalPrefs->mainWindowBackground;
-    i.forwardSearch = gGlobalPrefs->forwardSearch;
-    i.escToExit = gGlobalPrefs->escToExit;
-    i.cbxMangaMode = gGlobalPrefs->comicBookUI.cbxMangaMode;
-    if (gGlobalPrefs->useSysColors) {
-        i.colorRange[0] = GetSysColor(COLOR_WINDOWTEXT);
-        i.colorRange[1] = GetSysColor(COLOR_WINDOW);
-    }
-    else {
-        i.colorRange[0] = gGlobalPrefs->fixedPageUI.textColor;
-        i.colorRange[1] = gGlobalPrefs->fixedPageUI.backgroundColor;
-    }
+	i.forwardSearch = gGlobalPrefs->forwardSearch;
+	i.escToExit = gGlobalPrefs->escToExit;
+	i.cbxMangaMode = gGlobalPrefs->comicBookUI.cbxMangaMode;
+	if (gGlobalPrefs->useSysColors) {
+		i.colorRange[0] = GetSysColor(COLOR_WINDOWTEXT);
+		i.colorRange[1] = GetSysColor(COLOR_WINDOW);
+	}
+	else {
+		i.colorRange[0] = gGlobalPrefs->fixedPageUI.textColor;
+		i.colorRange[1] = gGlobalPrefs->fixedPageUI.backgroundColor;
+	}
 
 	std::string ssumatra("\"BetsyNetPDF.dll\" ");
 	std::string splugin(" -plugin ");
-	std::string sprinting(" -print-dialog -exit-on-print");
+	std::string sprinting(" -print-dialog -exit-on-print ");
+	std::string sdefaultPrinter(" -print-to-default -silent ");
+	std::string swithPrinterName(" -print-to " + printerName + " -silent ");
 	std::string scmd;
 	if(directPrinting)
-		scmd = ssumatra + "\"" + file + "\"" + sprinting;
+	{
+		if(defaultPrinter)
+		{
+			scmd = ssumatra + sdefaultPrinter + "\"" + file + "\"";
+		}
+		else 
+		{
+			if(!printerName.empty())
+			{
+				scmd = ssumatra + swithPrinterName + "\"" + file + "\"";
+			}
+			else
+			{
+				scmd = ssumatra + sprinting + "\"" + file + "\"";
+			}
+		}
+	}
 	else
-		scmd = ssumatra + "\"" + file + "\"" + splugin + hwnd;
+		scmd = ssumatra + splugin + hwnd + " \"" + file + "\"";
 
 	Widen<wchar_t> to_wstring;
 	std::wstring wscmd = to_wstring(scmd);
@@ -6953,7 +6971,7 @@ void BetsyNetPDFUnmanagedApi::GetFakedCmd(CommandLineInfo& i, std::string file, 
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF unmanged api callers
 ///////////////////////////////////////////////////////////////////////////////
-extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting,
+extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName,
 	OnSelectionChangedDelegate selChangedPtr, 
 	OnMouseClickDelegate mouseClickPointer, 
 	OnDeleteDelegate onDeletePointer, 
@@ -7015,7 +7033,7 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
 	}
 
     CommandLineInfo i;
-	BetsyNetPDFUnmanagedApi::GetFakedCmd(i, file, hwnd, directPrinting);
+	BetsyNetPDFUnmanagedApi::GetFakedCmd(i, file, hwnd, directPrinting, defaultPrinter, std::string(printerName));
 
     SetCurrentLang(i.lang ? i.lang : gGlobalPrefs->uiLanguage);
 
@@ -7062,6 +7080,18 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
 		gGlobalPrefs->showToolbar = false;
     }
 
+	if (i.printerName) {
+        // note: this prints all PDF files. Another option would be to
+        // print only the first one
+        for (size_t n = 0; n < i.fileNames.Count(); n++) {
+            bool ok = PrintFile(i.fileNames.At(n), i.printerName, !i.silent, i.printSettings);
+            if (!ok)
+                retCode++;
+        }
+        --retCode; // was 1 if no print failures, turn 1 into 0
+        goto Exit;
+    }
+
     if (i.fileNames.Count() == 0 && gGlobalPrefs->rememberOpenedFiles && gGlobalPrefs->showStartPage) {
         // make the shell prepare the image list, so that it's ready when the first window's loaded
         SHFILEINFO sfi;
@@ -7102,6 +7132,7 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
 
 	win->betsyApi = betsyApi;
 
+Exit:
 	return win;
 }
 
