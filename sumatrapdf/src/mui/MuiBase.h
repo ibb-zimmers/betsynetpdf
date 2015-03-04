@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Mui_h
@@ -27,8 +27,25 @@ public:
     }
 };
 
+struct CachedFont {
+    const WCHAR *       name;
+    float               sizePt;
+    Gdiplus::FontStyle  style;
+
+    Gdiplus::Font *     font;
+    // hFont is created out of font
+    HFONT               hFont;
+
+    HFONT               GetHFont();
+    Gdiplus::FontStyle  GetStyle() const { return style; }
+    float               GetSize() const { return sizePt; }
+    const WCHAR *       GetName() const { return name; }
+    bool                SameAs(const WCHAR *name, float sizePt, FontStyle style) const;
+};
+
 void        InitGraphicsMode(Graphics *g);
-Font *      GetCachedFont(const WCHAR *name, float size, FontStyle style);
+CachedFont *GetCachedFont(const WCHAR *name, float sizePt, FontStyle style);
+
 Graphics *  AllocGraphicsForMeasureText();
 void        FreeGraphicsForMeasureText(Graphics *gfx);
 

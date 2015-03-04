@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -11,61 +11,32 @@
 #include "Version.h"
 #include "WinUtil.h"
 
-// the only valid chars are 0-9, . and newlines.
-// a valid version has to match the regex /^\d+(\.\d+)*(\r?\n)?$/
-// Return false if it contains anything else.
-bool IsValidProgramVersion(const char *txt)
+#define REG_PATH_UNINST L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" APP_NAME_STR
+
+/* Returns true, if a Registry entry indicates that this executable has been
+   created by an installer (and should be updated through an installer) */
+bool HasBeenInstalled()
 {
-    if (!str::IsDigit(*txt))
+    ScopedMem<WCHAR> installedPath;
+    // cf. GetInstallationDir() in installer\Installer.cpp
+    installedPath.Set(ReadRegStr(HKEY_CURRENT_USER, REG_PATH_UNINST, L"InstallLocation"));
+    if (!installedPath)
+        installedPath.Set(ReadRegStr(HKEY_LOCAL_MACHINE, REG_PATH_UNINST, L"InstallLocation"));
+    if (!installedPath)
         return false;
 
-    for (; *txt; txt++) {
-        if (str::IsDigit(*txt))
-            continue;
-        if (*txt == '.' && str::IsDigit(*(txt + 1)))
-            continue;
-        if (*txt == '\r' && *(txt + 1) == '\n')
-            continue;
-        if (*txt == '\n' && !*(txt + 1))
-            continue;
+    ScopedMem<WCHAR> exePath(GetExePath());
+    if (!exePath)
         return false;
-    }
 
-    return true;
-}
-
-// extract the next (positive) number from the string *txt
-static unsigned int ExtractNextNumber(const WCHAR **txt)
-{
-    unsigned int val = 0;
-    const WCHAR *next = str::Parse(*txt, L"%u%?.", &val);
-    *txt = next ? next : *txt + str::Len(*txt);
-    return val;
-}
-
-// compare two version string. Return 0 if they are the same,
-// > 0 if the first is greater than the second and < 0 otherwise.
-// e.g.
-//   0.9.3.900 is greater than 0.9.3
-//   1.09.300 is greater than 1.09.3 which is greater than 1.9.1
-//   1.2.0 is the same as 1.2
-int CompareVersion(const WCHAR *txt1, const WCHAR *txt2)
-{
-    while (*txt1 || *txt2) {
-        unsigned int v1 = ExtractNextNumber(&txt1);
-        unsigned int v2 = ExtractNextNumber(&txt2);
-        if (v1 != v2)
-            return v1 - v2;
-    }
-
-    return 0;
+    if (!str::EndsWithI(installedPath, L".exe"))
+        installedPath.Set(path::Join(installedPath, path::GetBaseName(exePath)));
+    return path::IsSame(installedPath, exePath);
 }
 
 /* Return false if this program has been started from "Program Files" directory
    (which is an indicator that it has been installed) or from the last known
    location of a SumatraPDF installation: */
-#define REG_PATH_UNINST     L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" APP_NAME_STR
-
 bool IsRunningInPortableMode()
 {
     // cache the result so that it will be consistent during the lifetime of the process
@@ -74,27 +45,15 @@ bool IsRunningInPortableMode()
         return sCacheIsPortable != 0;
     sCacheIsPortable = 1;
 
-    ScopedMem<WCHAR> exePath(GetExePath());
-    if (!exePath)
-        return true;
-
-    // if we can't get a path, assume we're not running from "Program Files"
-    ScopedMem<WCHAR> installedPath;
-    // cf. GetInstallationDir() in installer\Installer.cpp
-    installedPath.Set(ReadRegStr(HKEY_CURRENT_USER, REG_PATH_UNINST, L"InstallLocation"));
-    if (!installedPath)
-        installedPath.Set(ReadRegStr(HKEY_LOCAL_MACHINE, REG_PATH_UNINST, L"InstallLocation"));
-    if (installedPath) {
-        if (!str::EndsWithI(installedPath.Get(), L".exe"))
-            installedPath.Set(path::Join(installedPath.Get(), path::GetBaseName(exePath)));
-        if (path::IsSame(installedPath, exePath)) {
-            sCacheIsPortable = 0;
-            return false;
-        }
+    if (HasBeenInstalled()) {
+        sCacheIsPortable = 0;
+        return false;
     }
 
+    ScopedMem<WCHAR> exePath(GetExePath());
     ScopedMem<WCHAR> programFilesDir(GetSpecialFolder(CSIDL_PROGRAM_FILES));
-    if (!programFilesDir)
+    // if we can't get a path, assume we're not running from "Program Files"
+    if (!exePath || !programFilesDir)
         return true;
 
     // check if one of the exePath's parent directories is "Program Files"
@@ -115,55 +74,23 @@ bool IsRunningInPortableMode()
 /* Caller needs to free() the result. */
 WCHAR *AppGenDataFilename(const WCHAR *fileName)
 {
-    ScopedMem<WCHAR> path;
-    if (IsRunningInPortableMode()) {
-        /* Use the same path as the binary */
-        ScopedMem<WCHAR> exePath(GetExePath());
-        if (exePath)
-            path.Set(path::GetDir(exePath));
-    } else {
-        /* Use %APPDATA% */
-        path.Set(GetSpecialFolder(CSIDL_APPDATA, true));
-        if (path) {
-            path.Set(path::Join(path, APP_NAME_STR));
-            if (path && !dir::Create(path))
-                path.Set(NULL);
-        }
-    }
-
-    if (!path || !fileName)
+    if (!fileName)
         return NULL;
 
+    if (IsRunningInPortableMode()) {
+        /* Use the same path as the binary */
+        return path::GetAppPath(fileName);
+    }
+
+    /* Use %APPDATA% */
+    ScopedMem<WCHAR> path(GetSpecialFolder(CSIDL_APPDATA, true));
+    if (!path)
+        return NULL;
+    path.Set(path::Join(path, APP_NAME_STR));
+    if (!path || !dir::Create(path))
+        return NULL;
     return path::Join(path, fileName);
 }
-
-// Updates the drive letter for a path that could have been on a removable drive,
-// if that same path can be found on a different removable drive
-// returns true if the path has been changed
-bool AdjustVariableDriveLetter(WCHAR *path)
-{
-    // Don't bother if the file path is still valid
-    if (file::Exists(path))
-        return false;
-    // Don't bother for files on non-removable drives
-    if (!path::HasVariableDriveLetter(path))
-        return false;
-
-    // Iterate through all (other) removable drives and try to find the file there
-    WCHAR szDrive[] = L"A:\\";
-    WCHAR origDrive = path[0];
-    for (DWORD driveMask = GetLogicalDrives(); driveMask; driveMask >>= 1) {
-        if ((driveMask & 1) && szDrive[0] != origDrive && path::HasVariableDriveLetter(szDrive)) {
-            path[0] = szDrive[0];
-            if (file::Exists(path))
-                return true;
-        }
-        szDrive[0]++;
-    }
-    path[0] = origDrive;
-    return false;
-}
-
 
 /*
 Structure of registry entries for associating Sumatra with PDF files.
@@ -232,15 +159,15 @@ void DoAssociateExeWithPdfExtension(HKEY hkey)
 
     WriteRegStr(hkey, REG_CLASSES_APP L"\\shell", NULL, L"open");
 
-    ScopedMem<WCHAR> cmdPath(str::Format(L"\"%s\" \"%%1\" %%*", exePath)); // "${exePath}" "%1" %*
+    ScopedMem<WCHAR> cmdPath(str::Format(L"\"%s\" \"%%1\" %%*", exePath.Get())); // "${exePath}" "%1" %*
     bool ok = WriteRegStr(hkey, REG_CLASSES_APP L"\\shell\\open\\command", NULL, cmdPath);
 
     // also register for printing
-    cmdPath.Set(str::Format(L"\"%s\" -print-to-default \"%%1\"", exePath)); // "${exePath}" -print-to-default "%1"
+    cmdPath.Set(str::Format(L"\"%s\" -print-to-default \"%%1\"", exePath.Get())); // "${exePath}" -print-to-default "%1"
     WriteRegStr(hkey, REG_CLASSES_APP L"\\shell\\print\\command", NULL, cmdPath);
 
     // also register for printing to specific printer
-    cmdPath.Set(str::Format(L"\"%s\" -print-to \"%%2\" \"%%1\"", exePath)); // "${exePath}" -print-to "%2" "%1"
+    cmdPath.Set(str::Format(L"\"%s\" -print-to \"%%2\" \"%%1\"", exePath.Get())); // "${exePath}" -print-to "%2" "%1"
     WriteRegStr(hkey, REG_CLASSES_APP L"\\shell\\printto\\command", NULL, cmdPath);
 
     // Only change the association if we're confident, that we've registered ourselves well enough
@@ -297,58 +224,6 @@ bool IsExeAssociatedWithPdfExtension()
         return false;
 
     return path::IsSame(exePath, argList.At(0));
-}
-
-// caller needs to free() the result
-WCHAR *ExtractFilenameFromURL(const WCHAR *url)
-{
-    ScopedMem<WCHAR> urlName(str::Dup(url));
-    // try to extract the file name from the URL (last path component before query or hash)
-    str::TransChars(urlName, L"/?#", L"\\\0\0");
-    urlName.Set(str::Dup(path::GetBaseName(urlName)));
-    // unescape hex-escapes (these are usually UTF-8)
-    if (str::FindChar(urlName, '%')) {
-        ScopedMem<char> utf8Name(str::conv::ToUtf8(urlName));
-        char *src = utf8Name, *dst = utf8Name;
-        while (*src) {
-            int esc;
-            if ('%' == *src && str::Parse(src, "%%%2x", &esc)) {
-                *dst++ = (char)esc;
-                src += 3;
-            }
-            else
-                *dst++ = *src++;
-        }
-        *dst = '\0';
-        urlName.Set(str::conv::FromUtf8(utf8Name));
-    }
-    if (str::IsEmpty(urlName.Get()))
-        return NULL;
-    return urlName.StealData();
-}
-
-// files are considered untrusted, if they're either loaded from a
-// non-file URL in plugin mode, or if they're marked as being from
-// an untrusted zone (e.g. by the browser that's downloaded them)
-bool IsUntrustedFile(const WCHAR *filePath, const WCHAR *fileURL)
-{
-    ScopedMem<WCHAR> protocol;
-    if (fileURL && str::Parse(fileURL, L"%S:", &protocol))
-        if (str::Len(protocol) > 1 && !str::EqI(protocol, L"file"))
-            return true;
-
-    if (file::GetZoneIdentifier(filePath) >= URLZONE_INTERNET)
-        return true;
-
-    // check all parents of embedded files and ADSs as well
-    ScopedMem<WCHAR> path(str::Dup(filePath));
-    while (str::Len(path) > 2 && str::FindChar(path + 2, ':')) {
-        *wcsrchr(path, ':') = '\0';
-        if (file::GetZoneIdentifier(path) >= URLZONE_INTERNET)
-            return true;
-    }
-
-    return false;
 }
 
 // List of rules used to detect TeX editors.
@@ -440,7 +315,7 @@ WCHAR *AutoDetectInverseSearchCommands(HWND hwndCombo)
             continue;
         }
 
-        ScopedMem<WCHAR> editorCmd(str::Format(L"\"%s\" %s", exePath, editor_rules[i].InverseSearchArgs));
+        ScopedMem<WCHAR> editorCmd(str::Format(L"\"%s\" %s", exePath.Get(), editor_rules[i].InverseSearchArgs));
 
         if (!hwndCombo) {
             // no need to fill a combo box: return immeditately after finding an editor.
@@ -460,52 +335,6 @@ WCHAR *AutoDetectInverseSearchCommands(HWND hwndCombo)
             ComboBox_AddString(hwndCombo, firstEditor);
     }
     return firstEditor;
-}
-
-static HDDEDATA CALLBACK DdeCallback(UINT uType, UINT uFmt, HCONV hconv, HSZ hsz1,
-    HSZ hsz2, HDDEDATA hdata, ULONG_PTR dwData1, ULONG_PTR dwData2)
-{
-    return 0;
-}
-
-void DDEExecute(const WCHAR* server, const WCHAR* topic, const WCHAR* command)
-{
-    unsigned long inst = 0;
-    HSZ hszServer = NULL, hszTopic = NULL;
-    HCONV hconv = NULL;
-    HDDEDATA hddedata = NULL;
-
-    UINT result = DdeInitialize(&inst, &DdeCallback, APPCMD_CLIENTONLY, 0);
-    if (result != DMLERR_NO_ERROR)
-        goto Exit;
-    hszServer = DdeCreateStringHandle(inst, server, CP_WINNEUTRAL);
-    if (!hszServer)
-        goto Exit;
-    hszTopic = DdeCreateStringHandle(inst, topic, CP_WINNEUTRAL);
-    if (!hszTopic)
-        goto Exit;
-    hconv = DdeConnect(inst, hszServer, hszTopic, 0);
-    if (!hconv)
-        goto Exit;
-    DWORD cbLen = (str::Len(command) + 1) * sizeof(WCHAR);
-    hddedata = DdeCreateDataHandle(inst, (BYTE*)command, cbLen, 0, 0, CF_UNICODETEXT, 0);
-    if (!hddedata)
-        goto Exit;
-
-    HDDEDATA answer = DdeClientTransaction((BYTE*)hddedata, (DWORD)-1, hconv, 0, 0, XTYP_EXECUTE, 10000, 0);
-    if (answer)
-        DdeFreeDataHandle(answer);
-
-Exit:
-    if (hddedata)
-        DdeFreeDataHandle(hddedata);
-    if (hconv)
-        DdeDisconnect(hconv);
-    if (hszTopic)
-        DdeFreeStringHandle(inst, hszTopic);
-    if (hszServer)
-        DdeFreeStringHandle(inst, hszServer);
-    DdeUninitialize(inst);
 }
 
 #define UWM_DELAYED_SET_FOCUS (WM_APP + 1)
@@ -531,6 +360,9 @@ bool ExtendedEditWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
             delayFocus = false;
         }
         return true;
+
+    case WM_KILLFOCUS:
+        return false; // for easier debugging (make setting a breakpoint possible)
 
     case WM_SETFOCUS:
         if (!delayFocus)
@@ -583,7 +415,7 @@ void EnsureAreaVisibility(RectI& r)
 
     // make sure that the window is neither too small nor bigger than the monitor
     if (r.dx < MIN_WIN_DX || r.dx > work.dx)
-        r.dx = (int)min(work.dy * DEF_PAGE_RATIO, work.dx);
+        r.dx = std::min((int)((double)work.dy * DEF_PAGE_RATIO), work.dx);
     if (r.dy < MIN_WIN_DY || r.dy > work.dy)
         r.dy = work.dy;
 
@@ -602,7 +434,7 @@ RectI GetDefaultWindowPos()
     RectI work = RectI::FromRECT(workArea);
 
     RectI r = work;
-    r.dx = (int)min(r.dy * DEF_PAGE_RATIO, work.dx);
+    r.dx = std::min((int)((double)r.dy * DEF_PAGE_RATIO), work.dx);
     r.x = (work.dx - r.dx) / 2;
 
     return r;

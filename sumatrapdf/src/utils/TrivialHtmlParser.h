@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef TrivialHtmlParser_h
@@ -17,8 +17,13 @@ enum HtmlParseError {
     ErrParsingAttributeValue,
 };
 
-struct HtmlAttr;
 struct HtmlToken;
+
+struct HtmlAttr {
+    char *name;
+    char *val;
+    HtmlAttr *next;
+};
 
 struct HtmlElement {
     HtmlTag tag;
@@ -89,5 +94,17 @@ public:
 };
 
 WCHAR *DecodeHtmlEntitites(const char *string, UINT codepage);
+
+namespace str {
+    namespace conv {
+
+inline WCHAR *FromHtmlUtf8(const char *s, size_t len)
+{
+    ScopedMem<char> tmp(str::DupN(s, len));
+    return DecodeHtmlEntitites(tmp, CP_UTF8);
+}
+
+    }
+}
 
 #endif

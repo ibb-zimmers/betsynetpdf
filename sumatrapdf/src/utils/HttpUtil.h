@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef HttpUtil_h
@@ -22,13 +22,14 @@ public:
     str::Str<char> *data;
     DWORD           error;
 
-    HttpReq(const WCHAR *url, HttpReqCallback *callback=NULL);
+    explicit HttpReq(const WCHAR *url, HttpReqCallback *callback=NULL);
     ~HttpReq();
 };
 
 class HttpReqCallback {
 public:
     virtual void Callback(HttpReq *ctx=NULL) = 0;
+    virtual ~HttpReqCallback() { }
 };
 
 #endif

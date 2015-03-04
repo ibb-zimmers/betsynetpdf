@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Timer_h
@@ -19,14 +19,19 @@ class Timer {
     }
 
 public:
-    Timer(bool start=false) {
-        end.QuadPart = 0;
-        if (start)
-            Start();
+    explicit Timer() {
+        Start();
     }
 
-    void Start() { QueryPerformanceCounter(&start); }
-    void Stop() { QueryPerformanceCounter(&end); }
+    void Start() {
+        end.QuadPart = 0;
+        QueryPerformanceCounter(&start);
+    }
+
+    double Stop() { 
+        QueryPerformanceCounter(&end);
+        return GetTimeInMs();
+    }
 
     // If stopped, get the time at point it was stopped,
     // otherwise get current time

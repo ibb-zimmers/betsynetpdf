@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef FileUtil_h
@@ -25,6 +25,7 @@ bool         Match(const WCHAR *path, const WCHAR *filter);
 bool         IsAbsolute(const WCHAR *path);
 
 WCHAR *      GetTempPath(const WCHAR *filePrefix=NULL);
+WCHAR *      GetAppPath(const WCHAR *fileName=NULL);
 
 }
 
@@ -33,16 +34,19 @@ namespace file {
 bool         Exists(const WCHAR *filePath);
 char *       ReadAll(const WCHAR *filePath, size_t *fileSizeOut, Allocator *allocator=NULL);
 char *       ReadAllUtf(const char *filePath, size_t *fileSizeOut, Allocator *allocator=NULL);
-bool         ReadAll(const WCHAR *filePath, char *buffer, size_t bufferLen);
+bool         ReadN(const WCHAR *filePath, char *buf, size_t toRead);
 bool         WriteAll(const WCHAR *filePath, const void *data, size_t dataLen);
 bool         WriteAllUtf(const char *filePath, const void *data, size_t dataLen);
 int64        GetSize(const WCHAR *filePath);
 bool         Delete(const WCHAR *filePath);
 FILETIME     GetModificationTime(const WCHAR *filePath);
 bool         SetModificationTime(const WCHAR *filePath, FILETIME lastMod);
-bool         StartsWith(const WCHAR *filePath, const char *magicNumber, size_t len=-1);
+bool         StartsWithN(const WCHAR *filePath, const char *magicNumber, size_t len);
+bool         StartsWith(const WCHAR *filePath, const char *magicNumber);
 int          GetZoneIdentifier(const WCHAR *filePath);
 bool         SetZoneIdentifier(const WCHAR *filePath, int zoneId=URLZONE_INTERNET);
+
+HANDLE       OpenReadOnly(const WCHAR *filePath);
 
 }
 

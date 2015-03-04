@@ -1,11 +1,14 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "RenderCache.h"
+
+#include "DisplayModel.h"
 #include "TextSelection.h"
 #include "WinUtil.h"
 
+// TODO: remove this and always conserve memory?
 /* Define if you want to conserve memory by always freeing cached bitmaps
    for pages not visible. Disabling this might lead to pages not rendering
    due to insufficient (GDI) memory. */
@@ -19,8 +22,8 @@ RenderCache::RenderCache()
       maxTileSize(GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)),
       isRemoteSession(GetSystemMetrics(SM_REMOTESESSION))
 {
-    colorRange[0] = WIN_COL_BLACK;
-    colorRange[1] = WIN_COL_WHITE;
+    textColor = WIN_COL_BLACK;
+    backgroundColor = WIN_COL_WHITE;
 
     InitializeCriticalSection(&cacheAccess);
     InitializeCriticalSection(&requestAccess);
@@ -157,14 +160,14 @@ static bool IsTileVisible(DisplayModel *dm, int pageNo, TilePosition tile, float
 {
     if (!dm) return false;
     PageInfo *pageInfo = dm->GetPageInfo(pageNo);
-    if (!dm->engine || !pageInfo) return false;
-    RectI tileOnScreen = GetTileOnScreen(dm->engine, pageNo, dm->Rotation(), dm->ZoomReal(), tile, pageInfo->pageOnScreen);
+    if (!dm->GetEngine() || !pageInfo) return false;
+    RectI tileOnScreen = GetTileOnScreen(dm->GetEngine(), pageNo, dm->GetRotation(), dm->GetZoomReal(), tile, pageInfo->pageOnScreen);
     // consider nearby tiles visible depending on the fuzz factor
     tileOnScreen.x -= (int)(tileOnScreen.dx * fuzz * 0.5);
     tileOnScreen.dx = (int)(tileOnScreen.dx * (fuzz + 1));
     tileOnScreen.y -= (int)(tileOnScreen.dy * fuzz * 0.5);
     tileOnScreen.dy = (int)(tileOnScreen.dy * (fuzz + 1));
-    RectI screen(PointI(), dm->viewPort.Size());
+    RectI screen(PointI(), dm->GetViewPort().Size());
     return !tileOnScreen.Intersect(screen).IsEmpty();
 }
 
@@ -239,7 +242,7 @@ void RenderCache::Invalidate(DisplayModel *dm, int pageNo, RectD rect)
 
     ScopedCritSec scopeCache(&cacheAccess);
 
-    RectD mediabox = dm->engine->PageMediabox(pageNo);
+    RectD mediabox = dm->GetEngine()->PageMediabox(pageNo);
     for (int i = 0; i < cacheCount; i++) {
         if (cache[i]->dm == dm && cache[i]->pageNo == pageNo &&
             !GetTileRect(mediabox, cache[i]->tile).Intersect(rect).IsEmpty()) {
@@ -252,8 +255,8 @@ void RenderCache::Invalidate(DisplayModel *dm, int pageNo, RectD rect)
 // determine the count of tiles required for a page at a given zoom level
 USHORT RenderCache::GetTileRes(DisplayModel *dm, int pageNo)
 {
-    RectD mediabox = dm->engine->PageMediabox(pageNo);
-    RectD pixelbox = dm->engine->Transform(mediabox, pageNo, dm->ZoomReal(), dm->Rotation());
+    RectD mediabox = dm->GetEngine()->PageMediabox(pageNo);
+    RectD pixelbox = dm->GetEngine()->Transform(mediabox, pageNo, dm->GetZoomReal(), dm->GetRotation());
 
     float factorW = (float)pixelbox.dx / (maxTileSize.dx + 1);
     float factorH = (float)pixelbox.dy / (maxTileSize.dy + 1);
@@ -265,9 +268,9 @@ USHORT RenderCache::GetTileRes(DisplayModel *dm, int pageNo)
     // use larger tiles when fitting page or width or when a page is smaller
     // than the visible canvas width/height or when rendering pages
     // without clipping optimizations
-    if (dm->ZoomVirtual() == ZOOM_FIT_PAGE || dm->ZoomVirtual() == ZOOM_FIT_WIDTH ||
-        pixelbox.dx <= dm->viewPort.dx || pixelbox.dy < dm->viewPort.dy ||
-        !dm->engine->HasClipOptimizations(pageNo)) {
+    if (dm->GetZoomVirtual() == ZOOM_FIT_PAGE || dm->GetZoomVirtual() == ZOOM_FIT_WIDTH ||
+        pixelbox.dx <= dm->GetViewPort().dx || pixelbox.dy < dm->GetViewPort().dy ||
+        !dm->GetEngine()->HasClipOptimizations(pageNo)) {
         factorAvg /= 2.0;
     }
 
@@ -275,7 +278,7 @@ USHORT RenderCache::GetTileRes(DisplayModel *dm, int pageNo)
     if (factorAvg > 1.5)
         res = (USHORT)ceilf(log(factorAvg) / log(2.0f));
     // limit res to 30, so that (1 << res) doesn't overflow for 32-bit signed int
-    return min(res, 30);
+    return std::min(res, (USHORT)30);
 }
 
 // get the maximum resolution available for the given page
@@ -286,7 +289,7 @@ USHORT RenderCache::GetMaxTileRes(DisplayModel *dm, int pageNo, int rotation)
     for (int i = 0; i < cacheCount; i++) {
         if (cache[i]->dm == dm && cache[i]->pageNo == pageNo &&
             cache[i]->rotation == rotation) {
-            maxRes = max(cache[i]->tile.res, maxRes);
+            maxRes = std::max(cache[i]->tile.res, maxRes);
         }
     }
     return maxRes;
@@ -295,6 +298,7 @@ USHORT RenderCache::GetMaxTileRes(DisplayModel *dm, int pageNo, int rotation)
 // reduce the size of tiles in order to hopefully use less memory overall
 bool RenderCache::ReduceTileSize()
 {
+    fprintf(stderr, "RenderCache: reducing tile size (current: %d x %d)\n", maxTileSize.dx, maxTileSize.dy);
     if (maxTileSize.dx < 200 || maxTileSize.dy < 200)
         return false;
 
@@ -341,8 +345,8 @@ void RenderCache::RequestRendering(DisplayModel *dm, int pageNo, TilePosition ti
     if (!dm || dm->dontRenderFlag)
         return;
 
-    int rotation = NormalizeRotation(dm->Rotation());
-    float zoom = dm->ZoomReal(pageNo);
+    int rotation = NormalizeRotation(dm->GetRotation());
+    float zoom = dm->GetZoomReal(pageNo);
 
     if (curReq && (curReq->pageNo == pageNo) && (curReq->dm == dm) && (curReq->tile == tile)) {
         if ((curReq->zoom == zoom) && (curReq->rotation == rotation)) {
@@ -427,7 +431,7 @@ bool RenderCache::Render(DisplayModel *dm, int pageNo, int rotation, float zoom,
     newRequest->rotation = rotation;
     newRequest->zoom = zoom;
     if (tile) {
-        newRequest->pageRect = GetTileRectUser(dm->engine, pageNo, rotation, zoom, *tile);
+        newRequest->pageRect = GetTileRectUser(dm->GetEngine(), pageNo, rotation, zoom, *tile);
         newRequest->tile = *tile;
     }
     else if (pageRect) {
@@ -575,7 +579,7 @@ DWORD WINAPI RenderCache::RenderCacheThread(LPVOID data)
             req.dm->textCache->GetData(req.pageNo);
 
         CrashIf(req.abortCookie != NULL);
-        bmp = req.dm->engine->RenderBitmap(req.pageNo, req.zoom, req.rotation, &req.pageRect, Target_View, &req.abortCookie);
+        bmp = req.dm->GetEngine()->RenderBitmap(req.pageNo, req.zoom, req.rotation, &req.pageRect, Target_View, &req.abortCookie);
         if (req.abort) {
             delete bmp;
             if (req.renderCb)
@@ -590,8 +594,8 @@ DWORD WINAPI RenderCache::RenderCacheThread(LPVOID data)
         }
         else {
             // don't replace colors for individual images
-            if (bmp && !req.dm->engine->IsImageCollection())
-                UpdateBitmapColorRange(bmp->GetBitmap(), cache->colorRange);
+            if (bmp && !req.dm->GetEngine()->IsImageCollection())
+                UpdateBitmapColors(bmp->GetBitmap(), cache->textColor, cache->backgroundColor);
             cache->Add(req, bmp);
             req.dm->RepaintDisplay();
         }
@@ -604,14 +608,14 @@ UINT RenderCache::PaintTile(HDC hdc, RectI bounds, DisplayModel *dm, int pageNo,
                             TilePosition tile, RectI tileOnScreen, bool renderMissing,
                             bool *renderOutOfDateCue, bool *renderedReplacement)
 {
-    BitmapCacheEntry *entry = Find(dm, pageNo, dm->Rotation(), dm->ZoomReal(), &tile);
+    BitmapCacheEntry *entry = Find(dm, pageNo, dm->GetRotation(), dm->GetZoomReal(), &tile);
     UINT renderDelay = 0;
 
     if (!entry) {
         if (!isRemoteSession) {
             if (renderedReplacement)
                 *renderedReplacement = true;
-            entry = Find(dm, pageNo, dm->Rotation(), INVALID_ZOOM, &tile);
+            entry = Find(dm, pageNo, dm->GetRotation(), INVALID_ZOOM, &tile);
         }
         renderDelay = GetRenderDelay(dm, pageNo, tile);
         if (renderMissing && RENDER_DELAY_UNDEFINED == renderDelay && !IsRenderQueueFull())
@@ -633,9 +637,9 @@ UINT RenderCache::PaintTile(HDC hdc, RectI bounds, DisplayModel *dm, int pageNo,
     HDC bmpDC = CreateCompatibleDC(hdc);
     if (bmpDC) {
         SizeI bmpSize = renderedBmp->Size();
-        int xSrc = -min(tileOnScreen.x, 0);
-        int ySrc = -min(tileOnScreen.y, 0);
-        float factor = min(1.0f * bmpSize.dx / tileOnScreen.dx, 1.0f * bmpSize.dy / tileOnScreen.dy);
+        int xSrc = -std::min(tileOnScreen.x, 0);
+        int ySrc = -std::min(tileOnScreen.y, 0);
+        float factor = std::min(1.0f * bmpSize.dx / tileOnScreen.dx, 1.0f * bmpSize.dy / tileOnScreen.dy);
 
         SelectObject(bmpDC, hbmp);
         if (factor != 1.0f)
@@ -679,8 +683,8 @@ UINT RenderCache::Paint(HDC hdc, RectI bounds, DisplayModel *dm, int pageNo,
 {
     assert(pageInfo->shown && 0.0 != pageInfo->visibleRatio);
 
-    int rotation = dm->Rotation();
-    float zoom = dm->ZoomReal();
+    int rotation = dm->GetRotation();
+    float zoom = dm->GetZoomReal();
     USHORT targetRes = GetTileRes(dm, pageNo);
     USHORT maxRes = GetMaxTileRes(dm, pageNo, rotation);
     if (maxRes < targetRes)
@@ -692,9 +696,13 @@ UINT RenderCache::Paint(HDC hdc, RectI bounds, DisplayModel *dm, int pageNo,
     bool neededScaling = false;
 
     while (queue.Count() > 0) {
-        TilePosition tile = queue.At(0);
-        queue.RemoveAt(0);
-        RectI tileOnScreen = GetTileOnScreen(dm->engine, pageNo, rotation, zoom, tile, pageInfo->pageOnScreen);
+        TilePosition tile = queue.PopAt(0);
+        RectI tileOnScreen = GetTileOnScreen(dm->GetEngine(), pageNo, rotation, zoom, tile, pageInfo->pageOnScreen);
+        if (tileOnScreen.IsEmpty()) {
+            // display an error message when only empty tiles should be drawn (i.e. on page loading errors)
+            renderDelayMin = std::min(RENDER_DELAY_FAILED, renderDelayMin);
+            continue;
+        }
         tileOnScreen = pageInfo->pageOnScreen.Intersect(tileOnScreen);
         RectI isect = bounds.Intersect(tileOnScreen);
         if (isect.IsEmpty())
@@ -711,7 +719,7 @@ UINT RenderCache::Paint(HDC hdc, RectI bounds, DisplayModel *dm, int pageNo,
         }
         if (isTargetRes && renderDelay > 0)
             neededScaling = true;
-        renderDelayMin = min(renderDelay, renderDelayMin);
+        renderDelayMin = std::min(renderDelay, renderDelayMin);
         // paint tiles from left to right from top to bottom
         if (tile.res > 0 && queue.Count() > 0 && tile.res < queue.At(0).res)
             queue.Sort(cmpTilePosition);

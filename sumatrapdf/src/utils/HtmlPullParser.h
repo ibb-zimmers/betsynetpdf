@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef HtmlPullParser_h
@@ -80,14 +80,12 @@ class HtmlPullParser {
     size_t         len;
 
     HtmlToken      currToken;
-    
-public:
-    Vec<HtmlTag>   tagNesting;
 
+public:
     HtmlPullParser(const char *s, size_t len) : currPos(s), end(s + len), start(s), len(len) { }
     HtmlPullParser(const char *s, const char *end) : currPos(s), end(end), start(s), len(end - s) { }
 
-    void         SetCurrPosOff(int off) { currPos = start + off; }
+    void         SetCurrPosOff(ptrdiff_t off) { currPos = start + off; }
     size_t       Len()   const { return len;   }
     const char * Start() const { return start; }
 
@@ -103,6 +101,7 @@ bool        IsSpaceOnly(const char *s, const char *end);
 int         HtmlEntityNameToRune(const char *name, size_t nameLen);
 int         HtmlEntityNameToRune(const WCHAR *name, size_t nameLen);
 
+const char *ResolveHtmlEntity(const char *s, size_t len, int& rune);
 const char *ResolveHtmlEntities(const char *s, const char *end, Allocator *alloc);
 char *      ResolveHtmlEntities(const char *s, size_t len);
 

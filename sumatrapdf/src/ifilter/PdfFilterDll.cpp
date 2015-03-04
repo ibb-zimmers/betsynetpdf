@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -8,10 +8,12 @@
 #ifdef BUILD_TEX_IFILTER
 #include "CTeXFilter.h"
 #endif
+#ifdef BUILD_EPUB_IFILTER
+#include "CEpubFilter.h"
+#endif
 
 HINSTANCE g_hInstance = NULL;
 long g_lRefCount = 0;
-
 
 class CClassFactory : public IClassFactory
 {
@@ -63,6 +65,10 @@ public:
         else if (SUCCEEDED(CLSIDFromString(SZ_TEX_FILTER_CLSID, &clsid)) && IsEqualCLSID(m_clsid, clsid))
             pFilter = new CTeXFilter(&g_lRefCount);
 #endif
+#ifdef BUILD_EPUB_IFILTER
+        else if (SUCCEEDED(CLSIDFromString(SZ_EPUB_FILTER_CLSID, &clsid)) && IsEqualCLSID(m_clsid, clsid))
+            pFilter = new CEpubFilter(&g_lRefCount);
+#endif
         else
             return E_NOINTERFACE;
         if (!pFilter)
@@ -84,7 +90,6 @@ private:
     long m_lRef;
     CLSID m_clsid;
 };
-
 
 STDAPI_(BOOL) DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved)
 {
@@ -117,9 +122,10 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 
 STDAPI DllRegisterServer()
 {
-    WCHAR path[MAX_PATH];
-    if (!GetModuleFileName(g_hInstance, path, dimof(path)))
+    WCHAR dllPath[MAX_PATH];
+    if (!GetModuleFileName(g_hInstance, dllPath, dimof(dllPath)))
         return HRESULT_FROM_WIN32(GetLastError());
+    dllPath[dimof(dllPath) - 1] = '\0';
 
     struct {
         WCHAR *key, *value, *data;
@@ -127,7 +133,7 @@ STDAPI DllRegisterServer()
         { L"Software\\Classes\\CLSID\\" SZ_PDF_FILTER_CLSID,
                 NULL,                   L"SumatraPDF IFilter" },
         { L"Software\\Classes\\CLSID\\" SZ_PDF_FILTER_CLSID L"\\InProcServer32",
-                NULL,                   path },
+                NULL,                   dllPath },
         { L"Software\\Classes\\CLSID\\" SZ_PDF_FILTER_CLSID L"\\InProcServer32",
                 L"ThreadingModel",   L"Both" },
         { L"Software\\Classes\\CLSID\\" SZ_PDF_FILTER_HANDLER,
@@ -142,7 +148,7 @@ STDAPI DllRegisterServer()
         { L"Software\\Classes\\CLSID\\" SZ_TEX_FILTER_CLSID,
                 NULL,                   L"SumatraPDF IFilter" },
         { L"Software\\Classes\\CLSID\\" SZ_TEX_FILTER_CLSID L"\\InProcServer32",
-                NULL,                   path },
+                NULL,                   dllPath },
         { L"Software\\Classes\\CLSID\\" SZ_TEX_FILTER_CLSID L"\\InProcServer32",
                 L"ThreadingModel",      L"Both" },
         { L"Software\\Classes\\CLSID\\" SZ_TEX_FILTER_HANDLER,
@@ -153,6 +159,22 @@ STDAPI DllRegisterServer()
                 NULL,                   SZ_TEX_FILTER_CLSID },
         { L"Software\\Classes\\.tex\\PersistentHandler",
                 NULL,                   SZ_TEX_FILTER_HANDLER },
+#endif
+#ifdef BUILD_EPUB_IFILTER
+        { L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_CLSID,
+                NULL,                   L"SumatraPDF IFilter" },
+        { L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_CLSID L"\\InProcServer32",
+                NULL,                   dllPath },
+        { L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_CLSID L"\\InProcServer32",
+                L"ThreadingModel",      L"Both" },
+        { L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_HANDLER,
+                NULL,                   L"SumatraPDF LaTeX IFilter Persistent Handler" },
+        { L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_HANDLER L"\\PersistentAddinsRegistered",
+                NULL,                   L"" },
+        { L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_HANDLER L"\\PersistentAddinsRegistered\\{89BCB740-6119-101A-BCB7-00DD010655AF}",
+                NULL,                   SZ_EPUB_FILTER_CLSID },
+        { L"Software\\Classes\\.epub\\PersistentHandler",
+                NULL,                   SZ_EPUB_FILTER_HANDLER },
 #endif
     };
 
@@ -176,6 +198,11 @@ STDAPI DllUnregisterServer()
         L"Software\\Classes\\CLSID\\" SZ_TEX_FILTER_CLSID,
         L"Software\\Classes\\CLSID\\" SZ_TEX_FILTER_HANDLER,
         L"Software\\Classes\\.tex\\PersistentHandler",
+#endif
+#ifdef BUILD_EPUB_IFILTER
+        L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_CLSID,
+        L"Software\\Classes\\CLSID\\" SZ_EPUB_FILTER_HANDLER,
+        L"Software\\Classes\\.epub\\PersistentHandler",
 #endif
     };
 

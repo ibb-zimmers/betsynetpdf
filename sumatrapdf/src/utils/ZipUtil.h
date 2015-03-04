@@ -1,30 +1,32 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef ZipUtil_h
 #define ZipUtil_h
 
-#include <unzip.h>
+extern "C" {
+typedef struct ar_stream_s ar_stream;
+typedef struct ar_archive_s ar_archive;
+}
 
-enum ZipMethod { Zip_Any=-1, Zip_None=0, Zip_Deflate=8, Zip_Deflate64=9, Zip_Bzip=12 };
-
-class ZipFile {
-    unzFile uf;
+// TODO: unused - remove?
+class ZipFileAlloc {
     Allocator *allocator;
     WStrList filenames;
-    Vec<unz_file_info64> fileinfo;
-    Vec<unz64_file_pos> filepos;
-    uLong commentLen;
+    Vec<int64_t> filepos;
 
-    void ExtractFilenames(ZipMethod method=Zip_Any);
+    ar_stream *data;
+    ar_archive *ar;
+
+    void ExtractFilenames();
 
 public:
-    ZipFile(const WCHAR *path, ZipMethod method=Zip_Any, Allocator *allocator=NULL);
-    ZipFile(IStream *stream, ZipMethod method=Zip_Any, Allocator *allocator=NULL);
-    ~ZipFile();
+    explicit ZipFileAlloc(const WCHAR *path, bool deflatedOnly=false, Allocator *allocator=NULL);
+    explicit ZipFileAlloc(IStream *stream, bool deflatedOnly=false, Allocator *allocator=NULL);
+    ~ZipFileAlloc();
 
     size_t GetFileCount() const;
-    // the result is owned by ZipFile
+    // the result is owned by ZipFileAlloc
     const WCHAR *GetFileName(size_t fileindex);
     // reverts GetFileName
     size_t GetFileIndex(const WCHAR *filename);
@@ -42,19 +44,26 @@ public:
     bool UnzipFile(const WCHAR *filename, const WCHAR *dir, const WCHAR *unzippedName=NULL);
 };
 
-IStream *OpenDirAsZipStream(const WCHAR *dirPath, bool recursive=false);
-
-class ZipCreatorData;
-
 class ZipCreator {
-    ZipCreatorData *d;
+    ISequentialStream *stream;
+    str::Str<char> centraldir;
+    size_t bytesWritten;
+    size_t fileCount;
+
+    bool WriteData(const void *data, size_t size);
+    bool AddFileData(const char *nameUtf8, const void *data, size_t size, uint32_t dosdate=0);
+
 public:
-    ZipCreator();
+    ZipCreator(const WCHAR *zipFilePath);
+    ZipCreator(ISequentialStream *stream);
     ~ZipCreator();
 
     bool AddFile(const WCHAR *filePath, const WCHAR *nameInZip=NULL);
     bool AddFileFromDir(const WCHAR *filePath, const WCHAR *dir);
-    bool SaveAs(const WCHAR *zipFilePath);
+    bool AddDir(const WCHAR *dirPath, bool recursive=false);
+    bool Finish();
 };
+
+IStream *OpenDirAsZipStream(const WCHAR *dirPath, bool recursive=false);
 
 #endif

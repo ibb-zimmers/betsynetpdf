@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Dict_h
@@ -24,7 +24,7 @@ public:
     PoolAllocator *allocator;
     HashTable *h;
 
-    MapStrToInt(size_t initialSize = DEFAULT_HASH_TABLE_INITIAL_SIZE);
+    explicit MapStrToInt(size_t initialSize = DEFAULT_HASH_TABLE_INITIAL_SIZE);
     ~MapStrToInt();
 
     size_t Count() const;
@@ -40,7 +40,7 @@ public:
     PoolAllocator *allocator;
     HashTable *h;
 
-    MapWStrToInt(size_t initialSize = DEFAULT_HASH_TABLE_INITIAL_SIZE);
+    explicit MapWStrToInt(size_t initialSize = DEFAULT_HASH_TABLE_INITIAL_SIZE);
     ~MapWStrToInt();
 
     size_t Count() const;
@@ -62,7 +62,7 @@ public:
     StringInterner() : nInternCalls(0) {}
 
     int             Intern(const char *s, bool *alreadyPresent=NULL);
-    int             StringsCount() const { return intToStr.Count(); }
+    size_t          StringsCount() const { return intToStr.Count(); }
     const char *    GetByIndex(int n) const { return intToStr.At(n); }
 
     int             nInternCalls; // so we know how effective interning is

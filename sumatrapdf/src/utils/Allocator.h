@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 // note: include BaseUtil.h instead of including directly
@@ -25,7 +25,7 @@ public:
     template <typename T>
     static T *Alloc(Allocator *a, size_t n=1) {
         size_t size = n * sizeof(T);
-        return (T*)Allocator::AllocZero(a, size);
+        return (T *)AllocZero(a, size);
     }
 
     static void *AllocZero(Allocator *a, size_t size) {
@@ -136,7 +136,7 @@ public:
         return elPtr;
     }
 
-    PoolAllocator(size_t rounding=8) : minBlockSize(4096),
+    explicit PoolAllocator(size_t rounding=8) : minBlockSize(4096),
         allocRounding(rounding), currIter(NULL), iterPos((size_t)-1) {
         Init();
     }
@@ -244,7 +244,7 @@ class FixedArray {
     T stackBuf[StackBufInBytes / sizeof(T)];
     T *memBuf;
 public:
-    FixedArray(size_t elCount) {
+    explicit FixedArray(size_t elCount) {
         memBuf = NULL;
         size_t stackEls = StackBufInBytes / sizeof(T);
         if (elCount > stackEls)

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -30,12 +30,14 @@ bool DirIter::TryNextDir()
     return false;
 }
 
-// Start iteration in a given dir. Returns false if error.
-bool DirIter::Start(const WCHAR *dir, bool recursive)
+// Start iteration in a given dir and return fullPath of first
+// file found or NULL if no files
+const WCHAR *DirIter::First()
 {
-    this->recursive = recursive;
-    foundNext = StartDirIter(dir);
-    return foundNext;
+    foundNext = StartDirIter(startDir);
+    if (!foundNext)
+        return NULL;
+    return Next();
 }
 
 // try to filter out things that are not files
@@ -67,7 +69,7 @@ static bool IsSpecialDir(const WCHAR *s)
     return false;
 }
 
-// Returns a path of the next file (relative to the path passed to Start()).
+// Returns a full path of the next file
 // Returns NULL if finished iteration.
 // Returned value is valid only until we call Next() again.
 const WCHAR *DirIter::Next()

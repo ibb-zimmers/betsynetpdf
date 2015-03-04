@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -6,12 +6,15 @@
 
 #include "AppPrefs.h"
 #include "CmdLineParser.h"
+#include "Controller.h"
 #include "DisplayModel.h"
-#include "EbookWindow.h"
+#include "EngineManager.h"
 #include "ExternalPdfViewer.h"
 #include "Favorites.h"
-#include "FileUtil.h"
 #include "FileHistory.h"
+#include "FileThumbnails.h"
+#include "FileUtil.h"
+#include "Mui.h"
 #include "Selection.h"
 #include "SumatraAbout.h"
 #include "SumatraDialogs.h"
@@ -23,7 +26,7 @@
 void MenuUpdateDisplayMode(WindowInfo* win)
 {
     bool enabled = win->IsDocLoaded();
-    DisplayMode displayMode = enabled ? win->dm->GetDisplayMode() : gGlobalPrefs->defaultDisplayModeEnum;
+    DisplayMode displayMode = enabled ? win->ctrl->GetDisplayMode() : gGlobalPrefs->defaultDisplayModeEnum;
 
     for (int id = IDM_VIEW_LAYOUT_FIRST; id <= IDM_VIEW_LAYOUT_LAST; id++) {
         win::menu::SetEnabled(win->menu, id, enabled);
@@ -34,16 +37,16 @@ void MenuUpdateDisplayMode(WindowInfo* win)
         id = IDM_VIEW_SINGLE_PAGE;
     else if (IsFacing(displayMode))
         id = IDM_VIEW_FACING;
-    else if (DisplayModeShowCover(displayMode))
+    else if (IsBookView(displayMode))
         id = IDM_VIEW_BOOK;
     else
-        assert(!win->dm && DM_AUTOMATIC == displayMode);
+        AssertCrash(!win->ctrl && DM_AUTOMATIC == displayMode);
 
     CheckMenuRadioItem(win->menu, IDM_VIEW_LAYOUT_FIRST, IDM_VIEW_LAYOUT_LAST, id, MF_BYCOMMAND);
     win::menu::SetChecked(win->menu, IDM_VIEW_CONTINUOUS, IsContinuous(displayMode));
 
-    if (win->IsCbx()) {
-        bool mangaMode = win->dm ? win->dm->GetDisplayR2L() : gGlobalPrefs->comicBookUI.cbxMangaMode;
+    if (Engine_ComicBook == win->GetEngineType()) {
+        bool mangaMode = win->AsFixed()->GetDisplayR2L();
         win::menu::SetChecked(win->menu, IDM_VIEW_MANGA_MODE, mangaMode);
     }
 }
@@ -51,11 +54,11 @@ void MenuUpdateDisplayMode(WindowInfo* win)
 static MenuDef menuDefFile[] = {
     { _TRN("&Open...\tCtrl+O"),             IDM_OPEN ,                  MF_REQ_DISK_ACCESS },
     { _TRN("&Close\tCtrl+W"),               IDM_CLOSE,                  MF_REQ_DISK_ACCESS },
-    { _TRN("&Save As...\tCtrl+S"),          IDM_SAVEAS,                 MF_REQ_DISK_ACCESS | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("&Save As...\tCtrl+S"),          IDM_SAVEAS,                 MF_REQ_DISK_ACCESS },
 #ifdef ENABLE_SAVE_SHORTCUT
     { _TRN("Save S&hortcut...\tCtrl+Shift+S"), IDM_SAVEAS_BOOKMARK,     MF_REQ_DISK_ACCESS | MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
 #else
-    { _TRN("Re&name...\tF2"),               IDM_RENAME_FILE,            MF_REQ_DISK_ACCESS | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("Re&name...\tF2"),               IDM_RENAME_FILE,            MF_REQ_DISK_ACCESS },
 #endif
     { _TRN("&Print...\tCtrl+P"),            IDM_PRINT,                  MF_REQ_PRINTER_ACCESS | MF_NOT_FOR_EBOOK_UI },
     { SEP_ITEM,                             0,                          MF_REQ_DISK_ACCESS },
@@ -66,35 +69,32 @@ static MenuDef menuDefFile[] = {
     { _TRN("Open in &Microsoft XPS-Viewer"),IDM_VIEW_WITH_XPS_VIEWER,   MF_REQ_DISK_ACCESS | MF_NOT_FOR_EBOOK_UI },
     { _TRN("Open in &Microsoft HTML Help"), IDM_VIEW_WITH_HTML_HELP,    MF_REQ_DISK_ACCESS | MF_NOT_FOR_EBOOK_UI },
     // further entries are added if specified in gGlobalPrefs.vecCommandLine
-    { _TRN("Send by &E-mail..."),           IDM_SEND_BY_EMAIL,          MF_REQ_DISK_ACCESS | MF_NOT_FOR_EBOOK_UI },
-    { SEP_ITEM,                             0,                          MF_REQ_DISK_ACCESS | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("Send by &E-mail..."),           IDM_SEND_BY_EMAIL,          MF_REQ_DISK_ACCESS },
+    { SEP_ITEM,                             0,                          MF_REQ_DISK_ACCESS },
     { _TRN("P&roperties\tCtrl+D"),          IDM_PROPERTIES,             0 },
     { SEP_ITEM,                             0,                          0 },
     { _TRN("E&xit\tCtrl+Q"),                IDM_EXIT,                   0 }
 };
 
-// the whole menu is MF_NOT_FOR_EBOOK_UI
 static MenuDef menuDefView[] = {
     { _TRN("&Single Page\tCtrl+6"),         IDM_VIEW_SINGLE_PAGE,       MF_NOT_FOR_CHM },
     { _TRN("&Facing\tCtrl+7"),              IDM_VIEW_FACING,            MF_NOT_FOR_CHM },
-    { _TRN("&Book View\tCtrl+8"),           IDM_VIEW_BOOK,              MF_NOT_FOR_CHM },
-    // TODO: this should be Show &Pages Continuously. Need to add rename/duplicate functionality
-    // to apptranslator to make such renames easy
-    { _TRN("Show &pages continuously"),     IDM_VIEW_CONTINUOUS,        MF_NOT_FOR_CHM },
+    { _TRN("&Book View\tCtrl+8"),           IDM_VIEW_BOOK,              MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("Show &Pages Continuously"),     IDM_VIEW_CONTINUOUS,        MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
     // TODO: "&Inverse Reading Direction" (since some Mangas might be read left-to-right)?
     { _TRN("Man&ga Mode"),                  IDM_VIEW_MANGA_MODE,        MF_CBX_ONLY },
     { SEP_ITEM,                             0,                          MF_NOT_FOR_CHM },
-    { _TRN("Rotate &Left\tCtrl+Shift+-"),   IDM_VIEW_ROTATE_LEFT,       MF_NOT_FOR_CHM },
-    { _TRN("Rotate &Right\tCtrl+Shift++"),  IDM_VIEW_ROTATE_RIGHT,      MF_NOT_FOR_CHM },
-    { SEP_ITEM,                             0,                          MF_NOT_FOR_CHM },
-    { _TRN("Pr&esentation\tCtrl+L"),        IDM_VIEW_PRESENTATION_MODE, MF_REQ_FULLSCREEN },
-    { _TRN("F&ullscreen\tCtrl+Shift+L"),    IDM_VIEW_FULLSCREEN,        MF_REQ_FULLSCREEN },
+    { _TRN("Rotate &Left\tCtrl+Shift+-"),   IDM_VIEW_ROTATE_LEFT,       MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("Rotate &Right\tCtrl+Shift++"),  IDM_VIEW_ROTATE_RIGHT,      MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
+    { SEP_ITEM,                             0,                          MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("Pr&esentation\tF5"),            IDM_VIEW_PRESENTATION_MODE, MF_REQ_FULLSCREEN | MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("F&ullscreen\tF11"),             IDM_VIEW_FULLSCREEN,        MF_REQ_FULLSCREEN },
     { SEP_ITEM,                             0,                          MF_REQ_FULLSCREEN },
     { _TRN("Book&marks\tF12"),              IDM_VIEW_BOOKMARKS,         0 },
-    { _TRN("Show &Toolbar"),                IDM_VIEW_SHOW_HIDE_TOOLBAR, 0 },
-    { SEP_ITEM,                             0,                          MF_REQ_ALLOW_COPY },
-    { _TRN("Select &All\tCtrl+A"),          IDM_SELECT_ALL,             MF_REQ_ALLOW_COPY },
-    { _TRN("&Copy Selection\tCtrl+C"),      IDM_COPY_SELECTION,         MF_REQ_ALLOW_COPY },
+    { _TRN("Show &Toolbar"),                IDM_VIEW_SHOW_HIDE_TOOLBAR, MF_NOT_FOR_EBOOK_UI },
+    { SEP_ITEM,                             0,                          MF_REQ_ALLOW_COPY | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("Select &All\tCtrl+A"),          IDM_SELECT_ALL,             MF_REQ_ALLOW_COPY | MF_NOT_FOR_EBOOK_UI },
+    { _TRN("&Copy Selection\tCtrl+C"),      IDM_COPY_SELECTION,         MF_REQ_ALLOW_COPY | MF_NOT_FOR_EBOOK_UI },
 };
 
 static MenuDef menuDefGoTo[] = {
@@ -103,14 +103,14 @@ static MenuDef menuDefGoTo[] = {
     { _TRN("&First Page\tHome"),            IDM_GOTO_FIRST_PAGE,        0 },
     { _TRN("&Last Page\tEnd"),              IDM_GOTO_LAST_PAGE,         0 },
     { _TRN("Pa&ge...\tCtrl+G"),             IDM_GOTO_PAGE,              0 },
-    { SEP_ITEM,                             0,                          MF_NOT_FOR_EBOOK_UI },
-    { _TRN("&Back\tAlt+Left Arrow"),        IDM_GOTO_NAV_BACK,          MF_NOT_FOR_EBOOK_UI },
-    { _TRN("F&orward\tAlt+Right Arrow"),    IDM_GOTO_NAV_FORWARD,       MF_NOT_FOR_EBOOK_UI },
+    { SEP_ITEM,                             0,                          0 },
+    { _TRN("&Back\tAlt+Left Arrow"),        IDM_GOTO_NAV_BACK,          0 },
+    { _TRN("F&orward\tAlt+Right Arrow"),    IDM_GOTO_NAV_FORWARD,       0 },
     { SEP_ITEM,                             0,                          MF_NOT_FOR_EBOOK_UI },
     { _TRN("Fin&d...\tCtrl+F"),             IDM_FIND_FIRST,             MF_NOT_FOR_EBOOK_UI },
 };
 
-// the whole menu is MF_NOT_FOR_EBOOK_UI
+// the entire menu is MF_NOT_FOR_EBOOK_UI
 static MenuDef menuDefZoom[] = {
     { _TRN("Fit &Page\tCtrl+0"),            IDM_ZOOM_FIT_PAGE,          MF_NOT_FOR_CHM },
     { _TRN("&Actual Size\tCtrl+1"),         IDM_ZOOM_ACTUAL_SIZE,       MF_NOT_FOR_CHM },
@@ -143,7 +143,7 @@ static MenuDef menuDefSettings[] = {
     { _TRN("&Advanced Options..."),         IDM_ADVANCED_OPTIONS,       MF_REQ_PREF_ACCESS | MF_REQ_DISK_ACCESS },
 };
 
-// the whole menu is MF_NOT_FOR_EBOOK_UI
+// the entire menu is MF_NOT_FOR_EBOOK_UI
 MenuDef menuDefFavorites[] = {
     { _TRN("Add to favorites"),             IDM_FAV_ADD,                0 },
     { _TRN("Remove from favorites"),        IDM_FAV_DEL,                0 },
@@ -168,15 +168,9 @@ static MenuDef menuDefDebug[] = {
     { SEP_ITEM,                             0,                          0 },
     { "Crash me",                           IDM_DEBUG_CRASH_ME,         MF_NO_TRANSLATE },
 };
-
-static MenuDef menuDefDebugEbooks[] = {
-    { "Show bbox",                          IDM_DEBUG_SHOW_LINKS,       MF_NO_TRANSLATE },
-    { "Load mobi sample",                   IDM_LOAD_MOBI_SAMPLE,       MF_NO_TRANSLATE },
-    { "Toggle ebook UI",                    IDM_DEBUG_EBOOK_UI,         MF_NO_TRANSLATE },
-};
 #endif
 
-// the whole menu is MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI
+// the entire menu is MF_NOT_FOR_CHM | MF_NOT_FOR_EBOOK_UI
 static MenuDef menuDefContext[] = {
     { _TRN("&Copy Selection"),              IDM_COPY_SELECTION,         MF_REQ_ALLOW_COPY },
     { _TRN("Copy &Link Address"),           IDM_COPY_LINK_TARGET,       MF_REQ_ALLOW_COPY },
@@ -262,7 +256,7 @@ static void AppendRecentFilesToMenu(HMENU m)
         InsertMenu(m, IDM_EXIT, MF_BYCOMMAND | MF_SEPARATOR, 0, NULL);
 }
 
-static void AppendExternalViewersToMenu(HMENU menuFile, const WCHAR *filePath, bool forEbookUI)
+static void AppendExternalViewersToMenu(HMENU menuFile, const WCHAR *filePath)
 {
     if (0 == gGlobalPrefs->externalViewers->Count())
         return;
@@ -291,15 +285,11 @@ static void AppendExternalViewersToMenu(HMENU menuFile, const WCHAR *filePath, b
 
         ScopedMem<WCHAR> menuString(str::Format(_TR("Open in %s"), appName ? appName : name));
         UINT menuId = IDM_OPEN_WITH_EXTERNAL_FIRST + count;
-        InsertMenu(menuFile, forEbookUI ? IDM_PROPERTIES : IDM_SEND_BY_EMAIL,
-                   MF_BYCOMMAND | MF_ENABLED | MF_STRING, menuId, menuString);
+        InsertMenu(menuFile, IDM_SEND_BY_EMAIL, MF_BYCOMMAND | MF_ENABLED | MF_STRING, menuId, menuString);
         if (!filePath)
             win::menu::SetEnabled(menuFile, menuId, false);
         count++;
     }
-
-    if (forEbookUI && count > 0)
-        InsertMenu(menuFile, IDM_PROPERTIES, MF_BYCOMMAND | MF_SEPARATOR, 0, NULL);
 }
 
 static struct {
@@ -363,14 +353,18 @@ void MenuUpdateZoom(WindowInfo* win)
 {
     float zoomVirtual = gGlobalPrefs->defaultZoomFloat;
     if (win->IsDocLoaded())
-        zoomVirtual = win->dm->ZoomVirtual();
+        zoomVirtual = win->ctrl->GetZoomVirtual();
     UINT menuId = MenuIdFromVirtualZoom(zoomVirtual);
     ZoomMenuItemCheck(win->menu, menuId, win->IsDocLoaded());
 }
 
 void MenuUpdatePrintItem(WindowInfo* win, HMENU menu, bool disableOnly=false) {
     bool filePrintEnabled = win->IsDocLoaded();
-    bool filePrintAllowed = !filePrintEnabled || win->dm->engine->AllowsPrinting();
+#ifndef DISABLE_DOCUMENT_RESTRICTIONS
+    bool filePrintAllowed = !filePrintEnabled || !win->AsFixed() || win->AsFixed()->GetEngine()->AllowsPrinting();
+#else
+    bool filePrintAllowed = true;
+#endif
 
     int ix;
     for (ix = 0; ix < dimof(menuDefFile) && menuDefFile[ix].id != IDM_PRINT; ix++);
@@ -388,8 +382,6 @@ void MenuUpdatePrintItem(WindowInfo* win, HMENU menu, bool disableOnly=false) {
 
 static bool IsFileCloseMenuEnabled()
 {
-    if (gEbookWindows.Count() > 0)
-        return true;
     for (size_t i = 0; i < gWindows.Count(); i++) {
         if (!gWindows.At(i)->IsAboutWindow())
             return true;
@@ -397,7 +389,8 @@ static bool IsFileCloseMenuEnabled()
     return false;
 }
 
-void MenuUpdateStateForWindow(WindowInfo* win) {
+void MenuUpdateStateForWindow(WindowInfo* win)
+{
     // those menu items will be disabled if no document is opened, enabled otherwise
     static UINT menusToDisableIfNoDocument[] = {
         IDM_VIEW_ROTATE_LEFT, IDM_VIEW_ROTATE_RIGHT, IDM_GOTO_NEXT_PAGE, IDM_GOTO_PREV_PAGE,
@@ -405,7 +398,7 @@ void MenuUpdateStateForWindow(WindowInfo* win) {
         IDM_GOTO_PAGE, IDM_FIND_FIRST, IDM_SAVEAS, IDM_SAVEAS_BOOKMARK, IDM_SEND_BY_EMAIL,
         IDM_SELECT_ALL, IDM_COPY_SELECTION, IDM_PROPERTIES, IDM_VIEW_PRESENTATION_MODE,
         IDM_VIEW_WITH_ACROBAT, IDM_VIEW_WITH_FOXIT, IDM_VIEW_WITH_PDF_XCHANGE,
-        IDM_RENAME_FILE,
+        IDM_RENAME_FILE, IDM_DEBUG_ANNOTATION,
         // IDM_VIEW_WITH_XPS_VIEWER and IDM_VIEW_WITH_HTML_HELP
         // are removed instead of disabled (and can remain enabled
         // for broken XPS/CHM documents)
@@ -417,12 +410,17 @@ void MenuUpdateStateForWindow(WindowInfo* win) {
         IDM_VIEW_WITH_ACROBAT, IDM_VIEW_WITH_FOXIT, IDM_VIEW_WITH_PDF_XCHANGE,
     };
 
-    assert(IsFileCloseMenuEnabled() == !win->IsAboutWindow());
+    for (int i = 0; i < dimof(menusToDisableIfNoDocument); i++) {
+        UINT id = menusToDisableIfNoDocument[i];
+        win::menu::SetEnabled(win->menu, id, win->IsDocLoaded());
+    }
+
+    CrashIf(IsFileCloseMenuEnabled() == win->IsAboutWindow());
     win::menu::SetEnabled(win->menu, IDM_CLOSE, IsFileCloseMenuEnabled());
 
     MenuUpdatePrintItem(win, win->menu);
 
-    bool enabled = win->IsDocLoaded() && win->dm->HasTocTree();
+    bool enabled = win->IsDocLoaded() && win->ctrl->HasTocTree();
     win::menu::SetEnabled(win->menu, IDM_VIEW_BOOKMARKS, enabled);
 
     bool documentSpecific = win->IsDocLoaded();
@@ -435,16 +433,11 @@ void MenuUpdateStateForWindow(WindowInfo* win) {
     MenuUpdateZoom(win);
 
     if (win->IsDocLoaded()) {
-        win::menu::SetEnabled(win->menu, IDM_GOTO_NAV_BACK, win->dm->CanNavigate(-1));
-        win::menu::SetEnabled(win->menu, IDM_GOTO_NAV_FORWARD, win->dm->CanNavigate(1));
+        win::menu::SetEnabled(win->menu, IDM_GOTO_NAV_BACK, win->ctrl->CanNavigate(-1));
+        win::menu::SetEnabled(win->menu, IDM_GOTO_NAV_FORWARD, win->ctrl->CanNavigate(1));
     }
 
-    for (int i = 0; i < dimof(menusToDisableIfNoDocument); i++) {
-        UINT id = menusToDisableIfNoDocument[i];
-        win::menu::SetEnabled(win->menu, id, win->IsDocLoaded());
-    }
-
-    if (win->dm && Engine_ImageDir == win->dm->engineType) {
+    if (win->GetEngineType() == Engine_ImageDir) {
         for (int i = 0; i < dimof(menusToDisableIfDirectory); i++) {
             UINT id = menusToDisableIfDirectory[i];
             win::menu::SetEnabled(win->menu, id, false);
@@ -458,17 +451,20 @@ void MenuUpdateStateForWindow(WindowInfo* win) {
         }
     }
 
-    if (win->dm && win->dm->engine)
-        win::menu::SetEnabled(win->menu, IDM_FIND_FIRST, !win->dm->engine->IsImageCollection());
+    if (win->AsFixed())
+        win::menu::SetEnabled(win->menu, IDM_FIND_FIRST, !win->AsFixed()->GetEngine()->IsImageCollection());
 
     // TODO: is this check too expensive?
-    if (win->IsDocLoaded() && !file::Exists(win->dm->FilePath()))
+    if (win->IsDocLoaded() && !file::Exists(win->ctrl->FilePath()))
         win::menu::SetEnabled(win->menu, IDM_RENAME_FILE, false);
 
 #ifdef SHOW_DEBUG_MENU_ITEMS
     win::menu::SetChecked(win->menu, IDM_DEBUG_SHOW_LINKS, gDebugShowLinks);
     win::menu::SetChecked(win->menu, IDM_DEBUG_GDI_RENDERER, gUseGdiRenderer);
     win::menu::SetChecked(win->menu, IDM_DEBUG_EBOOK_UI, gGlobalPrefs->ebookUI.useFixedPageUI);
+    win::menu::SetChecked(win->menu, IDM_DEBUG_MUI, mui::IsDebugPaint());
+    win::menu::SetEnabled(win->menu, IDM_DEBUG_ANNOTATION, win->AsFixed() && win->AsFixed()->GetEngine()->SupportsAnnotation() &&
+                                                           win->showSelection && win->selectionOnPage);
 #endif
 }
 
@@ -525,8 +521,8 @@ void OnAboutContextMenu(WindowInfo* win, int x, int y)
 
 void OnContextMenu(WindowInfo* win, int x, int y)
 {
-    assert(win->IsDocLoaded());
-    if (!win->IsDocLoaded())
+    CrashIf(!win->AsFixed());
+    if (!win->AsFixed())
         return;
 
 	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
@@ -536,7 +532,7 @@ void OnContextMenu(WindowInfo* win, int x, int y)
 		return;
 	}
 
-    PageElement *pageEl = win->dm->GetElementAtPos(PointI(x, y));
+    PageElement *pageEl = win->AsFixed()->GetElementAtPos(PointI(x, y));
     ScopedMem<WCHAR> value(pageEl ? pageEl->GetValue() : NULL);
     CrashIf(value && !pageEl);
     RenderedBitmap *bmp = NULL;
@@ -552,7 +548,7 @@ void OnContextMenu(WindowInfo* win, int x, int y)
     if (!win->selectionOnPage)
         win::menu::SetEnabled(popup, IDM_COPY_SELECTION, false);
     MenuUpdatePrintItem(win, popup, true);
-    win::menu::SetEnabled(popup, IDM_VIEW_BOOKMARKS, win->dm->HasTocTree());
+    win::menu::SetEnabled(popup, IDM_VIEW_BOOKMARKS, win->ctrl->HasTocTree());
     win::menu::SetChecked(popup, IDM_VIEW_BOOKMARKS, win->tocVisible);
 
     POINT pt = { x, y };
@@ -602,11 +598,11 @@ void OnMenuZoom(WindowInfo* win, UINT menuId)
 
 void OnMenuCustomZoom(WindowInfo* win)
 {
-    if (!win->IsDocLoaded())
+    if (!win->IsDocLoaded() || win->AsEbook())
         return;
 
-    float zoom = win->dm->ZoomVirtual();
-    if (!Dialog_CustomZoom(win->hwndFrame, win->IsChm(), &zoom))
+    float zoom = win->ctrl->GetZoomVirtual();
+    if (!Dialog_CustomZoom(win->hwndFrame, win->AsChm(), &zoom))
         return;
     ZoomToSelection(win, zoom);
 }
@@ -614,9 +610,10 @@ void OnMenuCustomZoom(WindowInfo* win)
 static void RebuildFileMenu(WindowInfo *win, HMENU menu)
 {
     win::menu::Empty(menu);
-    BuildMenuFromMenuDef(menuDefFile, dimof(menuDefFile), menu, win->IsChm() ? MF_NOT_FOR_CHM : 0);
+    int filter = win->AsChm() ? MF_NOT_FOR_CHM : win->AsEbook() ? MF_NOT_FOR_EBOOK_UI : 0;
+    BuildMenuFromMenuDef(menuDefFile, dimof(menuDefFile), menu, filter);
     AppendRecentFilesToMenu(menu);
-    AppendExternalViewersToMenu(menu, win->loadedFilePath, false);
+    AppendExternalViewersToMenu(menu, win->loadedFilePath);
 
     // Suppress menu items that depend on specific software being installed:
     // e-mail client, Adobe Reader, Foxit, PDF-XChange
@@ -626,11 +623,11 @@ static void RebuildFileMenu(WindowInfo *win, HMENU menu)
         win::menu::Remove(menu, IDM_SEND_BY_EMAIL);
 
     // Also suppress PDF specific items for non-PDF documents
-    if (win->IsNotPdf() || !CanViewWithAcrobat())
+    if (!CouldBePDFDoc(win) || !CanViewWithAcrobat())
         win::menu::Remove(menu, IDM_VIEW_WITH_ACROBAT);
-    if (win->IsNotPdf() || !CanViewWithFoxit())
+    if (!CouldBePDFDoc(win) || !CanViewWithFoxit())
         win::menu::Remove(menu, IDM_VIEW_WITH_FOXIT);
-    if (win->IsNotPdf() || !CanViewWithPDFXChange())
+    if (!CouldBePDFDoc(win) || !CanViewWithPDFXChange())
         win::menu::Remove(menu, IDM_VIEW_WITH_PDF_XCHANGE);
     if (!CanViewWithXPSViewer(win))
         win::menu::Remove(menu, IDM_VIEW_WITH_XPS_VIEWER);
@@ -642,9 +639,11 @@ HMENU BuildMenu(WindowInfo *win)
 {
     HMENU mainMenu = CreateMenu();
     int filter = 0;
-    if (win->IsChm())
+    if (win->AsChm())
         filter |= MF_NOT_FOR_CHM;
-    if (!win->IsCbx())
+    else if (win->AsEbook())
+        filter |= MF_NOT_FOR_EBOOK_UI;
+    if (win->GetEngineType() != Engine_ComicBook)
         filter |= MF_CBX_ONLY;
 
     HMENU m = CreateMenu();
@@ -654,10 +653,13 @@ HMENU BuildMenu(WindowInfo *win)
     AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&View"));
     m = BuildMenuFromMenuDef(menuDefGoTo, dimof(menuDefGoTo), CreateMenu(), filter);
     AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Go To"));
-    m = BuildMenuFromMenuDef(menuDefZoom, dimof(menuDefZoom), CreateMenu(), filter);
-    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Zoom"));
+    if (!win->AsEbook()) {
+        m = BuildMenuFromMenuDef(menuDefZoom, dimof(menuDefZoom), CreateMenu(), filter);
+        AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Zoom"));
+    }
 
-    if (HasPermission(Perm_SavePreferences)) {
+    // TODO: implement Favorites for ebooks
+    if (HasPermission(Perm_SavePreferences) && !win->AsEbook()) {
         // I think it makes sense to disable favorites in restricted mode
         // because they wouldn't be persisted, anyway
         m = BuildMenuFromMenuDef(menuDefFavorites, dimof(menuDefFavorites), CreateMenu());
@@ -668,6 +670,11 @@ HMENU BuildMenu(WindowInfo *win)
     AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Settings"));
     m = BuildMenuFromMenuDef(menuDefHelp, dimof(menuDefHelp), CreateMenu(), filter);
     AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Help"));
+#if 0
+    // cf. MenuBarAsPopupMenu in Caption.cpp
+    m = GetSystemMenu(win->hwndFrame, FALSE);
+    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Window"));
+#endif
 #ifdef SHOW_DEBUG_MENU_ITEMS
     m = BuildMenuFromMenuDef(menuDefDebug, dimof(menuDefDebug), CreateMenu(), filter);
     AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, L"Debug");
@@ -676,36 +683,9 @@ HMENU BuildMenu(WindowInfo *win)
     return mainMenu;
 }
 
-static void RebuildFileMenuForEbookUI(HMENU menu, EbookWindow *win)
-{
-    win::menu::Empty(menu);
-    BuildMenuFromMenuDef(menuDefFile, dimof(menuDefFile), menu, MF_NOT_FOR_EBOOK_UI);
-    AppendRecentFilesToMenu(menu);
-    AppendExternalViewersToMenu(menu, win->LoadedFilePath(), true);
-}
-
-HMENU BuildMenu(EbookWindow *win)
-{
-    HMENU mainMenu = CreateMenu();
-    int filter = MF_NOT_FOR_EBOOK_UI;
-    HMENU m = CreateMenu();
-    RebuildFileMenuForEbookUI(m, win);
-    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&File"));
-    m = BuildMenuFromMenuDef(menuDefGoTo, dimof(menuDefGoTo), CreateMenu(), filter);
-    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Go To"));
-    m = BuildMenuFromMenuDef(menuDefSettings, dimof(menuDefSettings), CreateMenu(), filter);
-    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Settings"));
-    m = BuildMenuFromMenuDef(menuDefHelp, dimof(menuDefHelp), CreateMenu(), filter);
-    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, _TR("&Help"));
-#ifdef SHOW_DEBUG_MENU_ITEMS
-    m = BuildMenuFromMenuDef(menuDefDebugEbooks, dimof(menuDefDebugEbooks), CreateMenu(), filter);
-    AppendMenu(mainMenu, MF_POPUP | MF_STRING, (UINT_PTR)m, L"Debug");
-#endif
-    return mainMenu;
-}
-
 void UpdateMenu(WindowInfo *win, HMENU m)
 {
+    CrashIf(!win);
     UINT id = GetMenuItemID(m, 0);
     if (id == menuDefFile[0].id)
         RebuildFileMenu(win, m);
@@ -714,13 +694,25 @@ void UpdateMenu(WindowInfo *win, HMENU m)
         BuildMenuFromMenuDef(menuDefFavorites, dimof(menuDefFavorites), m);
         RebuildFavMenu(win, m);
     }
-    if (win)
-        MenuUpdateStateForWindow(win);
+    MenuUpdateStateForWindow(win);
 }
 
-void UpdateMenu(EbookWindow *win, HMENU m)
+// show/hide top-level menu bar. This doesn't persist across launches
+// so that accidental removal of the menu isn't catastrophic
+void ShowHideMenuBar(WindowInfo *win, bool showTemporarily)
 {
-    UINT id = GetMenuItemID(m, 0);
-    if (id == menuDefFile[0].id)
-        RebuildFileMenuForEbookUI(m, win);
+    CrashIf(!win->menu);
+    if (win->presentation || win->isFullScreen)
+        return;
+
+    HWND hwnd = win->hwndFrame;
+
+    if (showTemporarily) {
+        SetMenu(hwnd, win->menu);
+        return;
+    }
+
+    bool hideMenu = !showTemporarily && GetMenu(hwnd) != NULL;
+    SetMenu(hwnd, hideMenu ? NULL : win->menu);
+    win->isMenuHidden = hideMenu;
 }

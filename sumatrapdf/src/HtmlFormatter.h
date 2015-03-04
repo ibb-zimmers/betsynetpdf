@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef HtmlFormatter_h
@@ -6,7 +6,7 @@
 
 #include "EbookBase.h"
 #include "HtmlParserLookup.h"
-
+#include "Mui.h"
 using namespace Gdiplus;
 
 // Layout information for a given page is a list of
@@ -43,20 +43,20 @@ struct DrawInstr {
         struct {
             const char *s;
             size_t      len;
-        }                   str;          // InstrString, InstrLinkStart, InstrAnchor, InstrRtlString
-        Font *              font;         // InstrSetFont
-        ImageData           img;          // InstrImage
+        } str;          // InstrString, InstrLinkStart, InstrAnchor, InstrRtlString
+        mui::CachedFont *font;        // InstrSetFont
+        ImageData       img;          // InstrImage
     };
     RectF bbox; // common to most instructions
 
     DrawInstr() { }
 
-    DrawInstr(DrawInstrType t, RectF bbox = RectF()) : type(t), bbox(bbox) { }
+    explicit DrawInstr(DrawInstrType t, RectF bbox = RectF()) : type(t), bbox(bbox) { }
 
     // helper constructors for instructions that need additional arguments
     static DrawInstr Str(const char *s, size_t len, RectF bbox, bool rtl=false);
     static DrawInstr Image(char *data, size_t len, RectF bbox);
-    static DrawInstr SetFont(Font *font);
+    static DrawInstr SetFont(mui::CachedFont *font);
     static DrawInstr FixedSpace(float dx);
     static DrawInstr LinkStart(const char *s, size_t len);
     static DrawInstr Anchor(const char *s, size_t len, RectF bbox);
@@ -74,7 +74,7 @@ struct StyleRule {
     Unit        textIndentUnit;
     AlignAttr   textAlign;
 
-    StyleRule() : tag(Tag_NotFound), textIndentUnit(inherit), textAlign(Align_NotFound) { }
+    StyleRule();
 
     void Merge(StyleRule& source);
 
@@ -83,14 +83,14 @@ struct StyleRule {
 };
 
 struct DrawStyle {
-    Font *font;
+    mui::CachedFont *font;
     AlignAttr align;
     bool dirRtl;
 };
 
 class HtmlPage {
 public:
-    HtmlPage(int reparseIdx=0) : reparseIdx(reparseIdx) { }
+    explicit HtmlPage(int reparseIdx=0) : reparseIdx(reparseIdx) { }
 
     Vec<DrawInstr>  instructions;
     // if we start parsing html again from reparseIdx, we should
@@ -104,21 +104,13 @@ public:
 // just to pack args to HtmlFormatter
 class HtmlFormatterArgs {
 public:
-    HtmlFormatterArgs() :
-      pageDx(0), pageDy(0), fontName(NULL), fontSize(0),
-      textAllocator(NULL), htmlStr(0), htmlStrLen(0),
-      reparseIdx(0), measureAlgo(NULL)
-    { }
-
-    ~HtmlFormatterArgs() {
-        free(fontName);
-    }
+    HtmlFormatterArgs();
 
     REAL            pageDx;
     REAL            pageDy;
 
     void SetFontName(const WCHAR *s) {
-        str::ReplacePtr(&fontName, s);
+        fontName.Set(str::Dup(s));
     }
 
     const WCHAR *GetFontName() { return fontName; }
@@ -131,9 +123,7 @@ public:
        used to allocate this text. */
     Allocator *     textAllocator;
 
-    // if layouting everything at once, MeasureTextAccurate is too slow,
-    // so measureAlgo allows to choose a quicker text measurer instead
-    RectF        (* measureAlgo)(Graphics *g, Font *f, const WCHAR *s, size_t len);
+    mui::TextRenderMethod textRenderMethod;
 
     const char *    htmlStr;
     size_t          htmlStrLen;
@@ -142,7 +132,7 @@ public:
     int             reparseIdx;
 
 private:
-    WCHAR *         fontName;
+    ScopedMem<WCHAR> fontName;
 };
 
 class HtmlPullParser;
@@ -168,6 +158,7 @@ protected:
     void UpdateTagNesting(HtmlToken *t);
     virtual void HandleHtmlTag(HtmlToken *t);
     void HandleText(HtmlToken *t);
+    void HandleText(const char *s, size_t sLen);
     // blank convenience methods to override
     virtual void HandleTagImg(HtmlToken *t) { }
     virtual void HandleTagPagebreak(HtmlToken *t) { }
@@ -182,7 +173,7 @@ protected:
     bool  FlushCurrLine(bool isParagraphBreak);
     void  UpdateLinkBboxes(HtmlPage *page);
 
-    void  EmitImage(ImageData *img);
+    bool  EmitImage(ImageData *img);
     void  EmitHr();
     void  EmitTextRun(const char *s, const char *end);
     void  EmitElasticSpace();
@@ -193,9 +184,9 @@ protected:
     bool  EnsureDx(float dx);
 
     DrawStyle *CurrStyle() { return &styleStack.Last(); }
-    Font *CurrFont() { return CurrStyle()->font; }
+    mui::CachedFont *CurrFont() { return CurrStyle()->font; }
     void  SetFont(const WCHAR *fontName, FontStyle fs, float fontSize=-1);
-    void  SetFont(Font *origFont, FontStyle fs, float fontSize=-1);
+    void  SetFontBasedOn(mui::CachedFont *origFont, FontStyle fs, float fontSize=-1);
     void  ChangeFontStyle(FontStyle fs, bool isStart);
     void  SetAlignment(AlignAttr align);
     void  RevertStyleChange();
@@ -219,7 +210,7 @@ protected:
     ScopedMem<WCHAR>    defaultFontName;
     float               defaultFontSize;
     Allocator *         textAllocator;
-    RectF            (* measureAlgo)(Graphics *g, Font *f, const WCHAR *s, size_t len);
+    mui::ITextRender *  textMeasure;
 
     // style stack of the current line
     Vec<DrawStyle>      styleStack;
@@ -236,7 +227,7 @@ protected:
     bool                preFormatted;
     // set if the reading direction is RTL
     bool                dirRtl;
-    // TODO: HtmlPullParser::tagNesting is updated too soon for our purposes
+    // list of currently opened tags for auto-closing when needed
     Vec<HtmlTag>        tagNesting;
     bool                keepTagNesting;
     // set from CSS and to be checked by the individual tag handlers
@@ -245,14 +236,14 @@ protected:
     // isntructions for the current line
     Vec<DrawInstr>      currLineInstr;
     // reparse point of the first instructions in a current line
-    int                 currLineReparseIdx;
+    ptrdiff_t           currLineReparseIdx;
     HtmlPage *          currPage;
 
     // for tracking whether we're currently inside <a> tag
     size_t              currLinkIdx;
 
     // reparse point for the current HtmlToken
-    int                 currReparseIdx;
+    ptrdiff_t           currReparseIdx;
 
     HtmlPullParser *    htmlParser;
 
@@ -267,13 +258,17 @@ protected:
     WCHAR               buf[512];
 
 public:
-    HtmlFormatter(HtmlFormatterArgs *args);
+    explicit HtmlFormatter(HtmlFormatterArgs *args);
     virtual ~HtmlFormatter();
 
     HtmlPage *Next(bool skipEmptyPages=true);
     Vec<HtmlPage*> *FormatAllPages(bool skipEmptyPages=true);
 };
 
-void DrawHtmlPage(Graphics *g, Vec<DrawInstr> *drawInstructions, REAL offX, REAL offY, bool showBbox, Color textColor, bool *abortCookie=NULL);
+void DrawHtmlPage(Graphics *g, mui::ITextRender *textRender, Vec<DrawInstr> *drawInstructions, REAL offX, REAL offY, bool showBbox, Color textColor, bool *abortCookie=NULL);
+
+mui::TextRenderMethod GetTextRenderMethod();
+void SetTextRenderMethod(mui::TextRenderMethod method);
+HtmlFormatterArgs *CreateFormatterDefaultArgs(int dx, int dy, Allocator *textAllocator=NULL);
 
 #endif

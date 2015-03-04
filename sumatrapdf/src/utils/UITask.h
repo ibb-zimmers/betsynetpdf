@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef UITask_h
@@ -26,11 +26,14 @@ namespace uitask {
 void    Initialize();
 void    Destroy();
 
+// call only from the same thread as Initialize() and Destroy()
+void    DrainQueue();
+
 // Can be called from any thread. Queues the task to be executed
 // as soon as possible on ui thread.
 void    Post(UITask *);
 
-void    Post(UITaskFuncPtr, void *arg);
+void    PostFunc(UITaskFuncPtr, void *arg);
 }
 
 #endif

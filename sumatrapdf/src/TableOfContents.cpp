@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -6,14 +6,20 @@
 
 #include "AppPrefs.h"
 #include "AppTools.h"
-using namespace Gdiplus;
+#include "Controller.h"
 #include "GdiPlusUtil.h"
+#include "LabelWithCloseWnd.h"
 #include "resource.h"
 #include "SumatraPDF.h"
+#include "SplitterWnd.h"
+#include "Tabs.h"
 #include "Translations.h"
 #include "UITask.h"
 #include "WindowInfo.h"
 #include "WinUtil.h"
+
+/* Define if you want page numbers to be displayed in the ToC sidebar */
+// #define DISPLAY_TOC_PAGE_NUMBERS
 
 #ifdef DISPLAY_TOC_PAGE_NUMBERS
 #define WM_APP_REPAINT_TOC     (WM_APP + 1)
@@ -34,10 +40,12 @@ static void TreeView_ExpandRecursively(HWND hTree, HTREEITEM hItem, UINT flag, b
 
 static void CustomizeTocInfoTip(LPNMTVGETINFOTIP nmit)
 {
-    DocTocItem *tocItem = (DocTocItem *)nmit->lParam;
-    ScopedMem<WCHAR> path(tocItem->GetLink() ? tocItem->GetLink()->GetDestValue() : NULL);
+    PageDestination *link = ((DocTocItem *)nmit->lParam)->GetLink();
+    ScopedMem<WCHAR> path(link ? link->GetDestValue() : NULL);
     if (!path)
         return;
+    CrashIf(!link); // /analyze claims that this could happen - it really can't
+    CrashIf(link->GetDestType() != Dest_LaunchURL && link->GetDestType() != Dest_LaunchFile && link->GetDestType() != Dest_LaunchEmbedded);
 
     str::Str<WCHAR> infotip;
 
@@ -58,7 +66,7 @@ static void CustomizeTocInfoTip(LPNMTVGETINFOTIP nmit)
         infotip.Append(L"\r\n");
     }
 
-    if (tocItem->GetLink() && Dest_LaunchEmbedded == tocItem->GetLink()->GetDestType())
+    if (Dest_LaunchEmbedded == link->GetDestType())
         path.Set(str::Format(_TR("Attachment: %s"), path));
 
     infotip.Append(path);
@@ -98,8 +106,8 @@ static void RelayoutTocItem(LPNMTVCUSTOMDRAW ntvcd)
     WindowInfo *win = FindWindowInfoByHwnd(hTV);
     DocTocItem *tocItem = (DocTocItem *)item.lParam;
     ScopedMem<WCHAR> label;
-    if (tocItem->pageNo && win && win->IsDocLoaded() && win->dm->engine) {
-        label.Set(win->dm->engine->GetPageLabel(tocItem->pageNo));
+    if (tocItem->pageNo && win && win->IsDocLoaded()) {
+        label.Set(win->ctrl->GetPageLabel(tocItem->pageNo));
         label.Set(str::Join(L"  ", label));
     }
     if (label && str::EndsWith(item.pszText, label)) {
@@ -115,7 +123,7 @@ static void RelayoutTocItem(LPNMTVCUSTOMDRAW ntvcd)
         DrawText(ncd->hdc, label, -1, &rcPageNo, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
         // Reduce the size of the label and cut off the page number
-        rcItem.right = max(rcItem.right - txtSize.cx, 0);
+        rcItem.right = std::max(rcItem.right - txtSize.cx, 0);
         szText[str::Len(szText) - str::Len(label)] = '\0';
     }
 
@@ -137,15 +145,16 @@ static void RelayoutTocItem(LPNMTVCUSTOMDRAW ntvcd)
 class GoToTocLinkTask : public UITask
 {
     DocTocItem *tocItem;
-    HTREEITEM hItem;
     WindowInfo *win;
+    Controller *ctrl;
 
 public:
-    GoToTocLinkTask(WindowInfo *win, DocTocItem *tocItem, HTREEITEM hItem) :
-        win(win), tocItem(tocItem), hItem(hItem) { }
+    GoToTocLinkTask(WindowInfo *win, DocTocItem *tocItem, Controller *ctrl) :
+        win(win), tocItem(tocItem), ctrl(ctrl) { }
 
     virtual void Execute() {
-        if (!WindowInfoStillValid(win) || !win->IsDocLoaded() || !tocItem)
+        // tocItem is invalid if the DisplayModel has been replaced
+        if (!WindowInfoStillValid(win) || !win->tocLoaded || win->ctrl != ctrl)
             return;
 
         // make sure that the tree item that the user selected
@@ -154,7 +163,7 @@ public:
         if (tocItem->GetLink())
             win->linkHandler->GotoLink(tocItem->GetLink());
         else if (tocItem->pageNo)
-            win->dm->GoToPage(tocItem->pageNo, 0, true);
+            win->ctrl->GoToPage(tocItem->pageNo, true);
         win->tocKeepSelection = false;
     }
 };
@@ -173,7 +182,7 @@ static void GoToTocLinkForTVItem(WindowInfo* win, HWND hTV, HTREEITEM hItem=NULL
         return;
     if ((allowExternal || tocItem->GetLink() && Dest_ScrollTo == tocItem->GetLink()->GetDestType()) || tocItem->pageNo) {
         // delay changing the page until the tree messages have been handled
-        uitask::Post(new GoToTocLinkTask(win, tocItem, hItem));
+        uitask::Post(new GoToTocLinkTask(win, tocItem, win->ctrl));
     }
 }
 
@@ -201,7 +210,8 @@ void ToggleTocBox(WindowInfo *win)
         SetSidebarVisibility(win, false, gGlobalPrefs->showFavorites);
     } else {
         SetSidebarVisibility(win, true,  gGlobalPrefs->showFavorites);
-        SetFocus(win->hwndTocTree);
+        if (win->tocVisible)
+            SetFocus(win->hwndTocTree);
     }
 }
 
@@ -211,7 +221,7 @@ static HTREEITEM AddTocItemToView(HWND hwnd, DocTocItem *entry, HTREEITEM parent
     tvinsert.hParent = parent;
     tvinsert.hInsertAfter = TVI_LAST;
     tvinsert.itemex.mask = TVIF_TEXT | TVIF_PARAM | TVIF_STATE;
-    tvinsert.itemex.state = entry->open != toggleItem ? TVIS_EXPANDED : 0;
+    tvinsert.itemex.state = entry->child && entry->open != toggleItem ? TVIS_EXPANDED : 0;
     tvinsert.itemex.stateMask = TVIS_EXPANDED;
     tvinsert.itemex.lParam = (LPARAM)entry;
     // Replace unprintable whitespace with regular spaces
@@ -220,8 +230,8 @@ static HTREEITEM AddTocItemToView(HWND hwnd, DocTocItem *entry, HTREEITEM parent
 
 #ifdef DISPLAY_TOC_PAGE_NUMBERS
     WindowInfo *win = FindWindowInfoByHwnd(hwnd);
-    if (entry->pageNo && win && win->IsDocLoaded() && win->dm->engine) {
-        ScopedMem<WCHAR> label(win->dm->engine->GetPageLabel(entry->pageNo));
+    if (entry->pageNo && win && win->IsDocLoaded() && !win->AsEbook()) {
+        ScopedMem<WCHAR> label(win->ctrl->GetPageLabel(entry->pageNo));
         ScopedMem<WCHAR> text(str::Format(L"%s  %s", entry->title, label));
         tvinsert.itemex.pszText = text;
         return TreeView_InsertItem(hwnd, &tvinsert);
@@ -310,6 +320,44 @@ void UpdateTocExpansionState(WindowInfo *win, HTREEITEM hItem)
     }
 }
 
+void UpdateTocColors(WindowInfo *win)
+{
+    COLORREF labelBgCol = GetSysColor(COLOR_BTNFACE);
+    COLORREF labelTxtCol = GetSysColor(COLOR_BTNTEXT);
+    COLORREF treeBgCol = (DWORD)-1;
+    COLORREF splitterCol = GetSysColor(COLOR_BTNFACE);
+    bool flatTreeWnd = false;
+
+    if (win->AsEbook() && !gGlobalPrefs->useSysColors) {
+        labelBgCol = gGlobalPrefs->ebookUI.backgroundColor;
+        labelTxtCol = gGlobalPrefs->ebookUI.textColor;
+        treeBgCol = labelBgCol;
+        float factor = 14.f;
+        int sign = GetLightness(labelBgCol) + factor > 255 ? 1 : -1;
+        splitterCol = AdjustLightness2(labelBgCol, sign * factor);
+        flatTreeWnd = true;
+    }
+
+    TreeView_SetBkColor(win->hwndTocTree, treeBgCol);
+    SetBgCol(win->tocLabelWithClose, labelBgCol);
+    SetTextCol(win->tocLabelWithClose, labelTxtCol);
+    SetBgCol(win->sidebarSplitter, splitterCol);
+    ToggleWindowStyle(win->hwndTocTree, WS_EX_STATICEDGE, !flatTreeWnd, GWL_EXSTYLE);
+    SetWindowPos(win->hwndTocTree, NULL, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
+    // TODO: if we have favorites in ebook view, we'll need this
+    //SetBgCol(win->favLabelWithClose, labelBgCol);
+    //SetTextCol(win->favLabelWithClose, labelTxtCol);
+    //SetBgCol(win->favSplitter, labelTxtCol);
+
+    // TODO: more work needed to to ensure consistent look of the ebook window:
+    // - tab bar should match the color
+    // - change the tree item text color
+    // - change the tree item background color when selected (for both focused and non-focused cases)
+    // - ultimately implement owner-drawn scrollbars in a simpler style (like Chrome or VS 2013)
+    //   and match their colors as well
+}
+
 // copied from mupdf/fitz/dev_text.c
 #define ISLEFTTORIGHTCHAR(c) ((0x0041 <= (c) && (c) <= 0x005A) || (0x0061 <= (c) && (c) <= 0x007A) || (0xFB00 <= (c) && (c) <= 0xFB06))
 #define ISRIGHTTOLEFTCHAR(c) ((0x0590 <= (c) && (c) <= 0x05FF) || (0x0600 <= (c) && (c) <= 0x06FF) || (0x0750 <= (c) && (c) <= 0x077F) || (0xFB50 <= (c) && (c) <= 0xFDFF) || (0xFE70 <= (c) && (c) <= 0xFEFF))
@@ -332,13 +380,13 @@ static void GetLeftRightCounts(DocTocItem *node, int& l2r, int& r2l)
 
 void LoadTocTree(WindowInfo *win)
 {
+    CrashIf(!win->IsDocLoaded());
+
     if (win->tocLoaded)
         return;
     win->tocLoaded = true;
 
-    win->tocRoot = NULL;
-    if (win->dm->engine)
-        win->tocRoot = win->dm->engine->GetTocTree();
+    win->tocRoot = win->ctrl->GetTocTree();
     if (!win->tocRoot)
         return;
 
@@ -351,6 +399,7 @@ void LoadTocTree(WindowInfo *win)
     SendMessage(win->hwndTocTree, WM_SETREDRAW, FALSE, 0);
     ToggleWindowStyle(win->hwndTocTree, WS_EX_LAYOUTRTL | WS_EX_NOINHERITLAYOUT, isRTL, GWL_EXSTYLE);
     PopulateTocTreeView(win->hwndTocTree, win->tocRoot, win->tocState);
+    UpdateTocColors(win);
     SendMessage(win->hwndTocTree, WM_SETREDRAW, TRUE, 0);
     UINT fl = RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN;
     RedrawWindow(win->hwndTocTree, NULL, NULL, fl);
@@ -374,7 +423,10 @@ static LRESULT OnTocTreeNotify(WindowInfo *win, LPNMTREEVIEW pnmtv)
         case TVN_KEYDOWN: {
             TV_KEYDOWN *ptvkd = (TV_KEYDOWN *)pnmtv;
             if (VK_TAB == ptvkd->wVKey) {
-                AdvanceFocus(win);
+                if (win->tabsVisible && IsCtrlPressed())
+                    TabsOnCtrlTab(win, IsShiftPressed());
+                else
+                    AdvanceFocus(win);
                 return 1;
             }
             break;
@@ -399,16 +451,18 @@ static LRESULT OnTocTreeNotify(WindowInfo *win, LPNMTREEVIEW pnmtv)
 
         case NM_CUSTOMDRAW:
 #ifdef DISPLAY_TOC_PAGE_NUMBERS
+            if (win->AsEbook())
+                return CDRF_DODEFAULT;
             switch (((LPNMCUSTOMDRAW)pnmtv)->dwDrawStage) {
-                case CDDS_PREPAINT:
-                    return CDRF_NOTIFYITEMDRAW;
-                case CDDS_ITEMPREPAINT:
-                    return CDRF_DODEFAULT | CDRF_NOTIFYPOSTPAINT;
-                case CDDS_ITEMPOSTPAINT:
-                    RelayoutTocItem((LPNMTVCUSTOMDRAW)pnmtv);
-                    // fall through
-                default:
-                    return CDRF_DODEFAULT;
+            case CDDS_PREPAINT:
+                return CDRF_NOTIFYITEMDRAW;
+            case CDDS_ITEMPREPAINT:
+                return CDRF_DODEFAULT | CDRF_NOTIFYPOSTPAINT;
+            case CDDS_ITEMPOSTPAINT:
+                RelayoutTocItem((LPNMTVCUSTOMDRAW)pnmtv);
+                // fall through
+            default:
+                return CDRF_DODEFAULT;
             }
             break;
 #else
@@ -484,19 +538,11 @@ static LRESULT CALLBACK WndProcTocBox(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
     switch (msg) {
         case WM_SIZE:
-            LayoutTreeContainer(hwnd, IDC_TOC_BOX);
-            break;
-
-        case WM_DRAWITEM:
-            if (IDC_TOC_CLOSE == wParam) {
-                DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
-                DrawCloseButton(dis);
-                return TRUE;
-            }
+            LayoutTreeContainer(win->tocLabelWithClose, win->hwndTocTree);
             break;
 
         case WM_COMMAND:
-            if (LOWORD(wParam) == IDC_TOC_CLOSE && HIWORD(wParam) == STN_CLICKED)
+            if (LOWORD(wParam) == IDC_TOC_LABEL_WITH_CLOSE)
                 ToggleTocBox(win);
             break;
 
@@ -516,26 +562,20 @@ void CreateToc(WindowInfo *win)
     // toc windows
     win->hwndTocBox = CreateWindow(WC_STATIC, L"", WS_CHILD|WS_CLIPCHILDREN,
                                    0, 0, gGlobalPrefs->sidebarDx, 0,
-                                   win->hwndFrame, (HMENU)0, ghinst, NULL);
-    HWND title = CreateWindow(WC_STATIC, L"", WS_VISIBLE | WS_CHILD,
-                              0, 0, 0, 0, win->hwndTocBox, (HMENU)IDC_TOC_TITLE, ghinst, NULL);
-    SetWindowFont(title, gDefaultGuiFont, FALSE);
-    win::SetText(title, _TR("Bookmarks"));
+                                   win->hwndFrame, (HMENU)0, GetModuleHandle(NULL), NULL);
 
-    HWND hwndClose = CreateWindow(WC_STATIC, L"",
-                                  SS_OWNERDRAW | SS_NOTIFY | WS_CHILD | WS_VISIBLE,
-                                  0, 0, 16, 16, win->hwndTocBox, (HMENU)IDC_TOC_CLOSE, ghinst, NULL);
+    LabelWithCloseWnd *l = CreateLabelWithCloseWnd(win->hwndTocBox, IDC_TOC_LABEL_WITH_CLOSE);
+    win->tocLabelWithClose = l;
+    int padXY = (int)(2 * win->uiDPIFactor);
+    SetPaddingXY(l, padXY, padXY);
+    SetFont(l, GetDefaultGuiFont());
+    // label is set in UpdateSidebarTitles()
 
     win->hwndTocTree = CreateWindowEx(WS_EX_STATICEDGE, WC_TREEVIEW, L"TOC",
                                       TVS_HASBUTTONS|TVS_HASLINES|TVS_LINESATROOT|TVS_SHOWSELALWAYS|
                                       TVS_TRACKSELECT|TVS_DISABLEDRAGDROP|TVS_NOHSCROLL|TVS_INFOTIP|
                                       WS_TABSTOP|WS_VISIBLE|WS_CHILD,
-                                      0, 0, 0, 0, win->hwndTocBox, (HMENU)IDC_TOC_TREE, ghinst, NULL);
-
-    // Note: those must be consecutive numbers and in title/close/tree order
-    STATIC_ASSERT(IDC_TOC_BOX + 1 == IDC_TOC_TITLE &&
-            IDC_TOC_BOX + 2 == IDC_TOC_CLOSE &&
-            IDC_TOC_BOX + 3 == IDC_TOC_TREE, consecutive_toc_ids);
+                                      0, 0, 0, 0, win->hwndTocBox, (HMENU)IDC_TOC_TREE, GetModuleHandle(NULL), NULL);
 
     TreeView_SetUnicodeFormat(win->hwndTocTree, true);
 
@@ -546,8 +586,4 @@ void CreateToc(WindowInfo *win)
     if (NULL == DefWndProcTocBox)
         DefWndProcTocBox = (WNDPROC)GetWindowLongPtr(win->hwndTocBox, GWLP_WNDPROC);
     SetWindowLongPtr(win->hwndTocBox, GWLP_WNDPROC, (LONG_PTR)WndProcTocBox);
-
-    if (NULL == DefWndProcCloseButton)
-        DefWndProcCloseButton = (WNDPROC)GetWindowLongPtr(hwndClose, GWLP_WNDPROC);
-    SetWindowLongPtr(hwndClose, GWLP_WNDPROC, (LONG_PTR)WndProcCloseButton);
 }

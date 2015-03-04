@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -32,7 +32,7 @@ static TxtNode *AllocTxtNode(Allocator *allocator, TxtNodeType nodeType)
     void *p = Allocator::AllocZero(allocator, sizeof(TxtNode));
     TxtNode *node = new (p) TxtNode(nodeType);
     if (TextNode != nodeType) {
-        p = allocator->Alloc(sizeof(Vec<TxtNode*>));
+        p = Allocator::AllocZero(allocator, sizeof(Vec<TxtNode*>));
         node->children = new (p) Vec<TxtNode*>(0, allocator);
     }
     return node;

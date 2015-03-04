@@ -1,12 +1,8 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef WinUtil_h
 #define WinUtil_h
-
-#include <WindowsX.h>
-#include <CommCtrl.h>
-#include <WinSafer.h>
 
 // the following are only defined if _WIN32_WINNT >= 0x0600 and we use 0x0500
 #ifndef USER_DEFAULT_SCREEN_DPI
@@ -15,6 +11,8 @@
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
 #endif
+
+#define NO_COLOR        (COLORREF)-1
 
 #define WIN_COL_WHITE   RGB(0xff, 0xff, 0xff)
 #define WIN_COL_BLACK   RGB(0, 0, 0)
@@ -28,18 +26,18 @@ HMODULE SafeLoadLibrary(const WCHAR *dllName);
 FARPROC LoadDllFunc(WCHAR *dllName, const char *funcName);
 BOOL    SafeCloseHandle(HANDLE *h);
 BOOL    SafeDestroyWindow(HWND *hwnd);
-void    FillWndClassEx(WNDCLASSEX& wcex, HINSTANCE hInstance, const WCHAR *clsName, WNDPROC wndproc);
+void    FillWndClassEx(WNDCLASSEX& wcex, const WCHAR *clsName, WNDPROC wndproc);
+inline void MoveWindow(HWND hwnd, RectI rect) { MoveWindow(hwnd, rect.x, rect.y, rect.dx, rect.dy, TRUE); }
 
-bool   IsAppThemed();
-WORD   GetWindowsVersion();
+bool   _IsAppThemed();
 bool   IsRunningInWow64();
-
-inline bool IsVistaOrGreater() { return GetWindowsVersion() >= 0x0600; }
+bool   IsVistaOrGreater();
 
 void   LogLastError(DWORD err=0);
 bool   RegKeyExists(HKEY keySub, const WCHAR *keyName);
 WCHAR *ReadRegStr(HKEY keySub, const WCHAR *keyName, const WCHAR *valName);
 bool   WriteRegStr(HKEY keySub, const WCHAR *keyName, const WCHAR *valName, const WCHAR *value);
+bool   ReadRegDWORD(HKEY keySub, const WCHAR *keyName, const WCHAR *valName, DWORD& value);
 bool   WriteRegDWORD(HKEY keySub, const WCHAR *keyName, const WCHAR *valName, DWORD value);
 bool   CreateRegKey(HKEY keySub, const WCHAR *keyName);
 bool   DeleteRegKey(HKEY keySub, const WCHAR *keyName, bool resetACLFirst=false);
@@ -57,15 +55,12 @@ bool   CreateShortcut(const WCHAR *shortcutPath, const WCHAR *exePath,
 IDataObject* GetDataObjectForFile(const WCHAR *filePath, HWND hwnd=NULL);
 DWORD GetFileVersion(const WCHAR *path);
 
-inline bool IsKeyPressed(int key)
-{
-    return GetKeyState(key) & 0x8000 ? true : false;
-}
+inline bool IsKeyPressed(int key) { return GetKeyState(key) & 0x8000 ? true : false; }
 inline bool IsShiftPressed() { return IsKeyPressed(VK_SHIFT); }
 inline bool IsAltPressed() { return IsKeyPressed(VK_MENU); }
 inline bool IsCtrlPressed() { return IsKeyPressed(VK_CONTROL); }
 
-HFONT   GetSimpleFont(HDC hdc, const WCHAR *fontName, int fontSize);
+HFONT   CreateSimpleFont(HDC hdc, const WCHAR *fontName, int fontSize);
 
 RectI   ShiftRectToWorkArea(RectI rect, bool bFully=false);
 RectI   GetWorkAreaRect(RectI rect);
@@ -78,25 +73,40 @@ HANDLE  LaunchProcess(const WCHAR *cmdLine, const WCHAR *currDir=NULL, DWORD fla
 void    PaintRect(HDC hdc, const RectI& rect);
 void    PaintLine(HDC hdc, const RectI& rect);
 void    DrawCenteredText(HDC hdc, const RectI& r, const WCHAR *txt, bool isRTL=false);
+void    DrawCenteredText(HDC hdc, const RECT& r, const WCHAR *txt, bool isRTL=false);
 SizeI   TextSizeInHwnd(HWND hwnd, const WCHAR *txt);
 
 bool    IsCursorOverWindow(HWND hwnd);
-bool    GetCursorPosInHwnd(HWND hwnd, POINT& posOut);
+bool    GetCursorPosInHwnd(HWND hwnd, PointI& posOut);
 void    CenterDialog(HWND hDlg, HWND hParent=NULL);
 WCHAR * GetDefaultPrinterName();
 bool    CopyTextToClipboard(const WCHAR *text, bool appendOnly=false);
 bool    CopyImageToClipboard(HBITMAP hbmp, bool appendOnly=false);
 void    ToggleWindowStyle(HWND hwnd, DWORD flag, bool enable, int type=GWL_STYLE);
+RectI   ChildPosWithinParent(HWND hwnd);
+HFONT   GetDefaultGuiFont();
 
 IStream*CreateStreamFromData(const void *data, size_t len);
 void  * GetDataFromStream(IStream *stream, size_t *len, HRESULT *res_opt=NULL);
 bool    ReadDataFromStream(IStream *stream, void *buffer, size_t len, size_t offset=0);
-UINT    GuessTextCodepage(const char *data, size_t len, UINT default=CP_ACP);
+UINT    GuessTextCodepage(const char *data, size_t len, UINT defVal=CP_ACP);
 WCHAR * NormalizeString(const WCHAR *str, int /* NORM_FORM */ form);
+bool    IsRtl(HWND hwnd);
+void    ResizeHwndToClientArea(HWND hwnd, int dx, int dy, bool hasMenu);
 
-void CalcMD5DigestWin(const void *data, size_t byteCount, unsigned char digest[16]);
-void CalcSha1DigestWin(const void *data, size_t byteCount, unsigned char digest[32]);
-void ResizeHwndToClientArea(HWND hwnd, int dx, int dy, bool hasMenu);
+inline int RectDx(const RECT& r) { return r.right - r.left; }
+inline int RectDy(const RECT& r) { return r.bottom - r.top; }
+
+// schedule WM_PAINT at window's leasure
+inline void ScheduleRepaint(HWND hwnd) { InvalidateRect(hwnd, NULL, FALSE); }
+
+// do WM_PAINT immediately
+inline void RepaintNow(HWND hwnd) {
+    InvalidateRect(hwnd, NULL, FALSE);
+    UpdateWindow(hwnd);
+}
+
+inline BOOL toBOOL(bool b) { return b ? TRUE : FALSE; }
 
 namespace win {
 
@@ -110,21 +120,21 @@ inline size_t GetTextLen(HWND hwnd)
    caller needs to free() the text */
 WCHAR *GetText(HWND hwnd);
 
-inline void SetText(HWND hwnd, const WCHAR *txt)
-{
-    SendMessage(hwnd, WM_SETTEXT, 0, (LPARAM)txt);
-}
+inline void SetText(HWND hwnd, const WCHAR *txt) { SendMessage(hwnd, WM_SETTEXT, 0, (LPARAM)txt); }
 
-int GetHwndDpi(HWND hwnd, float *uiDPIFactor);
+int GetHwndDpi(HWND hwnd, float *uiDPIFactor=NULL);
 int GlobalDpiAdjust(int value);
 int GlobalDpiAdjust(float value);
+int DpiAdjust(HWND, int);
+int DpiAdjust(HWND, float);
+
+inline void SetVisibility(HWND hwnd, bool visible) {
+    ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
+}
 
 namespace menu {
 
-inline void SetChecked(HMENU m, UINT id, bool isChecked)
-{
-    CheckMenuItem(m, id, MF_BYCOMMAND | (isChecked ? MF_CHECKED : MF_UNCHECKED));
-}
+inline void SetChecked(HMENU m, UINT id, bool isChecked) { CheckMenuItem(m, id, MF_BYCOMMAND | (isChecked ? MF_CHECKED : MF_UNCHECKED)); }
 
 inline bool SetEnabled(HMENU m, UINT id, bool isEnabled)
 {
@@ -132,15 +142,8 @@ inline bool SetEnabled(HMENU m, UINT id, bool isEnabled)
     return ret != -1;
 }
 
-inline void Remove(HMENU m, UINT id)
-{
-    RemoveMenu(m, id, MF_BYCOMMAND);
-}
-
-inline void Empty(HMENU m)
-{
-    while (RemoveMenu(m, 0, MF_BYPOSITION));
-}
+inline void Remove(HMENU m, UINT id) { RemoveMenu(m, id, MF_BYCOMMAND); }
+inline void Empty(HMENU m) { while (RemoveMenu(m, 0, MF_BYPOSITION)); }
 
 void SetText(HMENU m, UINT id, WCHAR *s);
 WCHAR *ToSafeString(const WCHAR *str);
@@ -163,15 +166,57 @@ public:
     void Flush(HDC hdc);
 };
 
+class DeferWinPosHelper {
+    HDWP hdwp;
+
+public:
+    DeferWinPosHelper() {
+        hdwp = ::BeginDeferWindowPos(32);
+    }
+
+    ~DeferWinPosHelper() {
+        End();
+    }
+
+    void End() {
+        if (hdwp) {
+            ::EndDeferWindowPos(hdwp);
+            hdwp = NULL;
+        }
+    }
+
+    void SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int x, int y, int cx, int cy, UINT uFlags) {
+        hdwp = ::DeferWindowPos(hdwp, hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
+    }
+
+    void MoveWindow(HWND hWnd, int x, int y, int cx, int cy, BOOL bRepaint=TRUE) {
+        UINT uFlags = SWP_NOACTIVATE|SWP_NOOWNERZORDER|SWP_NOZORDER;
+        if (!bRepaint)
+            uFlags |= SWP_NOREDRAW;
+        this->SetWindowPos(hWnd, 0, x, y, cx, cy, uFlags);
+    }
+
+    void MoveWindow(HWND hWnd, RectI r) {
+        this->MoveWindow(hWnd, r.x, r.y, r.dx, r.dy);
+    }
+};
+
 void    InitAllCommonControls();
 SizeI   GetBitmapSize(HBITMAP hbmp);
-void    UpdateBitmapColorRange(HBITMAP hbmp, COLORREF range[2]);
+void    UpdateBitmapColors(HBITMAP hbmp, COLORREF textColor, COLORREF bgColor);
 unsigned char *SerializeBitmap(HBITMAP hbmp, size_t *bmpBytesOut);
+HBITMAP CreateMemoryBitmap(SizeI size, HANDLE *hDataMapping=NULL);
 COLORREF AdjustLightness(COLORREF c, float factor);
+float GetLightness(COLORREF c);
 double  GetProcessRunningTime();
 
 void RunNonElevated(const WCHAR *exePath);
 void VariantInitBstr(VARIANT& urlVar, const WCHAR *s);
 char *LoadTextResource(int resId, size_t *sizeOut=NULL);
+bool DDEExecute(const WCHAR *server, const WCHAR *topic, const WCHAR *command);
+
+void RectInflateTB(RECT& r, int top, int bottom);
+void DivideRectH(const RECT&r, int y, int dy, RECT& r1, RECT& r2, RECT& r3);
+void DivideRectV(const RECT&r, int x, int dx, RECT& r1, RECT& r2, RECT& r3);
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef ThreadUtil_h
@@ -7,7 +7,7 @@
 /* A very simple thread class that allows stopping a thread */
 class ThreadBase {
 private:
-    LONG                threadNo;
+    int                 threadNo;
     HANDLE              hThread;
     bool                cancelRequested;
 
@@ -25,7 +25,7 @@ protected:
 
 public:
     // name is for debugging purposes, can be NULL.
-    ThreadBase(const char *name=NULL);
+    explicit ThreadBase(const char *name=NULL);
 
     // call this to start executing Run() function.
     void Start();

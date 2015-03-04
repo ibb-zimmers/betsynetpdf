@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -14,6 +14,9 @@
 /*
 This code is tricky, so here's a high-level overview. More info at:
 http://qualapps.blogspot.com/2010/05/understanding-readdirectorychangesw.html
+
+Also, we did have a bug caused by incorrect use of CancelIo(). Here's a good
+description of its intricacies: http://blogs.msdn.com/b/oldnewthing/archive/2011/02/02/10123392.aspx
 
 We use ReadDirectoryChangesW() with overlapped i/o and i/o completion
 callback function.
@@ -160,7 +163,6 @@ static void NotifyAboutFile(WatchedDir *d, const WCHAR *fileName)
         // file notifications to be ignored. (This happens for instance for
         // PDF files produced by pdftex from small.tex document)
         wf->observer->OnFileChanged();
-        return;
     }
 }
 
@@ -197,19 +199,20 @@ static void CALLBACK ReadDirectoryChangesNotification(DWORD errCode,
     // collect files that changed, removing duplicates
     WStrVec changedFiles;
     for (;;) {
-        WCHAR *fileName = str::DupN(notify->FileName, notify->FileNameLength / sizeof(WCHAR));
-        if (notify->Action == FILE_ACTION_MODIFIED) {
+        ScopedMem<WCHAR> fileName(str::DupN(notify->FileName, notify->FileNameLength / sizeof(WCHAR)));
+        // files can get updated either by writing to them directly or
+        // by writing to a .tmp file first and then moving that file in place
+        // (the latter only yields a RENAMED action with the expected file name)
+        if (notify->Action == FILE_ACTION_MODIFIED || notify->Action == FILE_ACTION_RENAMED_NEW_NAME) {
             if (!changedFiles.Contains(fileName)) {
                 lf(L"ReadDirectoryChangesNotification() FILE_ACTION_MODIFIED, for '%s'", fileName);
-                changedFiles.Append(fileName);
-                fileName = NULL;
+                changedFiles.Append(fileName.StealData());
             } else {
                 lf(L"ReadDirectoryChangesNotification() eliminating duplicate notification for '%s'", fileName);
             }
         } else {
             lf(L"ReadDirectoryChangesNotification() action=%d, for '%s'", (int)notify->Action, fileName);
         }
-        free(fileName);
 
         // step to the next entry if there is one
         DWORD nextOff = notify->NextEntryOffset;
@@ -242,7 +245,7 @@ static void CALLBACK StartMonitoringDirForChangesAPC(ULONG_PTR arg)
          wd->buf,                           // read results buffer
          sizeof(wd->buf),                   // length of buffer
          FALSE,                             // bWatchSubtree
-         FILE_NOTIFY_CHANGE_LAST_WRITE,     // filter conditions
+         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME, // filter conditions
          NULL,                              // bytes returned
          overlapped,                        // overlapped buffer
          ReadDirectoryChangesNotification); // completion routine

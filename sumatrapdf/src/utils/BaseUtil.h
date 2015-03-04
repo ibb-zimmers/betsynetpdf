@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef BaseUtil_h
@@ -11,17 +11,29 @@
 #define _UNICODE
 #endif
 
-#include <WinSock2.h>
+// #include <winsock2.h>
 #include <windows.h>
 #include <unknwn.h>
 #include <shlwapi.h>
 #include <shlobj.h>
+#include <commctrl.h>
+#include <windowsx.h>
+#include <winsafer.h>
 #include <gdiplus.h>
+
+#ifdef min
+#undef min
+#endif
+
+#ifdef max
+#undef max
+#endif
 
 #ifdef DEBUG
 #define _CRTDBG_MAP_ALLOC
 #endif
 
+#include <algorithm>
 #include <stdlib.h>
 
 // TODO: this breaks placement new
@@ -42,6 +54,9 @@
 #include <stdint.h>
 #include <time.h>
 #include <locale.h>
+#include <malloc.h>
+#include <io.h>
+#include <fcntl.h>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -72,15 +87,12 @@ typedef uint32_t uint32;
 typedef int64_t   int64;
 typedef uint64_t uint64;
 
-// useful for setting an 'invalid' state for size_t variables
-#define MAX_SIZE_T (size_t)(-1)
-
 STATIC_ASSERT(2 == sizeof(int16),   int16_is_2_bytes);
 STATIC_ASSERT(2 == sizeof(uint16), uint16_is_2_bytes);
 STATIC_ASSERT(4 == sizeof(int32),   int32_is_4_bytes);
-STATIC_ASSERT(4 == sizeof(uint32),  uint32_is_4_bytes);
+STATIC_ASSERT(4 == sizeof(uint32), uint32_is_4_bytes);
 STATIC_ASSERT(8 == sizeof(int64),   int64_is_8_bytes);
-STATIC_ASSERT(8 == sizeof(uint64),  uint64_is_8_bytes);
+STATIC_ASSERT(8 == sizeof(uint64), uint64_is_8_bytes);
 
 #pragma warning(push)
 #pragma warning(disable: 6011) // silence /analyze: de-referencing a NULL pointer
@@ -125,16 +137,17 @@ inline void CrashMe()
 #define CrashIf(cond) __analysis_assume(!(cond))
 #endif
 
+// Sometimes we want to assert only in debug build (not in pre-release)
+#if defined(DEBUG)
+#define CrashIfDebugOnly(cond) CrashAlwaysIf(cond)
+#else
+#define CrashIfDebugOnly(cond) __analysis_assume(!(cond))
+#endif
+
 // AssertCrash is like assert() but crashes like CrashIf()
 // It's meant to make converting assert() easier (converting to
 // CrashIf() requires inverting the condition, which can introduce bugs)
 #define AssertCrash(exp) CrashIf(!(exp))
-
-template <typename T>
-inline void Swap(T& one, T&two)
-{
-    T tmp = one; one = two; two = tmp;
-}
 
 template <typename T>
 inline T limitValue(T val, T min, T max)
@@ -190,5 +203,34 @@ bool ListRemove(T** root, T* el)
 #include "Scoped.h"
 #include "StrUtil.h"
 #include "Vec.h"
+
+/* In debug mode, VS 2010 instrumentations complains about GetRValue() etc.
+This adds equivalent functions that don't have this problem and ugly
+substitutions to make sure we don't use Get*Value() in the future */
+
+static inline BYTE GetRValueSafe(COLORREF rgb)
+{
+    rgb = rgb & 0xff;
+    return (BYTE)rgb;
+}
+
+static inline BYTE GetGValueSafe(COLORREF rgb)
+{
+    rgb = (rgb >> 8) & 0xff;
+    return (BYTE)rgb;
+}
+
+static inline BYTE GetBValueSafe(COLORREF rgb)
+{
+    rgb = (rgb >> 16) & 0xff;
+    return (BYTE)rgb;
+}
+
+#undef GetRValue
+#define GetRValue UseGetRValueSafeInstead
+#undef GetGValue
+#define GetGValue UseGetGValueSafeInstead
+#undef GetBValue
+#define GetBValue UseGetBValueSafeInstead
 
 #endif

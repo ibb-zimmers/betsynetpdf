@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -68,6 +68,8 @@ void TextSearch::SetText(const WCHAR *text)
     else
         anchor = str::DupN(text, 1);
 
+    if (str::Len(this->findText) >= INT_MAX)
+        this->findText[(unsigned)INT_MAX - 1] = '\0';
     if (str::EndsWith(this->findText, L" "))
         this->findText[str::Len(this->findText) - 1] = '\0';
 
@@ -101,8 +103,8 @@ void TextSearch::SetLastResult(TextSelection *sel)
     str::NormalizeWS(selection);
     SetText(selection);
 
-    findPage = min(startPage, endPage);
-    findIndex = (findPage == startPage ? startGlyph : endGlyph) + str::Len(findText);
+    findPage = std::min(startPage, endPage);
+    findIndex = (findPage == startPage ? startGlyph : endGlyph) + (int)str::Len(findText);
     pageText = textCache->GetData(findPage);
     forward = true;
 }

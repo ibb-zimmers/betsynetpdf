@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 // PDF-source synchronizer based on .pdfsync file
 
@@ -20,12 +20,12 @@ enum {
     PDFSYNCERR_INVALID_ARGUMENT
 };
 
-class PdfEngine;
+class BaseEngine;
 
 class Synchronizer
 {
 public:
-    Synchronizer(const WCHAR* syncfilepath);
+    explicit Synchronizer(const WCHAR* syncfilepath);
     virtual ~Synchronizer() { }
 
     // Inverse-search:
@@ -56,7 +56,7 @@ protected:
     ScopedMem<WCHAR> syncfilepath;  // path to the synchronization file
 
 public:
-    static int Create(const WCHAR *pdffilename, PdfEngine *engine, Synchronizer **sync);
+    static int Create(const WCHAR *pdffilename, BaseEngine *engine, Synchronizer **sync);
 };
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef StressTesting_h
@@ -8,6 +8,7 @@ bool IsValidPageRange(const WCHAR *ranges);
 bool IsBenchPagesInfo(const WCHAR *s);
 void BenchFileOrDir(WStrVec& pathsToBench);
 bool IsStressTesting();
+void BenchEbookLayout(WCHAR *filePath);
 
 class WindowInfo;
 class RenderCache;

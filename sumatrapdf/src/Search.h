@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef Search_h
@@ -43,6 +43,7 @@
 LRESULT OnDDEInitiate(HWND hwnd, WPARAM wparam, LPARAM lparam);
 LRESULT OnDDExecute(HWND hwnd, WPARAM wparam, LPARAM lparam);
 LRESULT OnDDETerminate(HWND hwnd, WPARAM wparam, LPARAM lparam);
+LRESULT OnCopyData(HWND hwnd, WPARAM wparam, LPARAM lparam);
 
 #define HIDE_FWDSRCHMARK_TIMER_ID                4
 #define HIDE_FWDSRCHMARK_DELAY_IN_MS             400

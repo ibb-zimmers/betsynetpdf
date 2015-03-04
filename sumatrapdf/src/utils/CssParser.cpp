@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -222,7 +222,3 @@ GetNextProperty:
 
     return &prop;
 }
-
-#ifdef DEBUG
-#include "CssParser_ut.cpp"
-#endif

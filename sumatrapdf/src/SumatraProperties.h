@@ -1,10 +1,8 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef SumatraProperties_h
 #define SumatraProperties_h
-
-#include "SumatraWindow.h"
 
 #define PROPERTIES_CLASS_NAME   L"SUMATRA_PDF_PROPERTIES"
 
@@ -40,7 +38,9 @@ public:
     HWND    hwndParent;
 };
 
-void OnMenuProperties(const SumatraWindow& win);
+class WindowInfo;
+
+void OnMenuProperties(WindowInfo *win);
 void DeletePropertiesWindow(HWND hwndParent);
 LRESULT CALLBACK WndProcProperties(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 

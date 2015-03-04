@@ -1,10 +1,12 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "SumatraProperties.h"
 
-#include "EbookWindow.h"
+#include "Controller.h"
+#include "DisplayModel.h"
+#include "EngineManager.h"
 #include "FileUtil.h"
 #include "resource.h"
 #include "SumatraPDF.h"
@@ -12,9 +14,9 @@
 #include "WindowInfo.h"
 #include "WinUtil.h"
 
-#define PROPERTIES_LEFT_RIGHT_SPACE_DX 8
-#define PROPERTIES_RECT_PADDING     8
-#define PROPERTIES_TXT_DY_PADDING 2
+#define PROPERTIES_LEFT_RIGHT_SPACE_DX  8
+#define PROPERTIES_RECT_PADDING         8
+#define PROPERTIES_TXT_DY_PADDING       2
 #define PROPERTIES_WIN_TITLE    _TR("Document Properties")
 
 static Vec<PropertiesLayout*> gPropertiesWindows;
@@ -64,10 +66,10 @@ static bool PdfDateParse(const WCHAR *pdfDate, SYSTEMTIME *timeOut)
 // See: ISO 8601 specification
 // Format:  "YYYY-MM-DDTHH:MM:SSZ"
 // Example: "2011-04-19T22:10:48Z"
-static bool IsoDateParse(const WCHAR *xpsDate, SYSTEMTIME *timeOut)
+static bool IsoDateParse(const WCHAR *isoDate, SYSTEMTIME *timeOut)
 {
     ZeroMemory(timeOut, sizeof(SYSTEMTIME));
-    const WCHAR *end = str::Parse(xpsDate, L"%4d-%2d-%2d", &timeOut->wYear, &timeOut->wMonth, &timeOut->wDay);
+    const WCHAR *end = str::Parse(isoDate, L"%4d-%2d-%2d", &timeOut->wYear, &timeOut->wMonth, &timeOut->wDay);
     if (end) // time is optional
         str::Parse(end, L"T%2d:%2d:%2dZ", &timeOut->wHour, &timeOut->wMinute, &timeOut->wSecond);
     return end != NULL;
@@ -79,18 +81,20 @@ static WCHAR *FormatSystemTime(SYSTEMTIME& date)
     WCHAR buf[512];
     int cchBufLen = dimof(buf);
     int ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &date, NULL, buf, cchBufLen);
-    if (0 == ret) // GetDateFormat() failed
-        ret = 1;
+    if (ret < 2) // GetDateFormat() failed or returned an empty result
+        return NULL;
 
-    WCHAR *tmp = buf + ret - 1;
-    if (ret > 1)
-        *tmp++ = ' ';
-    cchBufLen -= ret;
-    ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &date, NULL, tmp, cchBufLen);
-    if (0 == ret) // GetTimeFormat() failed
-        *tmp = '\0';
+    // don't add 00:00:00 for dates without time
+    if (0 == date.wHour && 0 == date.wMinute && 0 == date.wSecond)
+        return str::Dup(buf);
 
-    return tmp > buf ? str::Dup(buf) : NULL;
+    WCHAR *tmp = buf + ret;
+    tmp[-1] = ' ';
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &date, NULL, tmp, cchBufLen - ret);
+    if (ret < 2) // GetTimeFormat() failed or returned an empty result
+        tmp[-1] = '\0';
+
+    return str::Dup(buf);
 }
 
 // Convert a date in PDF or XPS format, e.g. "D:20091222171933-05'00'" to a display
@@ -150,20 +154,38 @@ static WCHAR *FormatFileSize(size_t size)
     return str::Format(L"%s (%s %s)", n1, n2, _TR("Bytes"));
 }
 
-// format page size according to locale (e.g. "29.7 x 20.9 cm" or "11.69 x 8.23 in")
+// format page size according to locale (e.g. "29.7 x 21.0 cm" or "11.69 x 8.27 in")
 // Caller needs to free the result
 static WCHAR *FormatPageSize(BaseEngine *engine, int pageNo, int rotation)
 {
     RectD mediabox = engine->PageMediabox(pageNo);
-    SizeD size = engine->Transform(mediabox, pageNo, 1.0, rotation).Size();
+    SizeD size = engine->Transform(mediabox, pageNo, 1.0f / engine->GetFileDPI(), rotation).Size();
+
+    const WCHAR *formatName = L"";
+    SizeD sizeP = size.dx < size.dy ? size : SizeD(size.dy, size.dx);
+    // common ISO 216 formats (metric)
+    if (limitValue(sizeP.dx, 8.26, 8.28) == sizeP.dx && limitValue(sizeP.dy, 11.68, 11.70) == sizeP.dy)
+        formatName = L" (A4)";
+    else if (limitValue(sizeP.dx, 11.68, 11.70) == sizeP.dx && limitValue(sizeP.dy, 16.53, 16.55) == sizeP.dy)
+        formatName = L" (A3)";
+    else if (limitValue(sizeP.dx, 5.82, 5.85) == sizeP.dx && limitValue(sizeP.dy, 8.26, 8.28) == sizeP.dy)
+        formatName = L" (A5)";
+    // common US/ANSI formats (imperial)
+    else if (limitValue(sizeP.dx, 8.49, 8.51) == sizeP.dx && limitValue(sizeP.dy, 10.99, 11.01) == sizeP.dy)
+        formatName = L" (Letter)";
+    else if (limitValue(sizeP.dx, 8.49, 8.51) == sizeP.dx && limitValue(sizeP.dy, 13.99, 14.01) == sizeP.dy)
+        formatName = L" (Legal)";
+    else if (limitValue(sizeP.dx, 10.99, 11.01) == sizeP.dx && limitValue(sizeP.dy, 16.99, 17.01) == sizeP.dy)
+        formatName = L" (Tabloid)";
 
     WCHAR unitSystem[2];
     GetLocaleInfo(LOCALE_USER_DEFAULT, LOCALE_IMEASURE, unitSystem, dimof(unitSystem));
     bool isMetric = unitSystem[0] == '0';
     double unitsPerInch = isMetric ? 2.54 : 1.0;
+    const WCHAR *unit = isMetric ? L"cm" : L"in";
 
-    double width = size.dx * unitsPerInch / engine->GetFileDPI();
-    double height = size.dy * unitsPerInch / engine->GetFileDPI();
+    double width = size.dx * unitsPerInch;
+    double height = size.dy * unitsPerInch;
     if (((int)(width * 100)) % 100 == 99)
         width += 0.01;
     if (((int)(height * 100)) % 100 == 99)
@@ -172,12 +194,12 @@ static WCHAR *FormatPageSize(BaseEngine *engine, int pageNo, int rotation)
     ScopedMem<WCHAR> strWidth(str::FormatFloatWithThousandSep(width));
     ScopedMem<WCHAR> strHeight(str::FormatFloatWithThousandSep(height));
 
-    return str::Format(L"%s x %s %s", strWidth, strHeight, isMetric ? L"cm" : L"in");
+    return str::Format(L"%s x %s %s%s", strWidth, strHeight, unit, formatName);
 }
 
-static WCHAR *FormatPdfFileStructure(Doc doc)
+static WCHAR *FormatPdfFileStructure(Controller *ctrl)
 {
-    ScopedMem<WCHAR> fstruct(doc.GetProperty(Prop_PdfFileStructure));
+    ScopedMem<WCHAR> fstruct(ctrl->GetProperty(Prop_PdfFileStructure));
     if (str::IsEmpty(fstruct.Get()))
         return NULL;
     WStrVec parts;
@@ -201,16 +223,17 @@ static WCHAR *FormatPdfFileStructure(Doc doc)
 
 // returns a list of permissions denied by this document
 // Caller needs to free the result
-static WCHAR *FormatPermissions(Doc doc)
+static WCHAR *FormatPermissions(Controller *ctrl)
 {
-    if (!doc.IsEngine())
+    if (!ctrl->AsFixed())
         return NULL;
 
     WStrVec denials;
 
-    if (!doc.AsEngine()->AllowsPrinting())
+    BaseEngine *engine = ctrl->AsFixed()->GetEngine();
+    if (!engine->AllowsPrinting())
         denials.Push(str::Dup(_TR("printing document")));
-    if (!doc.AsEngine()->AllowsCopyingText())
+    if (!engine->AllowsCopyingText())
         denials.Push(str::Dup(_TR("copying text")));
 
     return denials.Join(L", ");
@@ -236,8 +259,8 @@ bool PropertiesLayout::HasProperty(const WCHAR *key)
 
 static void UpdatePropertiesLayout(PropertiesLayout *layoutData, HDC hdc, RectI *rect)
 {
-    ScopedFont fontLeftTxt(GetSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
-    ScopedFont fontRightTxt(GetSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
+    ScopedFont fontLeftTxt(CreateSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
+    ScopedFont fontRightTxt(CreateSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
     HGDIOBJ origFont = SelectObject(hdc, fontLeftTxt);
 
     /* calculate text dimensions for the left side */
@@ -304,7 +327,7 @@ static bool CreatePropertiesWindow(HWND hParent, PropertiesLayout* layoutData)
            CW_USEDEFAULT, CW_USEDEFAULT,
            CW_USEDEFAULT, CW_USEDEFAULT,
            NULL, NULL,
-           ghinst, NULL);
+           GetModuleHandle(NULL), NULL);
     if (!hwnd)
         return false;
 
@@ -324,8 +347,8 @@ static bool CreatePropertiesWindow(HWND hParent, PropertiesLayout* layoutData)
     WindowRect wRc(hwnd);
     ClientRect cRc(hwnd);
     RectI work = GetWorkAreaRect(WindowRect(hParent));
-    wRc.dx = min(rc.dx + wRc.dx - cRc.dx, work.dx);
-    wRc.dy = min(rc.dy + wRc.dy - cRc.dy, work.dy);
+    wRc.dx = std::min(rc.dx + wRc.dx - cRc.dx, work.dx);
+    wRc.dy = std::min(rc.dy + wRc.dy - cRc.dy, work.dy);
     MoveWindow(hwnd, wRc.x, wRc.y, wRc.dx, wRc.dy, FALSE);
     CenterDialog(hwnd, hParent);
 
@@ -333,79 +356,70 @@ static bool CreatePropertiesWindow(HWND hParent, PropertiesLayout* layoutData)
     return true;
 }
 
-static void GetProps(Doc doc, PropertiesLayout *layoutData, DisplayModel *dm, bool extended)
+static void GetProps(Controller *ctrl, PropertiesLayout *layoutData, bool extended)
 {
-    CrashIf(!doc.IsEngine() && !doc.IsEbook());
-    DocType engineType = doc.GetDocType();
+    CrashIf(!ctrl);
 
-    WCHAR *str = str::Dup(gPluginMode ? gPluginURL : doc.GetFilePath());
+    WCHAR *str = str::Dup(gPluginMode ? gPluginURL : ctrl->FilePath());
     layoutData->AddProperty(_TR("File:"), str);
 
-    str = doc.GetProperty(Prop_Title);
+    str = ctrl->GetProperty(Prop_Title);
     layoutData->AddProperty(_TR("Title:"), str);
 
-    str = doc.GetProperty(Prop_Subject);
+    str = ctrl->GetProperty(Prop_Subject);
     layoutData->AddProperty(_TR("Subject:"), str);
 
-    str = doc.GetProperty(Prop_Author);
+    str = ctrl->GetProperty(Prop_Author);
     layoutData->AddProperty(_TR("Author:"), str);
 
-    str = doc.GetProperty(Prop_Copyright);
+    str = ctrl->GetProperty(Prop_Copyright);
     layoutData->AddProperty(_TR("Copyright:"), str);
 
-    str = doc.GetProperty(Prop_CreationDate);
-    if (Engine_PDF == engineType)
+    str = ctrl->GetProperty(Prop_CreationDate);
+    if (str && ctrl->AsFixed() && Engine_PDF == ctrl->AsFixed()->engineType)
         ConvDateToDisplay(&str, PdfDateParse);
-    else if (Engine_XPS == engineType)
-        ConvDateToDisplay(&str, IsoDateParse);
-    else if (Engine_Epub == engineType || Doc_Epub == engineType)
-        ConvDateToDisplay(&str, IsoDateParse);
-    else if (Engine_Mobi == engineType || Doc_Mobi == engineType)
+    else
         ConvDateToDisplay(&str, IsoDateParse);
     layoutData->AddProperty(_TR("Created:"), str);
 
-    str = doc.GetProperty(Prop_ModificationDate);
-    if (Engine_PDF == engineType)
+    str = ctrl->GetProperty(Prop_ModificationDate);
+    if (str && ctrl->AsFixed() && Engine_PDF == ctrl->AsFixed()->engineType)
         ConvDateToDisplay(&str, PdfDateParse);
-    else if (Engine_XPS == engineType)
-        ConvDateToDisplay(&str, IsoDateParse);
-    else if (Engine_Epub == engineType || Doc_Epub == engineType)
-        ConvDateToDisplay(&str, IsoDateParse);
-    else if (Engine_Mobi == engineType || Doc_Mobi == engineType)
+    else
         ConvDateToDisplay(&str, IsoDateParse);
     layoutData->AddProperty(_TR("Modified:"), str);
 
-    str = doc.GetProperty(Prop_CreatorApp);
+    str = ctrl->GetProperty(Prop_CreatorApp);
     layoutData->AddProperty(_TR("Application:"), str);
 
-    str = doc.GetProperty(Prop_PdfProducer);
-    // TODO: remove PDF from string
+    str = ctrl->GetProperty(Prop_PdfProducer);
     layoutData->AddProperty(_TR("PDF Producer:"), str);
 
-    str = doc.GetProperty(Prop_PdfVersion);
+    str = ctrl->GetProperty(Prop_PdfVersion);
     layoutData->AddProperty(_TR("PDF Version:"), str);
 
-    str = FormatPdfFileStructure(doc);
+    str = FormatPdfFileStructure(ctrl);
     layoutData->AddProperty(_TR("PDF Optimizations:"), str);
 
-    int64 fileSize = file::GetSize(doc.GetFilePath());
-    if (-1 == fileSize && doc.IsEngine()) {
+    int64 fileSize = file::GetSize(ctrl->FilePath());
+    if (-1 == fileSize && ctrl->AsFixed()) {
         size_t fileSizeT;
-        free(doc.AsEngine()->GetFileData(&fileSizeT));
-        fileSize = fileSizeT;
+        if (ScopedMem<unsigned char>(ctrl->AsFixed()->GetEngine()->GetFileData(&fileSizeT)))
+            fileSize = fileSizeT;
     }
     if (-1 != fileSize) {
         str = FormatFileSize((size_t)fileSize);
         layoutData->AddProperty(_TR("File Size:"), str);
     }
 
-    if (doc.IsEngine()) {
-        str = str::Format(L"%d", doc.AsEngine()->PageCount());
+    // TODO: display page count per current layout for ebooks?
+    if (!ctrl->AsEbook()) {
+        str = str::Format(L"%d", ctrl->PageCount());
         layoutData->AddProperty(_TR("Number of Pages:"), str);
     }
 
-    if (dm && dm->engineType != Engine_Chm) {
-        str = FormatPageSize(dm->engine, dm->CurrentPageNo(), dm->Rotation());
+    if (ctrl->AsFixed()) {
+        str = FormatPageSize(ctrl->AsFixed()->GetEngine(), ctrl->CurrentPageNo(), ctrl->AsFixed()->GetRotation());
         if (IsUIRightToLeft() && IsVistaOrGreater()) {
             // ensure that the size remains ungarbled left-to-right
             // (note: XP doesn't know about \u202A...\u202C)
@@ -414,13 +428,13 @@ static void GetProps(Doc doc, PropertiesLayout *layoutData, DisplayModel *dm, bo
         layoutData->AddProperty(_TR("Page Size:"), str);
     }
 
-    str = FormatPermissions(doc);
+    str = FormatPermissions(ctrl);
     layoutData->AddProperty(_TR("Denied Permissions:"), str);
 
 #if defined(DEBUG) || defined(ENABLE_EXTENDED_PROPERTIES)
     if (extended) {
         // TODO: FontList extraction can take a while
-        str = doc.GetProperty(Prop_FontList);
+        str = ctrl->GetProperty(Prop_FontList);
         if (str) {
             // add a space between basic and extended file properties
             layoutData->AddProperty(L" ", str::Dup(L" "));
@@ -430,7 +444,7 @@ static void GetProps(Doc doc, PropertiesLayout *layoutData, DisplayModel *dm, bo
 #endif
 }
 
-static void ShowProperties(HWND parent, Doc doc, DisplayModel *dm, bool extended=false)
+static void ShowProperties(HWND parent, Controller *ctrl, bool extended=false)
 {
     PropertiesLayout *layoutData = FindPropertyWindowByParent(parent);
     if (layoutData) {
@@ -438,30 +452,27 @@ static void ShowProperties(HWND parent, Doc doc, DisplayModel *dm, bool extended
         return;
     }
 
-    if (!doc.IsEngine() && !doc.IsEbook())
+    if (!ctrl)
         return;
     layoutData = new PropertiesLayout();
     gPropertiesWindows.Append(layoutData);
-    GetProps(doc, layoutData, dm, extended);
+    GetProps(ctrl, layoutData, extended);
 
     if (!CreatePropertiesWindow(parent, layoutData))
         delete layoutData;
 }
 
-void OnMenuProperties(const SumatraWindow& win)
+void OnMenuProperties(WindowInfo *win)
 {
-    if (win.AsWindowInfo())
-        ShowProperties(win.AsWindowInfo()->hwndFrame, GetDocForWindow(win), win.AsWindowInfo()->dm);
-    else if (win.AsEbookWindow())
-        ShowProperties(win.AsEbookWindow()->hwndFrame, GetDocForWindow(win), NULL);
+    ShowProperties(win->hwndFrame, win->ctrl);
 }
 
 static void DrawProperties(HWND hwnd, HDC hdc)
 {
     PropertiesLayout *layoutData = FindPropertyWindowByHwnd(hwnd);
 
-    ScopedFont fontLeftTxt(GetSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
-    ScopedFont fontRightTxt(GetSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
+    ScopedFont fontLeftTxt(CreateSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
+    ScopedFont fontRightTxt(CreateSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
 
     HGDIOBJ origFont = SelectObject(hdc, fontLeftTxt); /* Just to remember the orig font */
 
@@ -506,7 +517,6 @@ static void OnPaintProperties(HWND hwnd)
     EndPaint(hwnd, &ps);
 }
 
-// returns true if properties have been copied to the clipboard
 static void CopyPropertiesToClipboard(HWND hwnd)
 {
     PropertiesLayout *layoutData = FindPropertyWindowByHwnd(hwnd);
@@ -539,7 +549,7 @@ static void PropertiesOnCommand(HWND hwnd, WPARAM wParam)
             WindowInfo *win = FindWindowInfoByHwnd(pl->hwndParent);
             if (win && !pl->HasProperty(_TR("Fonts:"))) {
                 DestroyWindow(hwnd);
-                ShowProperties(win->hwndFrame, GetDocForWindow(SumatraWindow::Make(win)), win->dm, true);
+                ShowProperties(win->hwndFrame, win->ctrl, true);
             }
         }
 #endif

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Mui_h
@@ -8,6 +8,8 @@
 #include "BaseUtil.h"
 #include "Sigslot.h"
 
+struct FrameRateWnd;
+
 enum AlignAttr;
 struct TxtNode;
 
@@ -16,6 +18,7 @@ namespace mui {
 using namespace Gdiplus;
 
 #include "MuiBase.h"
+#include "TextRender.h"
 #include "MuiCss.h"
 
 using namespace css;

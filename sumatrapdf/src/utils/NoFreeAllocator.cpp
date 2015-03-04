@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 /* NOTE: this is unfinished work in progress */
@@ -133,7 +133,7 @@ void *alloc(size_t size)
     MemBlock *m = gCurrMemBlock;
 
     if (!m || (size > m->left)) {
-        size_t blockSize = max(MEM_BLOCK_SIZE, size + sizeof(MemBlock));
+        size_t blockSize = std::max((size_t)MEM_BLOCK_SIZE, size + sizeof(MemBlock));
         MemBlock *block = (MemBlock*)malloc(blockSize);
         if (!block)
             return NULL;

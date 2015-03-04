@@ -1,11 +1,12 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef EpubDoc_h
 #define EpubDoc_h
 
+#include "BaseEngine.h"
 #include "EbookBase.h"
-#include "ZipUtil.h"
+#include "ArchUtil.h"
 
 struct ImageData2 {
     ImageData base;
@@ -15,20 +16,25 @@ struct ImageData2 {
 
 char *NormalizeURL(const char *url, const char *base);
 
+class PropertyMap {
+    ScopedMem<char> values[Prop_PdfVersion];
+
+    int Find(DocumentProperty prop) const;
+
+public:
+    void Set(DocumentProperty prop, char *valueUtf8, bool replace=false);
+    WCHAR *Get(DocumentProperty prop) const;
+};
+
 /* ********** EPUB ********** */
 
 class EpubDoc {
-    struct Metadata {
-        DocumentProperty prop;
-        char *value;
-    };
-
     ZipFile zip;
     str::Str<char> htmlData;
     Vec<ImageData2> images;
-    Vec<Metadata> props;
     ScopedMem<WCHAR> tocPath;
     ScopedMem<WCHAR> fileName;
+    PropertyMap props;
     bool isNcxToc;
     bool isRtlDoc;
 
@@ -38,12 +44,12 @@ class EpubDoc {
     bool ParseNcxToc(const char *data, size_t dataLen, const char *pagePath, EbookTocVisitor *visitor);
 
 public:
-    EpubDoc(const WCHAR *fileName);
-    EpubDoc(IStream *stream);
+    explicit EpubDoc(const WCHAR *fileName);
+    explicit EpubDoc(IStream *stream);
     ~EpubDoc();
 
-    const char *GetTextData(size_t *lenOut);
-    size_t GetTextDataSize();
+    const char *GetHtmlData(size_t *lenOut) const;
+    size_t GetHtmlDataSize() const;
     ImageData *GetImageData(const char *id, const char *pagePath);
     char *GetFileData(const char *relPath, const char *pagePath, size_t *lenOut);
 
@@ -61,6 +67,8 @@ public:
 
 /* ********** FictionBook (FB2) ********** */
 
+#define FB2_TOC_ENTRY_MARK "ToC!Entry!"
+
 class HtmlPullParser;
 struct HtmlToken;
 
@@ -70,10 +78,8 @@ class Fb2Doc {
 
     str::Str<char> xmlData;
     Vec<ImageData2> images;
-    ScopedMem<WCHAR> docTitle;
-    ScopedMem<WCHAR> docAuthor;
     ScopedMem<char> coverImage;
-
+    PropertyMap props;
     bool isZipped;
     bool hasToc;
 
@@ -81,18 +87,21 @@ class Fb2Doc {
     void ExtractImage(HtmlPullParser *parser, HtmlToken *tok);
 
 public:
-    Fb2Doc(const WCHAR *fileName);
-    Fb2Doc(IStream *stream);
+    explicit Fb2Doc(const WCHAR *fileName);
+    explicit Fb2Doc(IStream *stream);
     ~Fb2Doc();
 
-    const char *GetTextData(size_t *lenOut);
-    size_t GetTextDataSize();
+    const char *GetXmlData(size_t *lenOut) const;
+    size_t GetXmlDataSize() const;
     ImageData *GetImageData(const char *id);
     ImageData *GetCoverImage();
 
     WCHAR *GetProperty(DocumentProperty prop) const;
     const WCHAR *GetFileName() const;
     bool IsZipped() const;
+
+    bool HasToc() const;
+    bool ParseToc(EbookTocVisitor *visitor);
 
     static bool IsSupportedFile(const WCHAR *fileName, bool sniff=false);
     static Fb2Doc *CreateFromFile(const WCHAR *fileName);
@@ -112,10 +121,11 @@ class PalmDoc {
     bool Load();
 
 public:
-    PalmDoc(const WCHAR *fileName);
+    explicit PalmDoc(const WCHAR *fileName);
     ~PalmDoc();
 
-    const char *GetTextData(size_t *lenOut);
+    const char *GetHtmlData(size_t *lenOut) const;
+    size_t GetHtmlDataSize() const;
 
     WCHAR *GetProperty(DocumentProperty prop) const;
     const WCHAR *GetFileName() const;
@@ -127,27 +137,6 @@ public:
     static PalmDoc *CreateFromFile(const WCHAR *fileName);
 };
 
-/* ********** TCR (Text Compression for (Psion) Reader) ********** */
-
-class TcrDoc {
-    ScopedMem<WCHAR> fileName;
-    str::Str<char> htmlData;
-
-    bool Load();
-
-public:
-    TcrDoc(const WCHAR *fileName);
-    ~TcrDoc();
-
-    const char *GetTextData(size_t *lenOut);
-
-    WCHAR *GetProperty(DocumentProperty prop) const;
-    const WCHAR *GetFileName() const;
-
-    static bool IsSupportedFile(const WCHAR *fileName, bool sniff=false);
-    static TcrDoc *CreateFromFile(const WCHAR *fileName);
-};
-
 /* ********** Plain HTML ********** */
 
 class HtmlDoc {
@@ -155,19 +144,16 @@ class HtmlDoc {
     ScopedMem<char> htmlData;
     ScopedMem<char> pagePath;
     Vec<ImageData2> images;
-
-    ScopedMem<WCHAR> title;
-    ScopedMem<WCHAR> author;
-    ScopedMem<WCHAR> date;
-    ScopedMem<WCHAR> copyright;
+    PropertyMap props;
 
     bool Load();
+    char *LoadURL(const char *url, size_t *lenOut);
 
 public:
-    HtmlDoc(const WCHAR *fileName);
+    explicit HtmlDoc(const WCHAR *fileName);
     ~HtmlDoc();
 
-    const char *GetTextData(size_t *lenOut);
+    const char *GetHtmlData(size_t *lenOut) const;
     ImageData *GetImageData(const char *id);
     char *GetFileData(const char *relPath, size_t *lenOut);
 
@@ -178,7 +164,7 @@ public:
     static HtmlDoc *CreateFromFile(const WCHAR *fileName);
 };
 
-/* ********** Plain Text ********** */
+/* ********** Plain Text (and RFCs and TCR) ********** */
 
 class TxtDoc {
     ScopedMem<WCHAR> fileName;
@@ -188,9 +174,9 @@ class TxtDoc {
     bool Load();
 
 public:
-    TxtDoc(const WCHAR *fileName);
+    explicit TxtDoc(const WCHAR *fileName);
 
-    const char *GetTextData(size_t *lenOut);
+    const char *GetHtmlData(size_t *lenOut) const;
 
     WCHAR *GetProperty(DocumentProperty prop) const;
     const WCHAR *GetFileName() const;

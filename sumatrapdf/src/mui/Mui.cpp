@@ -1,7 +1,5 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
-
-#include <Windowsx.h>
 
 #include "Mui.h"
 
@@ -37,8 +35,6 @@ Event handling is loosly coupled and uses slots/signals via
 sigslot library.
 */
 
-#include "Mui.h"
-
 namespace mui {
 
 // if true, shows the bounding box of each control with red outline
@@ -53,6 +49,7 @@ void Initialize()
 void Destroy()
 {
     FreeControlCreators();
+    FreeLayoutCreators();
     css::Destroy();
     DestroyBase();
 }

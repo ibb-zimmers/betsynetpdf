@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 // include BaseUtil.h instead of including directly
@@ -40,7 +40,7 @@ public:
 class ScopedHandle {
     HANDLE handle;
 public:
-    ScopedHandle(HANDLE handle) : handle(handle) { }
+    explicit ScopedHandle(HANDLE handle) : handle(handle) { }
     ~ScopedHandle() { CloseHandle(handle); }
     operator HANDLE() const { return handle; }
 };
@@ -81,7 +81,7 @@ public:
     bool Create(const CLSID clsid) {
         CrashIf(ptr);
         if (ptr) return false;
-        HRESULT hr = CoCreateInstance(clsid, NULL, CLSCTX_ALL, __uuidof(T), (void **)&ptr);
+        HRESULT hr = CoCreateInstance(clsid, NULL, CLSCTX_ALL, IID_PPV_ARGS(&ptr));
         return SUCCEEDED(hr);
     }
     operator T*() const { return ptr; }
@@ -95,21 +95,41 @@ public:
 };
 
 template <class T>
-class ScopedComQIPtr : public ScopedComPtr<T> {
+class ScopedComQIPtr {
+protected:
+    T *ptr;
 public:
-    ScopedComQIPtr() : ScopedComPtr() { }
+    ScopedComQIPtr() : ptr(NULL) { }
     explicit ScopedComQIPtr(IUnknown *unk) {
-        HRESULT hr = unk->QueryInterface(__uuidof(T), (void **)&ptr);
+        HRESULT hr = unk->QueryInterface(&ptr);
         if (FAILED(hr))
             ptr = NULL;
+    }
+    ~ScopedComQIPtr() {
+        if (ptr)
+            ptr->Release();
+    }
+    bool Create(const CLSID clsid) {
+        CrashIf(ptr);
+        if (ptr) return false;
+        HRESULT hr = CoCreateInstance(clsid, NULL, CLSCTX_ALL, IID_PPV_ARGS(&ptr));
+        return SUCCEEDED(hr);
     }
     T* operator=(IUnknown *newUnk) {
         if (ptr)
             ptr->Release();
-        HRESULT hr = newUnk->QueryInterface(__uuidof(T), (void **)&ptr);
+        HRESULT hr = newUnk->QueryInterface(&ptr);
         if (FAILED(hr))
             ptr = NULL;
         return ptr;
+    }
+    operator T*() const { return ptr; }
+    T** operator&() { return &ptr; }
+    T* operator->() const { return ptr; }
+    T* operator=(T* newPtr) {
+        if (ptr)
+            ptr->Release();
+        return (ptr = newPtr);
     }
 };
 
@@ -117,11 +137,19 @@ template <typename T>
 class ScopedGdiObj {
     T obj;
 public:
-    ScopedGdiObj(T obj) : obj(obj) { }
+    explicit ScopedGdiObj(T obj) : obj(obj) { }
     ~ScopedGdiObj() { DeleteObject(obj); }
     operator T() const { return obj; }
 };
 typedef ScopedGdiObj<HFONT> ScopedFont;
+
+class ScopedHdcSelect {
+    HDC hdc;
+    HGDIOBJ prev;
+public:
+    ScopedHdcSelect(HDC hdc, HGDIOBJ obj) : hdc(hdc) { prev = SelectObject(hdc, obj); }
+    ~ScopedHdcSelect() { SelectObject(hdc, prev); }
+};
 
 class ScopedCom {
 public:
@@ -146,7 +174,7 @@ public:
     // suppress the GDI+ background thread when initiating in WinMain,
     // as that thread causes DDE messages to be sent too early and
     // thus causes unexpected timeouts
-    ScopedGdiPlus(bool inWinMain=false) : noBgThread(inWinMain) {
+    explicit ScopedGdiPlus(bool inWinMain=false) : noBgThread(inWinMain) {
         si.SuppressBackgroundThread = noBgThread;
         Gdiplus::GdiplusStartup(&token, &si, &so);
         if (noBgThread)

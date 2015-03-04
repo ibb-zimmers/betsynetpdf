@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 /* The most basic things, including string handling functions */
@@ -19,42 +19,49 @@ char *Dup(const char *s)
 {
     return s ? _strdup(s) : NULL;
 }
+
 WCHAR *Dup(const WCHAR *s)
 {
     return s ? _wcsdup(s) : NULL;
 }
 
-#define EntryCheck(arg1, arg2) \
-    if (arg1 == arg2) \
-        return true; \
-    if (!arg1 || !arg2) \
-        return false
-
 // return true if s1 == s2, case sensitive
 bool Eq(const char *s1, const char *s2)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == strcmp(s1, s2);
 }
 
 // return true if s1 == s2, case sensitive
 bool Eq(const WCHAR *s1, const WCHAR *s2)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == wcscmp(s1, s2);
 }
 
 // return true if s1 == s2, case insensitive
 bool EqI(const char *s1, const char *s2)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == _stricmp(s1, s2);
 }
 
 // return true if s1 == s2, case insensitive
 bool EqI(const WCHAR *s1, const WCHAR *s2)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == _wcsicmp(s1, s2);
 }
 
@@ -92,43 +99,59 @@ bool EqIS(const WCHAR *s1, const WCHAR *s2)
 
 bool EqN(const char *s1, const char *s2, size_t len)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == strncmp(s1, s2, len);
 }
 
 bool EqN(const WCHAR *s1, const WCHAR *s2, size_t len)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == wcsncmp(s1, s2, len);
 }
 
 bool EqNI(const char *s1, const char *s2, size_t len)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == _strnicmp(s1, s2, len);
 }
 
 bool EqNI(const WCHAR *s1, const WCHAR *s2, size_t len)
 {
-    EntryCheck(s1, s2);
+    if (s1 == s2)
+        return true;
+    if (!s1 || !s2)
+        return false;
     return 0 == _wcsnicmp(s1, s2, len);
 }
 
 /* return true if 'str' starts with 'txt', NOT case-sensitive */
 bool StartsWithI(const char *str, const char *txt)
 {
-    EntryCheck(str, txt);
+    if (str == txt)
+        return true;
+    if (!str || !txt)
+        return false;
     return 0 == _strnicmp(str, txt, str::Len(txt));
 }
 
 /* return true if 'str' starts with 'txt', NOT case-sensitive */
 bool StartsWithI(const WCHAR *str, const WCHAR *txt)
 {
-    EntryCheck(str, txt);
+    if (str == txt)
+        return true;
+    if (!str || !txt)
+        return false;
     return 0 == _wcsnicmp(str, txt, str::Len(txt));
 }
-
-#undef EntryCheck
 
 // TODO: implement with templates? (must happen in the header, though)
 // template <typename T> bool EndsWith(const T*, const T*) ?
@@ -175,6 +198,46 @@ bool EndsWithI(const WCHAR *txt, const WCHAR *end)
     if (endLen > txtLen)
         return false;
     return str::EqI(txt + txtLen - endLen, end);
+}
+
+const char *FindI(const char *s, const char *toFind)
+{
+    if (!s || !toFind)
+        return NULL;
+
+    char first = (char)tolower(*toFind);
+    if (!first)
+        return s;
+    while (*s) {
+        char c = (char)tolower(*s);
+        if (c == first) {
+            if (str::StartsWithI(s, toFind)) {
+                return s;
+            }
+        }
+        s++;
+    }
+    return NULL;
+}
+
+const WCHAR *FindI(const WCHAR *s, const WCHAR *toFind)
+{
+    if (!s || !toFind)
+        return NULL;
+
+    WCHAR first = towlower(*toFind);
+    if (!first)
+        return s;
+    while (*s) {
+        WCHAR c = towlower(*s);
+        if (c == first) {
+            if (str::StartsWithI(s, toFind)) {
+                return s;
+            }
+        }
+        s++;
+    }
+    return NULL;
 }
 
 void ReplacePtr(char **s, const char *snew)
@@ -230,7 +293,6 @@ char *Join(const char *s1, const char *s2, const char *s3, Allocator *allocator)
 
     return res;
 }
-
 
 /* Concatenate 2 strings. Any string can be NULL.
    Caller needs to free() memory. */
@@ -564,6 +626,32 @@ WCHAR *Replace(const WCHAR *s, const WCHAR *toReplace, const WCHAR *replaceWith)
 // replaces all whitespace characters with spaces, collapses several
 // consecutive spaces into one and strips heading/trailing ones
 // returns the number of removed characters
+size_t NormalizeWS(char *str)
+{
+    char *src = str, *dst = str;
+    bool addedSpace = true;
+
+    for (; *src; src++) {
+        if (!IsWs(*src)) {
+            *dst++ = *src;
+            addedSpace = false;
+        }
+        else if (!addedSpace) {
+            *dst++ = ' ';
+            addedSpace = true;
+        }
+    }
+
+    if (dst > str && IsWs(*(dst - 1)))
+        dst--;
+    *dst = '\0';
+
+    return src - dst;
+}
+
+// replaces all whitespace characters with spaces, collapses several
+// consecutive spaces into one and strips heading/trailing ones
+// returns the number of removed characters
 size_t NormalizeWS(WCHAR *str)
 {
     WCHAR *src = str, *dst = str;
@@ -670,7 +758,7 @@ size_t BufSet(char *dst, size_t dstCchSize, const char *src)
     CrashAlwaysIf(0 == dstCchSize);
 
     size_t srcCchSize = str::Len(src);
-    size_t toCopy = min(dstCchSize - 1, srcCchSize);
+    size_t toCopy = std::min(dstCchSize - 1, srcCchSize);
 
     errno_t err = strncpy_s(dst, dstCchSize, src, toCopy);
     CrashIf(err || dst[toCopy] != '\0');
@@ -683,7 +771,7 @@ size_t BufSet(WCHAR *dst, size_t dstCchSize, const WCHAR *src)
     CrashAlwaysIf(0 == dstCchSize);
 
     size_t srcCchSize = str::Len(src);
-    size_t toCopy = min(dstCchSize - 1, srcCchSize);
+    size_t toCopy = std::min(dstCchSize - 1, srcCchSize);
 
     errno_t err = wcsncpy_s(dst, dstCchSize, src, toCopy);
     CrashIf(err || dst[toCopy] != '\0');
@@ -702,7 +790,7 @@ size_t BufAppend(char *dst, size_t dstCchSize, const char *s)
         return 0;
     size_t left = dstCchSize - currDstCchLen - 1;
     size_t srcCchSize = str::Len(s);
-    size_t toCopy = min(left, srcCchSize);
+    size_t toCopy = std::min(left, srcCchSize);
 
     errno_t err = strncat_s(dst, dstCchSize, s, toCopy);
     CrashIf(err || dst[currDstCchLen + toCopy] != '\0');
@@ -719,7 +807,7 @@ size_t BufAppend(WCHAR *dst, size_t dstCchSize, const WCHAR *s)
         return 0;
     size_t left = dstCchSize - currDstCchLen - 1;
     size_t srcCchSize = str::Len(s);
-    size_t toCopy = min(left, srcCchSize);
+    size_t toCopy = std::min(left, srcCchSize);
 
     errno_t err = wcsncat_s(dst, dstCchSize, s, toCopy);
     CrashIf(err || dst[currDstCchLen + toCopy] != '\0');
@@ -909,7 +997,7 @@ static const char *ParseLimitedNumber(const char *str, const char *format,
     const char *endF = Parse(format, "%u%c", &width, &f2[1]);
     if (endF && FindChar("udx", f2[1]) && width <= Len(str)) {
         char limited[16]; // 32-bit integers are at most 11 characters long
-        str::BufSet(limited, min(width + 1, dimof(limited)), str);
+        str::BufSet(limited, std::min((size_t)width + 1, dimof(limited)), str);
         const char *end = Parse(limited, f2, valueOut);
         if (end && !*end)
             *endOut = str + width;
@@ -925,7 +1013,7 @@ static const WCHAR *ParseLimitedNumber(const WCHAR *str, const WCHAR *format,
     const WCHAR *endF = Parse(format, L"%u%c", &width, &f2[1]);
     if (endF && FindChar(L"udx", f2[1]) && width <= Len(str)) {
         WCHAR limited[16]; // 32-bit integers are at most 11 characters long
-        str::BufSet(limited, min(width + 1, dimof(limited)), str);
+        str::BufSet(limited, std::min((size_t)width + 1, dimof(limited)), str);
         const WCHAR *end = Parse(limited, f2, valueOut);
         if (end && !*end)
             *endOut = str + width;
@@ -1107,13 +1195,17 @@ Failure:
     return NULL;
 }
 
-size_t Utf8ToWcharBuf(const char *s, size_t sLen, WCHAR *bufOut, size_t cchBufOutSize)
+size_t Utf8ToWcharBuf(const char *s, size_t cbLen, WCHAR *bufOut, size_t cchBufOutSize)
 {
-    CrashIf(0 == cchBufOutSize);
-    int cchConverted = MultiByteToWideChar(CP_UTF8, 0, s, (int)sLen, NULL, 0);
-    if ((size_t)cchConverted >= cchBufOutSize)
+    CrashIf(!bufOut || (0 == cchBufOutSize));
+    int cchConverted = MultiByteToWideChar(CP_UTF8, 0, s, (int)cbLen, bufOut, (int)cchBufOutSize);
+    if (0 == cchConverted) {
+        // TODO: determine ideal string length so that the conversion succeeds
+        cchConverted = MultiByteToWideChar(CP_UTF8, 0, s, (int)cchBufOutSize / 2, bufOut, (int)cchBufOutSize);
+    }
+    else if ((size_t)cchConverted >= cchBufOutSize) {
         cchConverted = (int)cchBufOutSize - 1;
-    MultiByteToWideChar(CP_UTF8, 0, s, (int)sLen, bufOut, cchConverted);
+    }
     bufOut[cchConverted] = '\0';
     return cchConverted;
 }
@@ -1124,45 +1216,10 @@ size_t WcharToUtf8Buf(const WCHAR *s, char *bufOut, size_t cbBufOutSize)
     int cbConverted = WideCharToMultiByte(CP_UTF8, 0, s, -1, NULL, 0, NULL, NULL);
     if ((size_t)cbConverted >= cbBufOutSize)
         cbConverted = (int)cbBufOutSize - 1;
-    WideCharToMultiByte(CP_UTF8, 0, s, -1, bufOut, cbConverted, NULL, NULL);
-    bufOut[cbConverted] = '\0';
-    return cbConverted;
-}
-
-void UrlDecodeInPlace(char *url)
-{
-    for (char *src = url; *src; src++, url++) {
-        int val;
-        if (*src == '%' && str::Parse(src, "%%%2x", &val)) {
-            *url = (char)val;
-            src += 2;
-        } else {
-            *url = *src;
-        }
-    }
-    *url = '\0';
-}
-
-void UrlDecodeInPlace(WCHAR *url)
-{
-    for (WCHAR *src = url; *src; src++, url++) {
-        int val;
-        if (*src == '%' && str::Parse(src, L"%%%2x", &val)) {
-            *url = (WCHAR)val;
-            src += 2;
-        } else {
-            *url = *src;
-        }
-    }
-    *url = '\0';
-}
-
-WCHAR *ToPlainUrl(const WCHAR *url)
-{
-    WCHAR *plainUrl = str::Dup(url);
-    str::TransChars(plainUrl, L"#?", L"\0\0");
-    UrlDecodeInPlace(plainUrl);
-    return plainUrl;
+    int res = WideCharToMultiByte(CP_UTF8, 0, s, (int)str::Len(s), bufOut, cbConverted, NULL, NULL);
+    CrashIf(res > cbConverted);
+    bufOut[res] = '\0';
+    return res;
 }
 
 // --- copyright for utf8 code below
@@ -1323,6 +1380,66 @@ size_t FromCodePageBuf(WCHAR *buf, int cchBufSize, const char *s, UINT cp)
 } // namespace str::conv
 
 } // namespace str
+
+namespace url {
+
+bool IsAbsolute(const WCHAR *url)
+{
+    const WCHAR *colon = str::FindChar(url, ':');
+    const WCHAR *hash = str::FindChar(url, '#');
+    return colon && (!hash || hash > colon);
+}
+
+void DecodeInPlace(char *url)
+{
+    for (char *src = url; *src; src++, url++) {
+        int val;
+        if (*src == '%' && str::Parse(src, "%%%2x", &val)) {
+            *url = (char)val;
+            src += 2;
+        } else {
+            *url = *src;
+        }
+    }
+    *url = '\0';
+}
+
+void DecodeInPlace(WCHAR *url)
+{
+    if (!str::FindChar(url, '%'))
+        return;
+    // URLs are usually UTF-8 encoded
+    ScopedMem<char> urlUtf8(str::conv::ToUtf8(url));
+    DecodeInPlace(urlUtf8);
+    // convert back in place
+    CrashIf(str::Len(url) >= INT_MAX);
+    MultiByteToWideChar(CP_UTF8, 0, urlUtf8, -1, url, (int)str::Len(url) + 1);
+}
+
+WCHAR *GetFullPath(const WCHAR *url)
+{
+    WCHAR *path = str::Dup(url);
+    str::TransChars(path, L"#?", L"\0\0");
+    DecodeInPlace(path);
+    return path;
+}
+
+WCHAR *GetFileName(const WCHAR *url)
+{
+    ScopedMem<WCHAR> path(str::Dup(url));
+    str::TransChars(path, L"#?", L"\0\0");
+    WCHAR *base = path + str::Len(path);
+    for (; base > path; base--) {
+        if ('/' == base[-1] || '\\' == base[-1])
+            break;
+    }
+    if (str::IsEmpty(base))
+        return NULL;
+    DecodeInPlace(base);
+    return str::Dup(base);
+}
+
+} // namespace url
 
 // seqstrings is for size-efficient implementation of:
 // string -> int and int->string.

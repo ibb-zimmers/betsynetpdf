@@ -1,15 +1,18 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "Mui.h"
-#include <windowsx.h>
+
 #include "BitManip.h"
+#include "FrameRateWnd.h"
+#include "Timer.h"
+
 #include "DebugLog.h"
 
 namespace mui {
 
 EventMgr::EventMgr(HwndWrapper *wndRoot)
-    : wndRoot(wndRoot), currOver(NULL)
+    : wndRoot(wndRoot), currOver(NULL), inSizeMove(false)
 {
     CrashIf(!wndRoot);
     //CrashIf(wndRoot->hwnd);
@@ -33,6 +36,10 @@ EventMgr::~EventMgr()
 // Default is (0,0), which is unlimited
 void EventMgr::SetMinSize(Size s)
 {
+    // TODO: need to figure out a way to force resizing
+    // respecting those constraints. Could just size manually.
+    // Without doing sth., the constraints will only apply
+    // after next resize operation
     minSize = s;
 }
 
@@ -40,6 +47,10 @@ void EventMgr::SetMinSize(Size s)
 // Default is (0,0), which is unlimited
 void EventMgr::SetMaxSize(Size s)
 {
+    // TODO: need to figure out a way to force resizing
+    // respecting those constraints. Could just size manually.
+    // Without doing sth., the constraints will only apply
+    // after next resize operation
     maxSize = s;
 }
 
@@ -211,6 +222,16 @@ LRESULT EventMgr::OnSetCursor(int x, int y, bool& wasHandled)
 
 LRESULT EventMgr::OnMessage(UINT msg, WPARAM wParam, LPARAM lParam, bool& wasHandled)
 {
+    wasHandled = false;
+
+    if (WM_ENTERSIZEMOVE == msg) {
+        inSizeMove = true;
+    }
+
+    if (WM_EXITSIZEMOVE == msg) {
+        inSizeMove = false;
+    }
+
     if (WM_SIZE == msg) {
         //int dx = LOWORD(lParam);
         //int dy = HIWORD(lParam);
@@ -220,10 +241,6 @@ LRESULT EventMgr::OnMessage(UINT msg, WPARAM wParam, LPARAM lParam, bool& wasHan
 
     wndRoot->LayoutIfRequested();
 
-    wasHandled = false;
-    int x = GET_X_LPARAM(lParam);
-    int y = GET_Y_LPARAM(lParam);
-
     if (WM_SETCURSOR == msg) {
         POINT pt;
         if (GetCursorPos(&pt) && ScreenToClient(wndRoot->hwndParent, &pt))
@@ -231,14 +248,21 @@ LRESULT EventMgr::OnMessage(UINT msg, WPARAM wParam, LPARAM lParam, bool& wasHan
         return 0;
     }
 
-    if (WM_MOUSEMOVE == msg)
+    if (WM_MOUSEMOVE == msg) {
+        int x = GET_X_LPARAM(lParam);
+        int y = GET_Y_LPARAM(lParam);
         return OnMouseMove(wParam, x, y, wasHandled);
+    }
 
-    if (WM_LBUTTONUP == msg)
+    if (WM_LBUTTONUP == msg) {
+        int x = GET_X_LPARAM(lParam);
+        int y = GET_Y_LPARAM(lParam);
         return OnLButtonUp(wParam, x, y, wasHandled);
+    }
 
-    if (WM_GETMINMAXINFO == msg)
+    if (WM_GETMINMAXINFO == msg) {
         return OnGetMinMaxInfo((MINMAXINFO*)lParam, wasHandled);
+    }
 
     if (WM_PAINT == msg) {
         wndRoot->OnPaint(wndRoot->hwndParent);

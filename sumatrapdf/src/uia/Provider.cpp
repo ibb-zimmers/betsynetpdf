@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -131,29 +131,15 @@ void SumatraUIAutomationProvider::OnSelectionChanged()
         uia::RaiseAutomationEvent(document, UIA_Text_TextSelectionChangedEventId);
 }
 
-HRESULT STDMETHODCALLTYPE SumatraUIAutomationProvider::QueryInterface(const IID & iid,void ** ppvObject)
+HRESULT STDMETHODCALLTYPE SumatraUIAutomationProvider::QueryInterface(REFIID riid, void **ppv)
 {
-    if (ppvObject == NULL)
-        return E_POINTER;
-
-    // TODO: per http://blogs.msdn.com/b/oldnewthing/archive/2004/03/26/96777.aspx should
-    // respond to IUnknown
-    if (iid == __uuidof(IRawElementProviderSimple)) {
-        *ppvObject = static_cast<IRawElementProviderSimple*>(this);
-        this->AddRef(); //New copy has entered the universe
-        return S_OK;
-    } else if (iid == __uuidof(IRawElementProviderFragment)) {
-        *ppvObject = static_cast<IRawElementProviderFragment*>(this);
-        this->AddRef(); //New copy has entered the universe
-        return S_OK;
-    } else if (iid == __uuidof(IRawElementProviderFragmentRoot)) {
-        *ppvObject = static_cast<IRawElementProviderFragmentRoot*>(this);
-        this->AddRef(); //New copy has entered the universe
-        return S_OK;
-    }
-
-    *ppvObject = NULL;
-    return E_NOINTERFACE;
+    static const QITAB qit[] = {
+        QITABENT(SumatraUIAutomationProvider, IRawElementProviderSimple),
+        QITABENT(SumatraUIAutomationProvider, IRawElementProviderFragment),
+        QITABENT(SumatraUIAutomationProvider, IRawElementProviderFragmentRoot),
+        { 0 }
+    };
+    return QISearch(this, qit, riid, ppv);
 }
 
 ULONG STDMETHODCALLTYPE SumatraUIAutomationProvider::AddRef(void)
@@ -167,9 +153,8 @@ ULONG STDMETHODCALLTYPE SumatraUIAutomationProvider::Release(void)
     dbghelp::LogCallstack();
     LONG res = InterlockedDecrement(&refCount);
     CrashIf(res < 0);
-    if (0 == res) {
+    if (0 == res)
         delete this;
-    }
     return res;
 }
 

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 /* How to think of display logic: physical screen of size
@@ -47,6 +47,7 @@
 #include "DisplayModel.h"
 
 #include "AppPrefs.h" // needed for gGlobalPrefs
+#include "PdfSync.h"
 #include "TextSearch.h"
 #include "TextSelection.h"
 
@@ -54,32 +55,7 @@
 // doesn't map to chm features well.
 
 // if true, we pre-render the pages right before and after the visible pages
-bool gPredictiveRender = true;
-
-bool IsContinuous(DisplayMode displayMode)
-{
-    return DM_CONTINUOUS == displayMode ||
-           DM_CONTINUOUS_FACING == displayMode ||
-           DM_CONTINUOUS_BOOK_VIEW == displayMode;
-}
-
-bool IsSingle(DisplayMode displayMode)
-{
-    return DM_SINGLE_PAGE == displayMode ||
-           DM_CONTINUOUS == displayMode;
-}
-
-bool IsFacing(DisplayMode displayMode)
-{
-    return DM_FACING == displayMode ||
-           DM_CONTINUOUS_FACING == displayMode;
-}
-
-bool DisplayModeShowCover(DisplayMode displayMode)
-{
-    return DM_BOOK_VIEW == displayMode ||
-           DM_CONTINUOUS_BOOK_VIEW == displayMode;
-}
+static bool gPredictiveRender = true;
 
 static int ColumnsFromDisplayMode(DisplayMode displayMode)
 {
@@ -101,28 +77,10 @@ int NormalizeRotation(int rotation)
     return rotation;
 }
 
-static bool IsZoomVirtual(float zoomLevel)
+void DisplayModel::UpdateDisplayState(DisplayState *ds)
 {
-    if ((ZOOM_FIT_PAGE == zoomLevel) || (ZOOM_FIT_WIDTH == zoomLevel) ||
-        (ZOOM_FIT_CONTENT == zoomLevel))
-        return true;
-    return false;
-}
-
-bool IsValidZoom(float zoomLevel)
-{
-    if (IsZoomVirtual(zoomLevel))
-        return true;
-    if ((zoomLevel < ZOOM_MIN - 0.01f) || (zoomLevel > ZOOM_MAX + 0.01f)) {
-        return false;
-    }
-    return true;
-}
-
-void DisplayModel::DisplayStateFromModel(DisplayState *ds)
-{
-    if (!ds->filePath || !str::EqI(ds->filePath, FilePath()))
-        str::ReplacePtr(&ds->filePath, FilePath());
+    if (!ds->filePath || !str::EqI(ds->filePath, engine->FileName()))
+        str::ReplacePtr(&ds->filePath, engine->FileName());
 
     ds->useDefaultState = !gGlobalPrefs->rememberStatePerDocument;
 
@@ -134,7 +92,7 @@ void DisplayModel::DisplayStateFromModel(DisplayState *ds)
     if (presentationMode)
         ds->scrollPos = PointI();
     else
-        ds->scrollPos = PointD(ss.x, ss.y).Convert<int>();
+        ds->scrollPos = PointD(ss.x, ss.y).ToInt();
     ds->rotation = rotation;
     ds->displayR2L = displayR2L;
 
@@ -142,7 +100,7 @@ void DisplayModel::DisplayStateFromModel(DisplayState *ds)
     ds->decryptionKey = engine->GetDecryptionKey();
 }
 
-SizeD DisplayModel::PageSizeAfterRotation(int pageNo, bool fitToContent)
+SizeD DisplayModel::PageSizeAfterRotation(int pageNo, bool fitToContent) const
 {
     PageInfo *pageInfo = GetPageInfo(pageNo);
     if (fitToContent && pageInfo->contentBox.IsEmpty()) {
@@ -179,12 +137,13 @@ static int LastPageInARowNo(int pageNo, int columns, bool showCover, int pageCou
     int lastPageNo = FirstPageInARowNo(pageNo, columns, showCover) + columns - 1;
     if (showCover && pageNo < columns)
         lastPageNo--;
-    return min(lastPageNo, pageCount);
+    return std::min(lastPageNo, pageCount);
 }
 
 // must call SetInitialViewSettings() after creation
-DisplayModel::DisplayModel(BaseEngine *engine, DocType engineType, DisplayModelCallback *cb) :
-    engine(engine), engineType(engineType), dmCb(cb),
+DisplayModel::DisplayModel(BaseEngine *engine, EngineType type, ControllerCallback *cb) :
+    Controller(cb), engine(engine),
+    userAnnots(NULL), userAnnotsModified(false), engineType(type), pdfSync(NULL),
     pagesInfo(NULL), displayMode(DM_AUTOMATIC), startPage(1),
     zoomReal(INVALID_ZOOM), zoomVirtual(INVALID_ZOOM),
     rotation(0), dpiFactor(1.0f), displayR2L(false),
@@ -194,6 +153,7 @@ DisplayModel::DisplayModel(BaseEngine *engine, DocType engineType, DisplayModelC
 {
     CrashIf(!engine || engine->PageCount() <= 0);
 
+	//BetsyNetPDF
 	this->deactivateTextSelection = false;
 
     if (!engine->IsImageCollection()) {
@@ -209,8 +169,6 @@ DisplayModel::DisplayModel(BaseEngine *engine, DocType engineType, DisplayModelC
     windowMargin.right += 3; windowMargin.left += 1;
     pageSpacing.dx += 4; pageSpacing.dy += 4;
 #endif
-    if (AsChmEngine())
-        AsChmEngine()->SetNavigationCalback(dmCb);
 
     textCache = new PageTextCache(engine);
     textSelection = new TextSelection(engine, textCache);
@@ -220,8 +178,10 @@ DisplayModel::DisplayModel(BaseEngine *engine, DocType engineType, DisplayModelC
 DisplayModel::~DisplayModel()
 {
     dontRenderFlag = true;
-    dmCb->CleanUp(this);
+    cb->CleanUp(this);
 
+    delete pdfSync;
+    delete userAnnots;
     delete textSearch;
     delete textSelection;
     delete textCache;
@@ -231,7 +191,7 @@ DisplayModel::~DisplayModel()
 
 PageInfo *DisplayModel::GetPageInfo(int pageNo) const
 {
-    if (!ValidPageNo(pageNo) || AsChmEngine())
+    if (!ValidPageNo(pageNo))
         return NULL;
     assert(pagesInfo);
     if (!pagesInfo) return NULL;
@@ -245,9 +205,6 @@ void DisplayModel::SetInitialViewSettings(DisplayMode newDisplayMode, int newSta
     dpiFactor = 1.0f * screenDPI / engine->GetFileDPI();
     if (ValidPageNo(newStartPage))
         startPage = newStartPage;
-
-    if (AsChmEngine())
-        displayMode = DM_SINGLE_PAGE;
 
     displayMode = newDisplayMode;
     presDisplayMode = newDisplayMode;
@@ -263,8 +220,7 @@ void DisplayModel::SetInitialViewSettings(DisplayMode newDisplayMode, int newSta
         }
     }
     displayR2L = (layout & Layout_R2L) != 0;
-    if (!AsChmEngine())
-        BuildPagesInfo();
+    BuildPagesInfo();
 }
 
 void DisplayModel::BuildPagesInfo()
@@ -283,7 +239,7 @@ void DisplayModel::BuildPagesInfo()
 
     int columns = ColumnsFromDisplayMode(displayMode);
     int newStartPage = startPage;
-    if (DisplayModeShowCover(displayMode) && newStartPage == 1 && columns > 1)
+    if (IsBookView(displayMode) && newStartPage == 1 && columns > 1)
         newStartPage--;
     for (int pageNo = 1; pageNo <= pageCount; pageNo++) {
         PageInfo *pageInfo = GetPageInfo(pageNo);
@@ -302,7 +258,7 @@ void DisplayModel::BuildPagesInfo()
 
 // TODO: a better name e.g. ShouldShow() to better distinguish between
 // before-layout info and after-layout visibility checks
-bool DisplayModel::PageShown(int pageNo)
+bool DisplayModel::PageShown(int pageNo) const
 {
     PageInfo *pageInfo = GetPageInfo(pageNo);
     if (!pageInfo)
@@ -310,7 +266,7 @@ bool DisplayModel::PageShown(int pageNo)
     return pageInfo->shown;
 }
 
-bool DisplayModel::PageVisible(int pageNo)
+bool DisplayModel::PageVisible(int pageNo) const
 {
     PageInfo *pageInfo = GetPageInfo(pageNo);
     if (!pageInfo)
@@ -319,12 +275,12 @@ bool DisplayModel::PageVisible(int pageNo)
 }
 
 /* Return true if a page is visible or a page in a row below or above is visible */
-bool DisplayModel::PageVisibleNearby(int pageNo)
+bool DisplayModel::PageVisibleNearby(int pageNo) const
 {
     DisplayMode mode = GetDisplayMode();
     int columns = ColumnsFromDisplayMode(mode);
 
-    pageNo = FirstPageInARowNo(pageNo, columns, DisplayModeShowCover(mode));
+    pageNo = FirstPageInARowNo(pageNo, columns, IsBookView(mode));
     for (int i = pageNo - columns; i < pageNo + 2 * columns; i++) {
         if (ValidPageNo(i) && PageVisible(i))
             return true;
@@ -334,9 +290,9 @@ bool DisplayModel::PageVisibleNearby(int pageNo)
 
 /* Return true if the first page is fully visible and alone on a line in
    show cover mode (i.e. it's not possible to flip to a previous page) */
-bool DisplayModel::FirstBookPageVisible()
+bool DisplayModel::FirstBookPageVisible() const
 {
-    if (!DisplayModeShowCover(GetDisplayMode()))
+    if (!IsBookView(GetDisplayMode()))
         return false;
     if (CurrentPageNo() != 1)
         return false;
@@ -345,7 +301,7 @@ bool DisplayModel::FirstBookPageVisible()
 
 /* Return true if the last page is fully visible and alone on a line in
    facing or show cover mode (i.e. it's not possible to flip to a next page) */
-bool DisplayModel::LastBookPageVisible()
+bool DisplayModel::LastBookPageVisible() const
 {
     int count = PageCount();
     DisplayMode mode = GetDisplayMode();
@@ -356,14 +312,14 @@ bool DisplayModel::LastBookPageVisible()
     if (GetPageInfo(count)->visibleRatio < 1.0)
         return false;
     if (FirstPageInARowNo(count, ColumnsFromDisplayMode(mode),
-                          DisplayModeShowCover(mode)) < count)
+                          IsBookView(mode)) < count)
         return false;
     return true;
 }
 
 /* Given a zoom level that can include a "virtual" zoom levels like ZOOM_FIT_WIDTH,
    ZOOM_FIT_PAGE or ZOOM_FIT_CONTENT, calculate an absolute zoom level */
-float DisplayModel::ZoomRealFromVirtualForPage(float zoomVirtual, int pageNo)
+float DisplayModel::ZoomRealFromVirtualForPage(float zoomVirtual, int pageNo) const
 {
     if (zoomVirtual != ZOOM_FIT_WIDTH && zoomVirtual != ZOOM_FIT_PAGE && zoomVirtual != ZOOM_FIT_CONTENT)
         return zoomVirtual * 0.01f * dpiFactor;
@@ -375,35 +331,35 @@ float DisplayModel::ZoomRealFromVirtualForPage(float zoomVirtual, int pageNo)
     if (fitToContent && columns > 1) {
         // Fit the content of all the pages in the same row into the visible area
         // (i.e. don't crop inner margins but just the left-most, right-most, etc.)
-        int first = FirstPageInARowNo(pageNo, columns, DisplayModeShowCover(GetDisplayMode()));
-        int last = LastPageInARowNo(pageNo, columns, DisplayModeShowCover(GetDisplayMode()), PageCount());
+        int first = FirstPageInARowNo(pageNo, columns, IsBookView(GetDisplayMode()));
+        int last = LastPageInARowNo(pageNo, columns, IsBookView(GetDisplayMode()), PageCount());
+        RectD box;
         for (int i = first; i <= last; i++) {
             PageInfo *pageInfo = GetPageInfo(i);
-            RectD pageBox = engine->Transform(pageInfo->page, i, 1.0, rotation);
-            row.dx += pageBox.dx;
-
             if (pageInfo->contentBox.IsEmpty())
                 pageInfo->contentBox = engine->PageContentBox(i);
-            RectD rotatedContent = engine->Transform(pageInfo->contentBox, i, 1.0, rotation);
-            if (i == first && !rotatedContent.IsEmpty())
-                row.dx -= (rotatedContent.x - pageBox.x);
-            if (i == last && !rotatedContent.IsEmpty())
-                row.dx -= (pageBox.BR().x - rotatedContent.BR().x);
 
-            SizeD pageSize = PageSizeAfterRotation(i, true);
-            if (row.dy < pageSize.dy)
-                row.dy = pageSize.dy;
+            RectD pageBox = engine->Transform(pageInfo->page, i, 1.0, rotation);
+            RectD contentBox = engine->Transform(pageInfo->contentBox, i, 1.0, rotation);
+            if (contentBox.IsEmpty())
+                contentBox = pageBox;
+
+            contentBox.x += row.dx;
+            box = box.Union(contentBox);
+            row.dx += pageBox.dx + pageSpacing.dx;
         }
+        row = box.Size();
     } else {
         row = PageSizeAfterRotation(pageNo, fitToContent);
         row.dx *= columns;
+        row.dx += pageSpacing.dx * (columns - 1);
     }
 
     assert(!RectD(PointD(), row).IsEmpty());
     if (RectD(PointD(), row).IsEmpty())
         return 0;
 
-    int areaForPagesDx = viewPort.dx - windowMargin.left - windowMargin.right - pageSpacing.dx * (columns - 1);
+    int areaForPagesDx = viewPort.dx - windowMargin.left - windowMargin.right;
     int areaForPagesDy = viewPort.dy - windowMargin.top - windowMargin.bottom;
     if (areaForPagesDx <= 0 || areaForPagesDy <= 0)
         return 0;
@@ -417,9 +373,6 @@ float DisplayModel::ZoomRealFromVirtualForPage(float zoomVirtual, int pageNo)
 
 int DisplayModel::FirstVisiblePageNo() const
 {
-    if (AsChmEngine())
-        return AsChmEngine()->CurrentPageNo();
-
     assert(pagesInfo);
     if (!pagesInfo) return INVALID_PAGE_NO;
 
@@ -437,9 +390,6 @@ int DisplayModel::FirstVisiblePageNo() const
 // (in continuous layout, there's no better criteria)
 int DisplayModel::CurrentPageNo() const
 {
-    if (AsChmEngine())
-        return AsChmEngine()->CurrentPageNo();
-
     if (!IsContinuous(GetDisplayMode()))
         return startPage;
 
@@ -469,19 +419,10 @@ int DisplayModel::CurrentPageNo() const
     return mostVisiblePage;
 }
 
-void DisplayModel::SetZoomVirtual(float newZoomVirtual)
+void DisplayModel::CalcZoomVirtual(float newZoomVirtual)
 {
     CrashIf(!IsValidZoom(newZoomVirtual));
     zoomVirtual = newZoomVirtual;
-
-    if (AsChmEngine()) {
-        if (IsZoomVirtual(zoomVirtual) || !IsValidZoom(zoomVirtual))
-            zoomVirtual = 100.0f;
-        zoomReal = zoomVirtual * 0.01f * dpiFactor;
-        AsChmEngine()->ZoomTo(zoomVirtual);
-        return;
-    }
-
     if ((ZOOM_FIT_WIDTH == newZoomVirtual) || (ZOOM_FIT_PAGE == newZoomVirtual)) {
         /* we want the same zoom for all pages, so use the smallest zoom
            across the pages so that the largest page fits. In most documents
@@ -510,17 +451,17 @@ void DisplayModel::SetZoomVirtual(float newZoomVirtual)
     }
 }
 
-float DisplayModel::ZoomReal(int pageNo)
+float DisplayModel::GetZoomReal(int pageNo) const
 {
     DisplayMode mode = GetDisplayMode();
     if (IsContinuous(mode))
         return zoomReal;
     if (IsSingle(mode))
         return ZoomRealFromVirtualForPage(zoomVirtual, pageNo);
-    pageNo = FirstPageInARowNo(pageNo, ColumnsFromDisplayMode(mode), DisplayModeShowCover(mode));
-    if (pageNo == PageCount() || pageNo == 1 && DisplayModeShowCover(mode))
+    pageNo = FirstPageInARowNo(pageNo, ColumnsFromDisplayMode(mode), IsBookView(mode));
+    if (pageNo == PageCount() || pageNo == 1 && IsBookView(mode))
         return ZoomRealFromVirtualForPage(zoomVirtual, pageNo);
-    return min(ZoomRealFromVirtualForPage(zoomVirtual, pageNo), ZoomRealFromVirtualForPage(zoomVirtual, pageNo + 1));
+    return std::min(ZoomRealFromVirtualForPage(zoomVirtual, pageNo), ZoomRealFromVirtualForPage(zoomVirtual, pageNo + 1));
 }
 
 /* Given zoom and rotation, calculate the position of each page on a
@@ -531,13 +472,6 @@ float DisplayModel::ZoomReal(int pageNo)
      * navigating to another page in non-continuous mode */
 void DisplayModel::Relayout(float newZoomVirtual, int newRotation)
 {
-    // an optimization: the code below doesn't make sense for chm
-    // and causes SetZoomVirtual() to be called 3 times, so skip it
-    if (AsChmEngine()) {
-        SetZoomVirtual(newZoomVirtual);
-        return;
-    }
-
     assert(pagesInfo);
     if (!pagesInfo)
         return;
@@ -551,7 +485,7 @@ void DisplayModel::Relayout(float newZoomVirtual, int newRotation)
 RestartLayout:
     int currPosY = windowMargin.top;
     float currZoomReal = zoomReal;
-    SetZoomVirtual(newZoomVirtual);
+    CalcZoomVirtual(newZoomVirtual);
 
     int newViewPortOffsetX = 0;
     if (0 != currZoomReal && INVALID_ZOOM != currZoomReal)
@@ -587,7 +521,7 @@ RestartLayout:
             goto RestartLayout;
         }
 
-        if (DisplayModeShowCover(GetDisplayMode()) && pageNo == 1 && columns - pageInARow > 1)
+        if (IsBookView(GetDisplayMode()) && pageNo == 1 && columns - pageInARow > 1)
             pageInARow++;
         CrashIf(pageInARow >= dimof(columnMaxWidth));
         if (columnMaxWidth[pageInARow] < pos.dx)
@@ -626,7 +560,7 @@ RestartLayout:
 
     if (columns == 2 && PageCount() == 1) {
         /* don't center a single page over two columns */
-        if (DisplayModeShowCover(GetDisplayMode()))
+        if (IsBookView(GetDisplayMode()))
             columnMaxWidth[0] = columnMaxWidth[1];
         else
             columnMaxWidth[1] = columnMaxWidth[0];
@@ -659,15 +593,21 @@ RestartLayout:
             continue;
         }
         // leave first spot empty in cover page mode
-        if (DisplayModeShowCover(GetDisplayMode()) && pageNo == 1) {
+        if (IsBookView(GetDisplayMode()) && pageNo == 1) {
             CrashIf(pageInARow >= dimof(columnMaxWidth));
             pageOffX += columnMaxWidth[pageInARow] + pageSpacing.dx;
             ++pageInARow;
         }
         CrashIf(pageInARow >= dimof(columnMaxWidth));
-        pageInfo->pos.x = pageOffX + (columnMaxWidth[pageInARow] - pageInfo->pos.dx) / 2;
+        // center pages in a single column but right/left align them when using two columns
+        if (1 == columns)
+            pageInfo->pos.x = pageOffX + (columnMaxWidth[0] - pageInfo->pos.dx) / 2;
+        else if (0 == pageInARow)
+            pageInfo->pos.x = pageOffX + columnMaxWidth[0] - pageInfo->pos.dx;
+        else
+            pageInfo->pos.x = pageOffX;
         // center the cover page over the first two spots in non-continuous mode
-        if (DisplayModeShowCover(GetDisplayMode()) && pageNo == 1 && !IsContinuous(GetDisplayMode())) {
+        if (IsBookView(GetDisplayMode()) && pageNo == 1 && !IsContinuous(GetDisplayMode())) {
             pageInfo->pos.x = offX + windowMargin.left + (columnMaxWidth[0] + pageSpacing.dx + columnMaxWidth[1] - pageInfo->pos.dx) / 2;
         }
         // mirror the page layout when displaying a Right-to-Left document
@@ -704,7 +644,7 @@ RestartLayout:
         }
     }
 
-    canvasSize = SizeI(max(canvasDx, viewPort.dx), max(canvasDy, viewPort.dy));
+    canvasSize = SizeI(std::max(canvasDx, viewPort.dx), std::max(canvasDy, viewPort.dy));
 }
 
 void DisplayModel::ChangeStartPage(int newStartPage)
@@ -714,7 +654,7 @@ void DisplayModel::ChangeStartPage(int newStartPage)
 
     int columns = ColumnsFromDisplayMode(GetDisplayMode());
     startPage = newStartPage;
-    if (DisplayModeShowCover(GetDisplayMode()) && newStartPage == 1 && columns > 1)
+    if (IsBookView(GetDisplayMode()) && newStartPage == 1 && columns > 1)
         newStartPage--;
     for (int pageNo = 1; pageNo <= PageCount(); pageNo++) {
         PageInfo *pageInfo = GetPageInfo(pageNo);
@@ -820,7 +760,7 @@ PointI DisplayModel::CvtToScreen(int pageNo, PointD pt)
     p.x += 0.499 + pageInfo->pageOnScreen.x;
     p.y += 0.499 + pageInfo->pageOnScreen.y;
 
-    return p.Convert<int>();
+    return p.ToInt();
 }
 
 RectI DisplayModel::CvtToScreen(int pageNo, RectD r)
@@ -848,6 +788,9 @@ PointD DisplayModel::CvtFromScreen(PointI pt, int pageNo)
 
 RectD DisplayModel::CvtFromScreen(RectI r, int pageNo)
 {
+    if (!ValidPageNo(pageNo))
+        pageNo = GetPageNextToPoint(r.TL());
+
     PointD TL = CvtFromScreen(r.TL(), pageNo);
     PointD BR = CvtFromScreen(r.BR(), pageNo);
     return RectD::FromXY(TL, BR);
@@ -871,6 +814,7 @@ PageElement *DisplayModel::GetElementAtPos(PointI pt)
 // note: returns false for pages that haven't been rendered yet
 bool DisplayModel::IsOverText(PointI pt)
 {
+	// BetsyNetPDF
 	if(this->deactivateTextSelection)
 		return false;
 
@@ -910,7 +854,7 @@ void DisplayModel::RenderVisibleParts()
     // empty, so request the visible pages first and last to
     // make sure they're rendered before the predicted pages
     for (int pageNo = firstVisiblePage; pageNo <= lastVisiblePage; pageNo++) {
-        dmCb->RequestRendering(pageNo);
+        cb->RequestRendering(pageNo);
     }
 
     if (gPredictiveRender) {
@@ -918,24 +862,24 @@ void DisplayModel::RenderVisibleParts()
         // if the rendering queue still has place for them
         if (!IsSingle(GetDisplayMode())) {
             if (firstVisiblePage > 2)
-                dmCb->RequestRendering(firstVisiblePage - 2);
+                cb->RequestRendering(firstVisiblePage - 2);
             if (lastVisiblePage + 1 < PageCount())
-                dmCb->RequestRendering(lastVisiblePage + 2);
+                cb->RequestRendering(lastVisiblePage + 2);
         }
         if (firstVisiblePage > 1)
-            dmCb->RequestRendering(firstVisiblePage - 1);
+            cb->RequestRendering(firstVisiblePage - 1);
         if (lastVisiblePage < PageCount())
-            dmCb->RequestRendering(lastVisiblePage + 1);
+            cb->RequestRendering(lastVisiblePage + 1);
     }
 
     // request the visible pages last so that the above requested
     // invisible pages are not rendered if the queue fills up
     for (int pageNo = lastVisiblePage; pageNo >= firstVisiblePage; pageNo--) {
-        dmCb->RequestRendering(pageNo);
+        cb->RequestRendering(pageNo);
     }
 }
 
-void DisplayModel::ChangeViewPortSize(SizeI newViewPortSize)
+void DisplayModel::SetViewPortSize(SizeI newViewPortSize)
 {
     ScrollState ss;
 
@@ -955,7 +899,7 @@ void DisplayModel::ChangeViewPortSize(SizeI newViewPortSize)
     } else {
         RecalcVisibleParts();
         RenderVisibleParts();
-        dmCb->UpdateScrollbars(canvasSize);
+        cb->UpdateScrollbars(canvasSize);
     }
 }
 
@@ -982,20 +926,15 @@ PointI DisplayModel::GetContentStart(int pageNo)
     RectD contentBox = GetContentBox(pageNo);
     if (contentBox.IsEmpty())
         return PointI(0, 0);
-    return contentBox.TL().Convert<int>();
+    return contentBox.TL().ToInt();
 }
 
+// TODO: what's GoToPage supposed to do for Facing at 400% zoom?
 void DisplayModel::GoToPage(int pageNo, int scrollY, bool addNavPt, int scrollX)
 {
     assert(ValidPageNo(pageNo));
     if (!ValidPageNo(pageNo))
         return;
-
-    ChmEngine *chmEngine = AsChmEngine();
-    if (chmEngine) {
-        chmEngine->DisplayPage(pageNo);
-        return;
-    }
 
     if (addNavPt)
         AddNavPoint();
@@ -1003,14 +942,14 @@ void DisplayModel::GoToPage(int pageNo, int scrollY, bool addNavPt, int scrollX)
     /* in facing mode only start at odd pages (odd because page
        numbering starts with 1, so odd is really an even page) */
     if (!IsSingle(GetDisplayMode()))
-        pageNo = FirstPageInARowNo(pageNo, ColumnsFromDisplayMode(GetDisplayMode()), DisplayModeShowCover(GetDisplayMode()));
+        pageNo = FirstPageInARowNo(pageNo, ColumnsFromDisplayMode(GetDisplayMode()), IsBookView(GetDisplayMode()));
 
     if (!IsContinuous(GetDisplayMode())) {
         /* in single page mode going to another page involves recalculating
            the size of canvas */
         ChangeStartPage(pageNo);
     } else if (ZOOM_FIT_CONTENT == zoomVirtual) {
-        // make sure that setZoomVirtual uses the correct page to calculate
+        // make sure that CalcZoomVirtual uses the correct page to calculate
         // the zoom level for (visibility will be recalculated below anyway)
         for (int i =  PageCount(); i > 0; i--)
             GetPageInfo(i)->visibleRatio = (i == pageNo ? 1.0f : 0);
@@ -1026,17 +965,20 @@ void DisplayModel::GoToPage(int pageNo, int scrollY, bool addNavPt, int scrollX)
         scrollX = start.x;
         scrollY = start.y;
         if (ColumnsFromDisplayMode(GetDisplayMode()) > 1) {
-            int lastPageNo = LastPageInARowNo(pageNo, ColumnsFromDisplayMode(GetDisplayMode()), DisplayModeShowCover(GetDisplayMode()), PageCount());
+            int lastPageNo = LastPageInARowNo(pageNo, ColumnsFromDisplayMode(GetDisplayMode()), IsBookView(GetDisplayMode()), PageCount());
             PointI second = GetContentStart(lastPageNo);
-            scrollY = min(scrollY, second.y);
+            scrollY = std::min(scrollY, second.y);
         }
         viewPort.x = scrollX + pageInfo->pos.x - windowMargin.left;
     }
     else if (-1 != scrollX)
         viewPort.x = scrollX;
     // make sure to not display the blank space beside the first page in cover mode
-    else if (-1 == scrollX && 1 == pageNo && DisplayModeShowCover(GetDisplayMode()))
+    else if (-1 == scrollX && 1 == pageNo && IsBookView(GetDisplayMode()))
         viewPort.x = pageInfo->pos.x - windowMargin.left;
+    // make sure that at least part of the page is visible
+    else if (viewPort.x >= pageInfo->pos.x + pageInfo->pos.dx)
+        viewPort.x = pageInfo->pos.x;
 
     /* Hack: if an image is smaller in Y axis than the draw area, then we center
        the image by setting pageInfo->currPos.y in RecalcPagesInfo. So we shouldn't
@@ -1052,20 +994,25 @@ void DisplayModel::GoToPage(int pageNo, int scrollY, bool addNavPt, int scrollX)
 
     RecalcVisibleParts();
     RenderVisibleParts();
-    dmCb->UpdateScrollbars(canvasSize);
-    dmCb->PageNoChanged(pageNo);
+    cb->UpdateScrollbars(canvasSize);
+    cb->PageNoChanged(pageNo);
     RepaintDisplay();
 }
 
-void DisplayModel::ChangeDisplayMode(DisplayMode newDisplayMode)
+void DisplayModel::SetDisplayMode(DisplayMode newDisplayMode, bool keepContinuous)
 {
+    if (keepContinuous && IsContinuous(displayMode)) {
+        switch (newDisplayMode) {
+        case DM_SINGLE_PAGE: newDisplayMode = DM_CONTINUOUS; break;
+        case DM_FACING: newDisplayMode = DM_CONTINUOUS_FACING; break;
+        case DM_BOOK_VIEW: newDisplayMode = DM_CONTINUOUS_BOOK_VIEW; break;
+        }
+    }
     if (displayMode == newDisplayMode)
-        return;
-    if (AsChmEngine())
         return;
 
     int currPageNo = CurrentPageNo();
-    if (IsFacing(newDisplayMode) && DisplayModeShowCover(displayMode) && currPageNo < PageCount())
+    if (IsFacing(newDisplayMode) && IsBookView(displayMode) && currPageNo < PageCount())
         currPageNo++;
     displayMode = newDisplayMode;
     if (IsContinuous(newDisplayMode)) {
@@ -1090,8 +1037,8 @@ void DisplayModel::SetPresentationMode(bool enable)
         presZoomVirtual = zoomVirtual;
         // disable the window margin during presentations
         windowMargin.top = windowMargin.right = windowMargin.bottom = windowMargin.left = 0;
-        ChangeDisplayMode(DM_SINGLE_PAGE);
-        ZoomTo(ZOOM_FIT_PAGE);
+        SetDisplayMode(DM_SINGLE_PAGE);
+        SetZoomVirtual(ZOOM_FIT_PAGE);
     }
     else {
         if (engine && engine->IsImageCollection())
@@ -1102,10 +1049,10 @@ void DisplayModel::SetPresentationMode(bool enable)
         windowMargin.top += 3; windowMargin.bottom += 5;
         windowMargin.right += 3; windowMargin.left += 1;
 #endif
-        ChangeDisplayMode(presDisplayMode);
+        SetDisplayMode(presDisplayMode);
         if (!IsValidZoom(presZoomVirtual))
             presZoomVirtual = zoomVirtual;
-        ZoomTo(presZoomVirtual);
+        SetZoomVirtual(presZoomVirtual);
     }
 }
 
@@ -1113,33 +1060,26 @@ void DisplayModel::SetPresentationMode(bool enable)
    rebuilds the display model for the next page.
    Returns true if advanced to the next page or false if couldn't advance
    (e.g. because already was at the last page) */
-bool DisplayModel::GoToNextPage(int scrollY)
+bool DisplayModel::GoToNextPage()
 {
     int columns = ColumnsFromDisplayMode(GetDisplayMode());
     int currPageNo = CurrentPageNo();
     // Fully display the current page, if the previous page is still visible
     if (ValidPageNo(currPageNo - columns) && PageVisible(currPageNo - columns) && GetPageInfo(currPageNo)->visibleRatio < 1.0) {
-        GoToPage(currPageNo, scrollY);
+        GoToPage(currPageNo, false);
         return true;
     }
-    int firstPageInNewRow = FirstPageInARowNo(currPageNo + columns, columns, DisplayModeShowCover(GetDisplayMode()));
+    int firstPageInNewRow = FirstPageInARowNo(currPageNo + columns, columns, IsBookView(GetDisplayMode()));
     if (firstPageInNewRow > PageCount()) {
         /* we're on a last row or after it, can't go any further */
         return false;
     }
-    GoToPage(firstPageInNewRow, scrollY);
+    GoToPage(firstPageInNewRow, false);
     return true;
 }
 
 bool DisplayModel::GoToPrevPage(int scrollY)
 {
-    if (AsChmEngine()) {
-        int pageNo = AsChmEngine()->CurrentPageNo();
-        if (pageNo > 1)
-            GoToPage(pageNo - 1, 0);
-        return pageNo > 1;
-    }
-
     int columns = ColumnsFromDisplayMode(GetDisplayMode());
     int currPageNo = CurrentPageNo();
 
@@ -1152,12 +1092,12 @@ bool DisplayModel::GoToPrevPage(int scrollY)
     PageInfo * pageInfo = GetPageInfo(currPageNo);
     if (zoomVirtual == ZOOM_FIT_CONTENT && -pageInfo->pageOnScreen.y <= top.y)
         scrollY = 0; // continue, even though the current page isn't fully visible
-    else if (max(-pageInfo->pageOnScreen.y, 0) > scrollY && IsContinuous(GetDisplayMode())) {
+    else if (std::max(-pageInfo->pageOnScreen.y, 0) > scrollY && IsContinuous(GetDisplayMode())) {
         /* the current page isn't fully visible, so show it first */
         GoToPage(currPageNo, scrollY);
         return true;
     }
-    int firstPageInNewRow = FirstPageInARowNo(currPageNo - columns, columns, DisplayModeShowCover(GetDisplayMode()));
+    int firstPageInNewRow = FirstPageInARowNo(currPageNo - columns, columns, IsBookView(GetDisplayMode()));
     if (firstPageInNewRow < 1 || 1 == currPageNo) {
         /* we're on a first page, can't go back */
         return false;
@@ -1176,7 +1116,7 @@ bool DisplayModel::GoToLastPage()
     int columns = ColumnsFromDisplayMode(GetDisplayMode());
     int currPageNo = CurrentPageNo();
     int newPageNo = PageCount();
-    int firstPageInLastRow = FirstPageInARowNo(newPageNo, columns, DisplayModeShowCover(GetDisplayMode()));
+    int firstPageInLastRow = FirstPageInARowNo(newPageNo, columns, IsBookView(GetDisplayMode()));
 
     if (currPageNo == firstPageInLastRow) /* are we on the last page already ? */
         return false;
@@ -1186,11 +1126,6 @@ bool DisplayModel::GoToLastPage()
 
 bool DisplayModel::GoToFirstPage()
 {
-    if (AsChmEngine()) {
-        GoToPage(1, 0, true);
-        return true;
-    }
-
     if (IsContinuous(GetDisplayMode())) {
         if (0 == viewPort.y) {
             return false;
@@ -1211,10 +1146,10 @@ void DisplayModel::ScrollXTo(int xOff)
     int currPageNo = CurrentPageNo();
     viewPort.x = xOff;
     RecalcVisibleParts();
-    dmCb->UpdateScrollbars(canvasSize);
+    cb->UpdateScrollbars(canvasSize);
 
     if (CurrentPageNo() != currPageNo)
-        dmCb->PageNoChanged(CurrentPageNo());
+        cb->PageNoChanged(CurrentPageNo());
     RepaintDisplay();
 }
 
@@ -1234,7 +1169,7 @@ void DisplayModel::ScrollYTo(int yOff)
 
     int newPageNo = CurrentPageNo();
     if (newPageNo != currPageNo)
-        dmCb->PageNoChanged(newPageNo);
+        cb->PageNoChanged(newPageNo);
     RepaintDisplay();
 }
 
@@ -1270,7 +1205,7 @@ void DisplayModel::ScrollYBy(int dy, bool changePage)
         /* see if we have to change page when scrolling forward */
         if ((dy > 0) && (startPage < PageCount())) {
             if (viewPort.y + viewPort.dy >= canvasSize.dy) {
-                GoToNextPage(0);
+                GoToNextPage();
                 return;
             }
         }
@@ -1285,19 +1220,22 @@ void DisplayModel::ScrollYBy(int dy, bool changePage)
     viewPort.y = newYOff;
     RecalcVisibleParts();
     RenderVisibleParts();
-    dmCb->UpdateScrollbars(canvasSize);
+    cb->UpdateScrollbars(canvasSize);
     newPageNo = CurrentPageNo();
     if (newPageNo != currPageNo)
-        dmCb->PageNoChanged(newPageNo);
+        cb->PageNoChanged(newPageNo);
     RepaintDisplay();
 }
 
-void DisplayModel::ZoomTo(float zoomLevel, PointI *fixPt)
+void DisplayModel::SetZoomVirtual(float zoomLevel, PointI *fixPt)
 {
+    if (zoomLevel > 0)
+        zoomLevel = limitValue(zoomLevel, ZOOM_MIN, ZOOM_MAX);
     if (!IsValidZoom(zoomLevel))
         return;
+
     bool scrollToFitPage = ZOOM_FIT_PAGE == zoomLevel || ZOOM_FIT_CONTENT == zoomLevel;
-    if (ZoomVirtual() == zoomLevel && (fixPt || !scrollToFitPage))
+    if (zoomVirtual == zoomLevel && (fixPt || !scrollToFitPage))
         return;
 
     ScrollState ss = GetScrollState();
@@ -1318,7 +1256,7 @@ void DisplayModel::ZoomTo(float zoomLevel, PointI *fixPt)
         ss.x = ss.y = -1;
     }
 
-    //lf("DisplayModel::zoomTo() zoomLevel=%.6f", _zoomLevel);
+    //lf("DisplayModel::SetZoomVirtual() zoomLevel=%.6f", _zoomLevel);
     Relayout(zoomLevel, rotation);
     SetScrollState(ss);
 
@@ -1332,23 +1270,23 @@ void DisplayModel::ZoomTo(float zoomLevel, PointI *fixPt)
     }
 }
 
-void DisplayModel::ZoomBy(float zoomFactor, PointI *fixPt)
+float DisplayModel::GetZoomVirtual(bool absolute) const
 {
-    // zoomTo expects a zoomVirtual, so undo the dpiFactor here
-    float newZoom = ZoomAbsolute() * zoomFactor;
-    newZoom = limitValue(newZoom, ZOOM_MIN, ZOOM_MAX);
-    //lf("DisplayModel::zoomBy() zoomReal=%.6f, zoomFactor=%.2f, newZoom=%.2f", dm->zoomReal, zoomFactor, newZoom);
-    ZoomTo(newZoom, fixPt);
+    if (absolute) {
+        // revert the dpiFactor premultiplication for converting zoomReal back to zoomVirtual
+        return zoomReal * 100 / dpiFactor;
+    }
+    return zoomVirtual;
 }
 
-float DisplayModel::NextZoomStep(float towardsLevel)
+float DisplayModel::GetNextZoomStep(float towardsLevel) const
 {
     if (gGlobalPrefs->zoomIncrement > 0) {
-        float zoom = ZoomAbsolute();
+        float zoom = GetZoomVirtual(true);
         if (zoom < towardsLevel)
-            return min(zoom * (gGlobalPrefs->zoomIncrement / 100 + 1), towardsLevel);
+            return std::min(zoom * (gGlobalPrefs->zoomIncrement / 100 + 1), towardsLevel);
         if (zoom > towardsLevel)
-            return max(zoom / (gGlobalPrefs->zoomIncrement / 100 + 1), towardsLevel);
+            return std::max(zoom / (gGlobalPrefs->zoomIncrement / 100 + 1), towardsLevel);
         return zoom;
     }
 
@@ -1366,17 +1304,17 @@ float DisplayModel::NextZoomStep(float towardsLevel)
     CrashIf(zoomLevels->Count() != 0 && (zoomLevels->At(0) < ZOOM_MIN || zoomLevels->Last() > ZOOM_MAX));
     CrashIf(zoomLevels->Count() != 0 && zoomLevels->At(0) > zoomLevels->Last());
 
-    float currZoom = ZoomAbsolute();
+    float currZoom = GetZoomVirtual(true);
     float pageZoom = (float)HUGE_VAL, widthZoom = (float)HUGE_VAL;
     for (int pageNo = 1; pageNo <= PageCount(); pageNo++) {
         if (PageShown(pageNo)) {
             float pagePageZoom = ZoomRealFromVirtualForPage(ZOOM_FIT_PAGE, pageNo);
-            pageZoom = min(pageZoom, pagePageZoom);
+            pageZoom = std::min(pageZoom, pagePageZoom);
             float pageWidthZoom = ZoomRealFromVirtualForPage(ZOOM_FIT_WIDTH, pageNo);
-            widthZoom = min(widthZoom, pageWidthZoom);
+            widthZoom = std::min(widthZoom, pageWidthZoom);
         }
     }
-    CrashIf(!AsChmEngine() && (pageZoom == (float)HUGE_VAL || widthZoom == (float)HUGE_VAL));
+    CrashIf(pageZoom == (float)HUGE_VAL || widthZoom == (float)HUGE_VAL);
     CrashIf(pageZoom > widthZoom);
     pageZoom *= 100 / dpiFactor; widthZoom *= 100 / dpiFactor;
 
@@ -1474,17 +1412,17 @@ bool DisplayModel::ShowResultRectToScreen(TextSel *res)
     if (extremes.y < viewPort.dy * 2 / 5)
         sy = extremes.y - viewPort.dy * 2 / 5;
     else if (extremes.y + extremes.dy > viewPort.dy * 3 / 5)
-        sy = min(extremes.y + extremes.dy - viewPort.dy * 3 / 5,
+        sy = std::min(extremes.y + extremes.dy - viewPort.dy * 3 / 5,
                  extremes.y + extremes.dy / 2 - viewPort.dy * 2 / 5);
 
     // horizontally, we try to position the search result at the
     // center of the screen, but don't scroll further than page
     // boundaries, so that as much context as possible remains visible
     if (extremes.x < 0)
-        sx = max(extremes.x + extremes.dx / 2 - viewPort.dx / 2,
+        sx = std::max(extremes.x + extremes.dx / 2 - viewPort.dx / 2,
         pageInfo->pageOnScreen.x);
     else if (extremes.x + extremes.dx >= viewPort.dx)
-        sx = min(extremes.x + extremes.dx / 2 - viewPort.dx / 2,
+        sx = std::min(extremes.x + extremes.dx / 2 - viewPort.dx / 2,
                  pageInfo->pageOnScreen.x + pageInfo->pageOnScreen.dx - viewPort.dx);
 
     if (sx != 0)
@@ -1528,11 +1466,8 @@ void DisplayModel::SetScrollState(ScrollState state)
     // Bail out, if the page wasn't scrolled
     if (state.x < 0 && state.y < 0)
         return;
-    // TODO: allow to set scroll state for ChmEngine
-    if (AsChmEngine())
-        return;
 
-    PointD newPtD(max(state.x, 0), max(state.y, 0));
+    PointD newPtD(std::max(state.x, (double)0), std::max(state.y, (double)0));
     PointI newPt = CvtToScreen(state.page, newPtD);
 
     // Also show the margins, if this has been requested
@@ -1560,7 +1495,7 @@ void DisplayModel::AddNavPoint()
         return;
     // make sure that the history doesn't grow overly large
     if (navHistoryIx >= MAX_NAV_HISTORY_LEN) {
-        assert(navHistoryIx == MAX_NAV_HISTORY_LEN);
+        CrashIf(navHistoryIx > MAX_NAV_HISTORY_LEN);
         navHistory.RemoveAt(0, navHistoryIx - MAX_NAV_HISTORY_LEN + 1);
         navHistoryIx = MAX_NAV_HISTORY_LEN - 1;
     }
@@ -1571,9 +1506,7 @@ void DisplayModel::AddNavPoint()
 
 bool DisplayModel::CanNavigate(int dir) const
 {
-    if (AsChmEngine())
-        return AsChmEngine()->CanNavigate(dir);
-    assert(navHistoryIx <= navHistory.Count());
+    CrashIf(navHistoryIx > navHistory.Count());
     if (dir < 0)
         return navHistoryIx >= (size_t)-dir;
     return navHistoryIx + dir < navHistory.Count();
@@ -1584,8 +1517,6 @@ void DisplayModel::Navigate(int dir)
 {
     if (!CanNavigate(dir))
         return;
-    if (AsChmEngine())
-        return AsChmEngine()->Navigate(dir);
     // update the current history entry
     ScrollState ss = GetScrollState();
     if (navHistoryIx < navHistory.Count())
@@ -1610,10 +1541,67 @@ void DisplayModel::CopyNavHistory(DisplayModel& orig)
     }
 }
 
-ChmEngine *DisplayModel::AsChmEngine() const
+bool DisplayModel::ShouldCacheRendering(int pageNo)
 {
-    if (Engine_Chm != engineType)
-        return NULL;
+    // recommend caching for all documents which are non-trivial to render
+    if (!engine->IsImageCollection())
+        return true;
 
-    return static_cast<ChmEngine*>(engine);
+    // recommend caching large images (mainly photos) as well, as shrinking
+    // them for every UI update (WM_PAINT) can cause notable lags
+    // TODO: stretching small images even also causes minor lags
+    RectD page = engine->PageMediabox(pageNo);
+    return page.dx * page.dy > 1024 * 1024;
+}
+
+void DisplayModel::ScrollToLink(PageDestination *dest)
+{
+    CrashIf(!dest || dest->GetDestPageNo() <= 0);
+
+    PointI scroll(-1, 0);
+    RectD rect = dest->GetDestRect();
+    int pageNo = dest->GetDestPageNo();
+
+    if (rect.IsEmpty()) {
+        // PDF: /XYZ top left
+        // scroll to rect.TL()
+        PointD scrollD = engine->Transform(rect.TL(), pageNo, zoomReal, rotation);
+        scroll = scrollD.ToInt();
+
+        // default values for the coordinates mean: keep the current position
+        if (DEST_USE_DEFAULT == rect.x)
+            scroll.x = -1;
+        if (DEST_USE_DEFAULT == rect.y) {
+            PageInfo *pageInfo = GetPageInfo(CurrentPageNo());
+            scroll.y = -(pageInfo->pageOnScreen.y - windowMargin.top);
+        }
+    }
+    else if (rect.dx != DEST_USE_DEFAULT && rect.dy != DEST_USE_DEFAULT) {
+        // PDF: /FitR left bottom right top
+        RectD rectD = engine->Transform(rect, pageNo, zoomReal, rotation);
+        scroll = rectD.TL().ToInt();
+
+        // Rect<float> rectF = _engine->Transform(rect, pageNo, 1.0, rotation).Convert<float>();
+        // zoom = 100.0f * std::min(viewPort.dx / rectF.dx, viewPort.dy / rectF.dy);
+    }
+    else if (rect.y != DEST_USE_DEFAULT) {
+        // PDF: /FitH top  or  /FitBH top
+        PointD scrollD = engine->Transform(rect.TL(), pageNo, zoomReal, rotation);
+        scroll.y = scrollD.ToInt().y;
+
+        // zoom = FitBH ? ZOOM_FIT_CONTENT : ZOOM_FIT_WIDTH
+    }
+    // else if (Fit || FitV) zoom = ZOOM_FIT_PAGE
+    // else if (FitB || FitBV) zoom = ZOOM_FIT_CONTENT
+    /* // ignore author-set zoom settings (at least as long as there's no way to overrule them)
+    if (zoom != INVALID_ZOOM) {
+        // TODO: adjust the zoom level before calculating the scrolling coordinates
+        SetZoomVirtual(zoom);
+        UpdateToolbarState(owner);
+    }
+    // */
+    // TODO: prevent scroll.y from getting too large?
+    if (scroll.y < 0)
+        scroll.y = 0; // Adobe Reader never shows the previous page
+    GoToPage(pageNo, scroll.y, true, scroll.x);
 }

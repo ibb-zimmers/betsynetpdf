@@ -1,11 +1,11 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "PdfSync.h"
 
+#include "BaseEngine.h"
 #include "FileUtil.h"
-#include "PdfEngine.h"
 
 #include "synctex_parser.h"
 
@@ -42,7 +42,7 @@ struct PdfsyncPoint {
 class Pdfsync : public Synchronizer
 {
 public:
-    Pdfsync(const WCHAR* syncfilename, PdfEngine *engine) :
+    Pdfsync(const WCHAR* syncfilename, BaseEngine *engine) :
         Synchronizer(syncfilename), engine(engine)
     {
         assert(str::EndsWithI(syncfilename, PDFSYNC_EXTENSION));
@@ -55,7 +55,7 @@ private:
     int RebuildIndex();
     UINT SourceToRecord(const WCHAR* srcfilename, UINT line, UINT col, Vec<size_t>& records);
 
-    PdfEngine *engine;          // needed for converting between coordinate systems
+    BaseEngine *engine;         // needed for converting between coordinate systems
     WStrVec srcfiles;           // source file names
     Vec<PdfsyncLine> lines;     // record-to-line mapping
     Vec<PdfsyncPoint> points;   // record-to-point mapping
@@ -67,7 +67,7 @@ private:
 class SyncTex : public Synchronizer
 {
 public:
-    SyncTex(const WCHAR* syncfilename, PdfEngine *engine) :
+    SyncTex(const WCHAR* syncfilename, BaseEngine *engine) :
         Synchronizer(syncfilename), engine(engine), scanner(NULL)
     {
         assert(str::EndsWithI(syncfilename, SYNCTEX_EXTENSION));
@@ -83,7 +83,7 @@ public:
 private:
     int RebuildIndex();
 
-    PdfEngine *engine; // needed for converting between coordinate systems
+    BaseEngine *engine; // needed for converting between coordinate systems
     synctex_scanner_t scanner;
 };
 
@@ -128,7 +128,7 @@ WCHAR * Synchronizer::PrependDir(const WCHAR* filename) const
 // Create a Synchronizer object for a PDF file.
 // It creates either a SyncTex or PdfSync object
 // based on the synchronization file found in the folder containing the PDF file.
-int Synchronizer::Create(const WCHAR *pdffilename, PdfEngine *engine, Synchronizer **sync)
+int Synchronizer::Create(const WCHAR *pdffilename, BaseEngine *engine, Synchronizer **sync)
 {
     if (!sync || !engine)
         return PDFSYNCERR_INVALID_ARGUMENT;
@@ -493,8 +493,8 @@ int Pdfsync::SourceToDoc(const WCHAR* srcfilename, UINT line, UINT col, UINT *pa
 // SYNCTEX synchronizer
 
 int SyncTex::RebuildIndex() {
-    synctex_scanner_free(this->scanner);
-    this->scanner = NULL;
+    synctex_scanner_free(scanner);
+    scanner = NULL;
 
     ScopedMem<char> syncfname(str::conv::ToAnsi(syncfilepath));
     if (!syncfname)
@@ -509,12 +509,15 @@ int SyncTex::RebuildIndex() {
 
 int SyncTex::DocToSource(UINT pageNo, PointI pt, ScopedMem<WCHAR>& filename, UINT *line, UINT *col)
 {
-    if (IsIndexDiscarded())
+    if (IsIndexDiscarded()) {
         if (RebuildIndex() != PDFSYNCERR_SUCCESS)
             return PDFSYNCERR_SYNCFILE_CANNOT_BE_OPENED;
-    assert(this->scanner);
+    }
+    CrashIf(!this->scanner);
 
-    if (synctex_edit_query(this->scanner, pageNo, (float)pt.x, (float)pt.y) < 0)
+    // Coverity: at this point, this->scanner->flags.has_parsed == 1 and thus
+    // synctex_scanner_parse never gets the chance to freeing the scanner
+    if (synctex_edit_query(this->scanner, pageNo, (float)pt.x, (float)pt.y) <= 0)
         return PDFSYNCERR_NO_SYNC_AT_LOCATION;
 
     synctex_node_t node = synctex_next_result(this->scanner);

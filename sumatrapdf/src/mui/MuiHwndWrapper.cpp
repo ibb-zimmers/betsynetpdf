@@ -1,9 +1,13 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "Mui.h"
+
+#include "FrameRateWnd.h"
+#include "Timer.h"
 #include "WinUtil.h"
 
+//#define NOLOG 0
 #include "DebugLog.h"
 
 namespace mui {
@@ -90,24 +94,26 @@ void HwndWrapper::TopLevelLayout()
         firstLayout = false;
         desiredSize = s;
         ResizeHwndToClientArea(hwndParent, s.Width, s.Height, false);
-    } else {
-        desiredSize = availableSize;
-        Rect r(0, 0, availableSize.Width, availableSize.Height);
-        SetPosition(r);
-        if (centerContent) {
-            int n = availableSize.Width - s.Width;
-            if (n > 0) {
-                r.X = n / 2;
-                r.Width = s.Width;
-            }
-            n = availableSize.Height - s.Height;
-            if (n > 0) {
-                r.Y = n / 2;
-                r.Height = s.Height;
-            }
-        }
-        Arrange(r);
+        layoutRequested = false;
+        return;
     }
+
+    desiredSize = availableSize;
+    Rect r(0, 0, availableSize.Width, availableSize.Height);
+    SetPosition(r);
+    if (centerContent) {
+        int n = availableSize.Width - s.Width;
+        if (n > 0) {
+            r.X = n / 2;
+            r.Width = s.Width;
+        }
+        n = availableSize.Height - s.Height;
+        if (n > 0) {
+            r.Y = n / 2;
+            r.Height = s.Height;
+        }
+    }
+    Arrange(r);
     layoutRequested = false;
 }
 
@@ -130,8 +136,17 @@ void HwndWrapper::LayoutIfRequested()
 void HwndWrapper::OnPaint(HWND hwnd)
 {
     CrashIf(hwnd != hwndParent);
+    Timer t;
     painter->Paint(hwnd, markedForRepaint);
+    if (frameRateWnd) {
+        ShowFrameRateDur(frameRateWnd, t.GetTimeInMs());
+    }
     markedForRepaint = false;
+}
+
+bool HwndWrapper::IsInSizeMove() const 
+{
+    return evtMgr->IsInSizeMove();
 }
 
 }

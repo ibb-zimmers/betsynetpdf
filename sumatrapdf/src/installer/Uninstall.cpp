@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef BUILD_UNINSTALLER
@@ -181,7 +181,6 @@ static BOOL RemoveInstalledFiles()
     return success;
 }
 
-
 // If this is uninstaller and we're running from installation directory,
 // copy uninstaller to temp directory and execute from there, exiting
 // ourselves. This is needed so that uninstaller can delete itself
@@ -331,7 +330,7 @@ void CreateMainWindow()
         CW_USEDEFAULT, CW_USEDEFAULT,
         dpiAdjust(INSTALLER_WIN_DX), dpiAdjust(INSTALLER_WIN_DY),
         NULL, NULL,
-        ghinst, NULL);
+        GetModuleHandle(NULL), NULL);
 }
 
 void ShowUsage()

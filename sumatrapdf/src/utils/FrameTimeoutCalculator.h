@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef FrameTimeoutCalculator_h
@@ -13,7 +13,7 @@ class FrameTimeoutCalculator {
     LARGE_INTEGER   timeFreq;
 
 public:
-    FrameTimeoutCalculator(int framesPerSecond) {
+    explicit FrameTimeoutCalculator(int framesPerSecond) {
         QueryPerformanceFrequency(&timeFreq); // number of ticks per second
         ticsPerMs = timeFreq.QuadPart / 1000;
         ticksPerFrame = timeFreq.QuadPart / framesPerSecond;

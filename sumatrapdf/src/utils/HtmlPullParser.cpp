@@ -1,13 +1,10 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
 #include "HtmlPullParser.h"
 
-/* TODO: We could extend the parser to allow navigating the tree (go to a prev/next sibling, go
-to a parent) without explicitly building a tree in memory. I think all we need to do is to extend
-tagNesting to also remember the position in html of the tag. Given this information we should be
-able to navigate the tree by reparsing.*/
+#include "HtmlParserLookup.h"
 
 // returns -1 if didn't find
 int HtmlEntityNameToRune(const char *name, size_t nameLen)
@@ -17,7 +14,7 @@ int HtmlEntityNameToRune(const char *name, size_t nameLen)
 
 #define MAX_ENTITY_NAME_LEN 8
 
-// A unicode version of HtmlEntityNameToRune. It's safe because 
+// A unicode version of HtmlEntityNameToRune. It's safe because
 // entity names only contain ascii (<127) characters so if a simplistic
 // conversion from unicode to ascii succeeds, we can use ascii
 // version, otherwise it wouldn't match anyway
@@ -47,7 +44,7 @@ bool SkipUntil(const char*& s, const char *end, char *term)
 {
     size_t len = str::Len(term);
     for (; s < end; s++) {
-        if (s + len < end && str::StartsWith(s, term))
+        if (s + len <= end && str::StartsWith(s, term))
             return true;
     }
     return false;
@@ -111,7 +108,7 @@ void MemAppend(char *& dst, const char *s, size_t len)
 // after '&' and len is the maximum lenght of the string
 // (4 in case of "foo;")
 // returns a pointer to the first character after the entity
-static const char *ResolveHtmlEntity(const char *s, size_t len, int& rune)
+const char *ResolveHtmlEntity(const char *s, size_t len, int& rune)
 {
     const char *entEnd = str::Parse(s, len, "#%d%?;", &rune);
     if (entEnd)
@@ -193,14 +190,9 @@ char *ResolveHtmlEntities(const char *s, size_t len)
     return (char *)tmp;
 }
 
-inline bool StrEqNIx(const char *s, size_t len, const char *s2)
-{
-    return str::Len(s2) == len && str::StartsWithI(s, s2);
-}
-
 bool AttrInfo::NameIs(const char *s) const
 {
-    return StrEqNIx(name, nameLen, s);
+    return str::EqNIx(name, nameLen, s);
 }
 
 // for now just ignores any namespace qualifier
@@ -211,12 +203,12 @@ bool AttrInfo::NameIsNS(const char *s, const char *ns) const
     CrashIf(!ns);
     const char *nameStart = (const char *)memchr(name, ':', nameLen);
     nameStart = nameStart ? nameStart + 1 : name;
-    return StrEqNIx(nameStart, nameLen - (nameStart - name), s);
+    return str::EqNIx(nameStart, nameLen - (nameStart - name), s);
 }
 
 bool AttrInfo::ValIs(const char *s) const
 {
-    return StrEqNIx(val, valLen, s);
+    return str::EqNIx(val, valLen, s);
 }
 
 void HtmlToken::SetTag(TokenType new_type, const char *new_s, const char *end)
@@ -257,7 +249,7 @@ bool HtmlToken::NameIsNS(const char *name, const char *ns) const
     CrashIf(!ns);
     const char *nameStart = (const char *)memchr(s, ':', nLen);
     nameStart = nameStart ? nameStart + 1 : s;
-    return StrEqNIx(nameStart, nLen - (nameStart - s), name);
+    return str::EqNIx(nameStart, nLen - (nameStart - s), name);
 }
 
 // reparse point is an address within html that we can
@@ -354,7 +346,7 @@ NoNextAttr:
 // <tag attr=">" />
 // tries to find the closing '>' and not be confused by '>' that
 // are part of attribute value. We're not very strict here
-// Returns false if didn't find 
+// Returns false if didn't find
 static bool SkipUntilTagEnd(const char*& s, const char *end)
 {
     while (s < end) {
@@ -370,38 +362,6 @@ static bool SkipUntilTagEnd(const char*& s, const char *end)
         }
     }
     return false;
-}
-
-// record the tag for the purpose of building current state
-// of html tree
-static void RecordStartTag(Vec<HtmlTag>* tagNesting, HtmlTag tag)
-{
-    if (!IsTagSelfClosing(tag))
-        tagNesting->Append(tag);
-}
-
-// remove the tag from state of html tree
-static void RecordEndTag(Vec<HtmlTag> *tagNesting, HtmlTag tag)
-{
-    // when closing a tag, if the top tag doesn't match but
-    // there are only potentially self-closing tags on the
-    // stack between the matching tag, we pop all of them
-    if (tagNesting->Contains(tag)) {
-        while ((tagNesting->Count() > 0) && (tagNesting->Last() != tag))
-            tagNesting->Pop();
-    }
-    if (tagNesting->Count() > 0 && tagNesting->Last() == tag) {
-        tagNesting->Pop();
-    }
-}
-
-static void UpdateTagNesting(Vec<HtmlTag> *tagNesting, HtmlToken *t)
-{
-    // update the current state of html tree
-    if (t->IsStartTag())
-        RecordStartTag(tagNesting, t->tag);
-    else if (t->IsEndTag())
-        RecordEndTag(tagNesting, t->tag);
 }
 
 // Returns next part of html or NULL if finished
@@ -428,7 +388,7 @@ Next:
     // skip <? and <! (processing instructions and comments)
     if (start < end && (('?' == *start) || ('!' == *start))) {
         if ('!' == *start && start + 2 < end && str::StartsWith(start, "!--")) {
-            currPos = start + 2;
+            currPos = start + 3;
             if (!SkipUntil(currPos, end, "-->")) {
                 currToken.SetError(HtmlToken::UnclosedTag, start);
                 return &currToken;
@@ -465,13 +425,5 @@ Next:
         currToken.SetTag(HtmlToken::StartTag, start, currPos);
     }
     ++currPos;
-    UpdateTagNesting(&tagNesting, &currToken);
     return &currToken;
 }
-
-// note: this is a bit unorthodox but allows us to easily separate
-// (often long) unit tests into a separate file without additional
-// makefile gymnastics
-#ifdef DEBUG
-#include "HtmlPullParser_ut.cpp"
-#endif

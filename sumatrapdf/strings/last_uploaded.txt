@@ -1,5 +1,4 @@
 AppTranslator strings
-%s of %s
 &About
 &Actual Size\tCtrl+1
 &Advanced Options...
@@ -48,6 +47,7 @@ AppTranslator strings
 &Skip this version
 &Use original page sizes
 &View
+&Window
 &Yes
 &Zoom
 (of %d)
@@ -98,7 +98,6 @@ Couldn't create the installation directory
 Couldn't initialize printer
 Couldn't install PDF previewer
 Couldn't install PDF search filter
-Couldn't install browser plugin
 Couldn't obtain temporary directory
 Couldn't remove installation directory
 Couldn't remove the shortcut
@@ -109,6 +108,7 @@ Couldn't uninstall browser plugin
 Couldn't write %s to disk
 Created:
 Current file
+Cursor position:
 Custom &Zoom...\tCtrl+Y
 Default &Layout:
 Default &Zoom:
@@ -123,12 +123,9 @@ Enter password
 Enter password for %s
 Enter the command-line to invoke when you double-click on the PDF document:
 Error loading %s
-Error: Couldn't run SumatraPDF!
-Error: SumatraPDF hasn't been found!
-Error: The document couldn't be downloaded!
 F&avorites
 F&orward\tAlt+Right Arrow
-F&ullscreen\tCtrl+Shift+L
+F&ullscreen\tF11
 Facing
 Failed to copy uninstaller to temp directory
 Failed to create a shortcut
@@ -167,15 +164,14 @@ Hide &Options
 Hide frequently read
 Hint: Use the F3 key for finding again
 Image files (*.%s)
-Install PDF &browser plugin for Firefox, Chrome and Opera
 Install SumatraPDF
 Install SumatraPDF in &folder:
 Installation failed!
 Installation in progress...
 KB
+Keep the PDF &browser plugin installed (no longer supported)
 Let Windows Desktop Search &search PDF documents
 Let Windows show &previews of PDF documents
-Loading file %s...
 MB
 Make SumatraPDF default application for PDF files?
 Make SumatraPDF my default PDF reader
@@ -199,7 +195,6 @@ Open in &Adobe Reader
 Open in &Foxit Reader
 Open in &Microsoft HTML Help
 Open in &Microsoft XPS-Viewer
-Opening document in SumatraPDF...
 P&roperties
 P&roperties\tCtrl+D
 PDF Document
@@ -213,10 +208,11 @@ Page Size:
 Page number %u inexistant
 Page scaling
 Page:
+PalmDoc documents
 Please close %s to proceed!
 Please wait - rendering...
 Postscript documents
-Pr&esentation\tCtrl+L
+Pr&esentation\tF5
 Previous Page
 Print
 Print as &image (requires more memory)
@@ -232,7 +228,6 @@ Remember &opened files
 Remove from favorites
 Remove page %s from favorites
 Rename To
-Replace document &colors with Windows color scheme
 Rotate &Left\tCtrl+Shift+-
 Rotate &Right\tCtrl+Shift++
 Save As
@@ -242,11 +237,12 @@ Select &All
 Select &All\tCtrl+A
 Select content with Ctrl+left mouse button
 Select the folder where SumatraPDF should be installed:
+Selection:
 Send by &E-mail...
 Set inverse search command-line
 Show &Bookmarks
+Show &Pages Continuously
 Show &Toolbar
-Show &pages continuously
 Show Favorites
 Show frequently read
 Show the &bookmarks sidebar when available
@@ -276,6 +272,7 @@ Uninstall SumatraPDF
 Uninstallation failed
 Uninstallation in progress...
 Unknown source file (%s)
+Use &tabs
 Use SumatraPDF as the &default PDF reader
 View
 Visit &Website

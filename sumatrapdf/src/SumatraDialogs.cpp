@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -56,7 +56,6 @@ static INT_PTR CreateDialogBox(int dlgId, HWND parent, DLGPROC DlgProc, LPARAM d
     ScopedMem<DLGTEMPLATE> rtlDlgTemplate(GetRtLDlgTemplate(dlgId));
     return DialogBoxIndirectParam(NULL, rtlDlgTemplate, parent, DlgProc, data);
 }
-
 
 /* For passing data to/from GetPassword dialog */
 struct Dialog_GetPassword_Data {
@@ -386,7 +385,7 @@ static INT_PTR CALLBACK Dialog_ChangeLanguage_Proc(HWND hDlg, UINT msg, WPARAM w
             const char *langCode = trans::GetLangCodeByIdx(i);
             ScopedMem<WCHAR> langName(str::conv::FromUtf8(name));
             ListBox_AppendString_NoSort(langList, langName);
-            if (langCode == data->langCode)
+            if (str::Eq(langCode, data->langCode))
                 itemToSelect = i;
         }
         ListBox_SetCurSel(langList, itemToSelect);
@@ -699,7 +698,7 @@ static INT_PTR CALLBACK Dialog_Settings_Proc(HWND hDlg, UINT msg, WPARAM wParam,
         CheckDlgButton(hDlg, IDC_DEFAULT_SHOW_TOC, prefs->showToc ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hDlg, IDC_REMEMBER_STATE_PER_DOCUMENT, prefs->rememberStatePerDocument ? BST_CHECKED : BST_UNCHECKED);
         EnableWindow(GetDlgItem(hDlg, IDC_REMEMBER_STATE_PER_DOCUMENT), prefs->rememberOpenedFiles);
-        CheckDlgButton(hDlg, IDC_USE_SYS_COLORS, prefs->useSysColors ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hDlg, IDC_USE_TABS, prefs->useTabs? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(hDlg, IDC_CHECK_FOR_UPDATES, prefs->checkForUpdates ? BST_CHECKED : BST_UNCHECKED);
         EnableWindow(GetDlgItem(hDlg, IDC_CHECK_FOR_UPDATES), HasPermission(Perm_InternetAccess));
         CheckDlgButton(hDlg, IDC_REMEMBER_OPENED_FILES, prefs->rememberOpenedFiles ? BST_CHECKED : BST_UNCHECKED);
@@ -720,20 +719,14 @@ static INT_PTR CALLBACK Dialog_Settings_Proc(HWND hDlg, UINT msg, WPARAM wParam,
         SetDlgItemText(hDlg, IDC_DEFAULT_ZOOM_LABEL, _TR("Default &Zoom:"));
         SetDlgItemText(hDlg, IDC_DEFAULT_SHOW_TOC, _TR("Show the &bookmarks sidebar when available"));
         SetDlgItemText(hDlg, IDC_REMEMBER_STATE_PER_DOCUMENT, _TR("&Remember these settings for each document"));
-        SetDlgItemText(hDlg, IDC_USE_SYS_COLORS, _TR("Replace document &colors with Windows color scheme"));
         SetDlgItemText(hDlg, IDC_SECTION_ADVANCED, _TR("Advanced"));
+        SetDlgItemText(hDlg, IDC_USE_TABS, _TR("Use &tabs"));
         SetDlgItemText(hDlg, IDC_CHECK_FOR_UPDATES, _TR("Automatically check for &updates"));
         SetDlgItemText(hDlg, IDC_REMEMBER_OPENED_FILES, _TR("Remember &opened files"));
         SetDlgItemText(hDlg, IDC_SECTION_INVERSESEARCH, _TR("Set inverse search command-line"));
         SetDlgItemText(hDlg, IDC_CMDLINE_LABEL, _TR("Enter the command-line to invoke when you double-click on the PDF document:"));
         SetDlgItemText(hDlg, IDOK, _TR("OK"));
         SetDlgItemText(hDlg, IDCANCEL, _TR("Cancel"));
-
-        if (GetSysColor(COLOR_WINDOWTEXT) == RGB(0, 0, 0) &&
-            GetSysColor(COLOR_WINDOW) == RGB(0xFF, 0xFF, 0xFF)) {
-            // remove the "use system colors" item if it wouldn't change anything
-            RemoveDialogItem(hDlg, IDC_USE_SYS_COLORS);
-        }
 
         if (prefs->enableTeXEnhancements && HasPermission(Perm_DiskAccess)) {
             // Fill the combo with the list of possible inverse search commands
@@ -774,7 +767,7 @@ static INT_PTR CALLBACK Dialog_Settings_Proc(HWND hDlg, UINT msg, WPARAM wParam,
 
             prefs->showToc = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_DEFAULT_SHOW_TOC));
             prefs->rememberStatePerDocument = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_REMEMBER_STATE_PER_DOCUMENT));
-            prefs->useSysColors = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_USE_SYS_COLORS));
+            prefs->useTabs = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_USE_TABS));
             prefs->checkForUpdates = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_CHECK_FOR_UPDATES));
             prefs->rememberOpenedFiles = (BST_CHECKED == IsDlgButtonChecked(hDlg, IDC_REMEMBER_OPENED_FILES));
             if (prefs->enableTeXEnhancements && HasPermission(Perm_DiskAccess)) {

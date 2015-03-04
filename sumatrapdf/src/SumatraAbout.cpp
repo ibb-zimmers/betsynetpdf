@@ -1,20 +1,17 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "SumatraAbout.h"
 
 #include "AppPrefs.h"
-#include "AppTools.h"
 #include "FileHistory.h"
-#include "FileUtil.h"
-using namespace Gdiplus;
-#include "GdiPlusUtil.h"
-#include "PdfEngine.h"
+#include "FileThumbnails.h"
 #include "resource.h"
 #include "SumatraPDF.h"
 #include "Translations.h"
 #include "Version.h"
+#include "WinCursors.h"
 #include "WindowInfo.h"
 #include "WinUtil.h"
 
@@ -57,10 +54,12 @@ using namespace Gdiplus;
 #define URL_AUTHORS L"http://sumatrapdf.googlecode.com/svn/trunk/AUTHORS"
 #define URL_TRANSLATORS L"http://sumatrapdf.googlecode.com/svn/trunk/TRANSLATORS"
 #else
-#define URL_LICENSE L"http://sumatrapdf.googlecode.com/svn/tags/" CURR_VERSION_STR L"rel/AUTHORS"
-#define URL_AUTHORS L"http://sumatrapdf.googlecode.com/svn/tags/" CURR_VERSION_STR L"rel/AUTHORS"
-#define URL_TRANSLATORS L"http://sumatrapdf.googlecode.com/svn/tags/" CURR_VERSION_STR L"rel/TRANSLATORS"
+#define URL_LICENSE L"http://sumatrapdf.googlecode.com/svn/tags/" UPDATE_CHECK_VER L"rel/AUTHORS"
+#define URL_AUTHORS L"http://sumatrapdf.googlecode.com/svn/tags/" UPDATE_CHECK_VER L"rel/AUTHORS"
+#define URL_TRANSLATORS L"http://sumatrapdf.googlecode.com/svn/tags/" UPDATE_CHECK_VER L"rel/TRANSLATORS"
 #endif
+
+#define LAYOUT_LTR              0
 
 static ATOM gAtomAbout;
 static HWND gHwndAbout;
@@ -108,7 +107,7 @@ static void DrawSumatraPDF(HDC hdc, PointI pt)
 #ifdef ABOUT_USE_LESS_COLORS
     // simple black version
     SetTextColor(hdc, ABOUT_BORDER_COL);
-    TextOut(hdc, pt.x, pt.y, txt, str::Len(txt));
+    TextOut(hdc, pt.x, pt.y, txt, (int)str::Len(txt));
 #else
     // colorful version
     COLORREF cols[] = { COL1, COL2, COL3, COL4, COL5, COL5, COL4, COL3, COL2, COL1 };
@@ -127,9 +126,9 @@ static SizeI CalcSumatraVersionSize(HDC hdc)
 {
     SizeI result;
 
-    ScopedFont fontSumatraTxt(GetSimpleFont(hdc, SUMATRA_TXT_FONT, SUMATRA_TXT_FONT_SIZE));
-    ScopedFont fontVersionTxt(GetSimpleFont(hdc, VERSION_TXT_FONT, VERSION_TXT_FONT_SIZE));
-    HGDIOBJ oldFont = SelectObject(hdc, fontSumatraTxt);
+    ScopedFont fontSumatraTxt(CreateSimpleFont(hdc, SUMATRA_TXT_FONT, SUMATRA_TXT_FONT_SIZE));
+    ScopedFont fontVersionTxt(CreateSimpleFont(hdc, VERSION_TXT_FONT, VERSION_TXT_FONT_SIZE));
+    ScopedHdcSelect selFont(hdc, fontSumatraTxt);
 
     SIZE txtSize;
     /* calculate minimal top box size */
@@ -142,21 +141,19 @@ static SizeI CalcSumatraVersionSize(HDC hdc)
     SelectObject(hdc, fontVersionTxt);
     txt = VERSION_TXT;
     GetTextExtentPoint32(hdc, txt, (int)str::Len(txt), &txtSize);
-    int minWidth = txtSize.cx;
+    LONG minWidth = txtSize.cx;
     txt = VERSION_SUB_TXT;
     GetTextExtentPoint32(hdc, txt, (int)str::Len(txt), &txtSize);
-    txtSize.cx = max(txtSize.cx, minWidth);
+    txtSize.cx = std::max(txtSize.cx, minWidth);
     result.dx += 2 * (txtSize.cx + ABOUT_INNER_PADDING);
-
-    SelectObject(hdc, oldFont);
 
     return result;
 }
 
 static void DrawSumatraVersion(HDC hdc, RectI rect)
 {
-    ScopedFont fontSumatraTxt(GetSimpleFont(hdc, SUMATRA_TXT_FONT, SUMATRA_TXT_FONT_SIZE));
-    ScopedFont fontVersionTxt(GetSimpleFont(hdc, VERSION_TXT_FONT, VERSION_TXT_FONT_SIZE));
+    ScopedFont fontSumatraTxt(CreateSimpleFont(hdc, SUMATRA_TXT_FONT, SUMATRA_TXT_FONT_SIZE));
+    ScopedFont fontVersionTxt(CreateSimpleFont(hdc, VERSION_TXT_FONT, VERSION_TXT_FONT_SIZE));
     HGDIOBJ oldFont = SelectObject(hdc, fontSumatraTxt);
 
     SetBkMode(hdc, TRANSPARENT);
@@ -181,10 +178,9 @@ static void DrawSumatraVersion(HDC hdc, RectI rect)
 
 static RectI DrawBottomRightLink(HWND hwnd, HDC hdc, const WCHAR *txt)
 {
-    ScopedFont fontLeftTxt(GetSimpleFont(hdc, L"MS Shell Dlg", 14));
-    HPEN penLinkLine = CreatePen(PS_SOLID, 1, COL_BLUE_LINK);
-
-    HGDIOBJ origFont = SelectObject(hdc, fontLeftTxt); /* Just to remember the orig font */
+    ScopedFont fontLeftTxt(CreateSimpleFont(hdc, L"MS Shell Dlg", 14));
+    ScopedGdiObj<HPEN> penLinkLine(CreatePen(PS_SOLID, 1, COL_BLUE_LINK));
+    ScopedHdcSelect font(hdc, fontLeftTxt);
 
     SetTextColor(hdc, COL_BLUE_LINK);
     SetBkMode(hdc, TRANSPARENT);
@@ -202,9 +198,6 @@ static RectI DrawBottomRightLink(HWND hwnd, HDC hdc, const WCHAR *txt)
     SelectObject(hdc, penLinkLine);
     PaintLine(hdc, RectI(rect.x, rect.y + rect.dy, rect.dx, 0));
 
-    SelectObject(hdc, origFont);
-    DeleteObject(penLinkLine);
-
     // make the click target larger
     rect.Inflate(ABOUT_INNER_PADDING, ABOUT_INNER_PADDING);
     return rect;
@@ -219,8 +212,8 @@ static void DrawAbout(HWND hwnd, HDC hdc, RectI rect, Vec<StaticLinkInfo>& linkI
     HPEN penDivideLine = CreatePen(PS_SOLID, ABOUT_LINE_SEP_SIZE, WIN_COL_BLACK);
     HPEN penLinkLine = CreatePen(PS_SOLID, ABOUT_LINE_SEP_SIZE, COL_BLUE_LINK);
 
-    ScopedFont fontLeftTxt(GetSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
-    ScopedFont fontRightTxt(GetSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
+    ScopedFont fontLeftTxt(CreateSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
+    ScopedFont fontRightTxt(CreateSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
 
     HGDIOBJ origFont = SelectObject(hdc, fontLeftTxt); /* Just to remember the orig font */
 
@@ -292,8 +285,8 @@ static void DrawAbout(HWND hwnd, HDC hdc, RectI rect, Vec<StaticLinkInfo>& linkI
 
 static void UpdateAboutLayoutInfo(HWND hwnd, HDC hdc, RectI *rect)
 {
-    ScopedFont fontLeftTxt(GetSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
-    ScopedFont fontRightTxt(GetSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
+    ScopedFont fontLeftTxt(CreateSimpleFont(hdc, LEFT_TXT_FONT, LEFT_TXT_FONT_SIZE));
+    ScopedFont fontRightTxt(CreateSimpleFont(hdc, RIGHT_TXT_FONT, RIGHT_TXT_FONT_SIZE));
 
     HGDIOBJ origFont = SelectObject(hdc, fontLeftTxt);
 
@@ -374,9 +367,32 @@ static void OnPaintAbout(HWND hwnd)
     PAINTSTRUCT ps;
     RectI rc;
     HDC hdc = BeginPaint(hwnd, &ps);
+    SetLayout(hdc, LAYOUT_LTR);
     UpdateAboutLayoutInfo(hwnd, hdc, &rc);
     DrawAbout(hwnd, hdc, rc, gLinkInfo);
     EndPaint(hwnd, &ps);
+}
+
+static void CopyAboutInfoToClipboard(HWND hwnd)
+{
+    str::Str<WCHAR> info(512);
+    info.AppendFmt(L"%s %s\r\n", APP_NAME_STR, VERSION_TXT);
+    for (size_t i = info.Size() - 2; i > 0; i--) {
+        info.Append('-');
+    }
+    info.Append(L"\r\n");
+    // concatenate all the information into a single string
+    // (cf. CopyPropertiesToClipboard in SumatraProperties.cpp)
+    size_t maxLen = 0;
+    for (AboutLayoutInfoEl *el = gAboutLayoutInfo; el->leftTxt; el++) {
+        maxLen = std::max(maxLen, str::Len(el->leftTxt));
+    }
+    for (AboutLayoutInfoEl *el = gAboutLayoutInfo; el->leftTxt; el++) {
+        for (size_t i = maxLen - str::Len(el->leftTxt); i > 0; i--)
+            info.Append(' ');
+        info.AppendFmt(L"%s: %s\r\n", el->leftTxt, el->url ? el->url : el->rightTxt);
+    }
+    CopyTextToClipboard(info.LendData());
 }
 
 const WCHAR *GetStaticLink(Vec<StaticLinkInfo>& linkInfo, int x, int y, StaticLinkInfo *info)
@@ -404,7 +420,7 @@ static void CreateInfotipForLink(StaticLinkInfo& linkInfo)
     gHwndAboutTooltip = CreateWindowEx(WS_EX_TOPMOST,
         TOOLTIPS_CLASS, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-        gHwndAbout, NULL, ghinst, NULL);
+        gHwndAbout, NULL, GetModuleHandle(NULL), NULL);
 
     TOOLINFO ti = { 0 };
     ti.cbSize = sizeof(ti);
@@ -433,7 +449,7 @@ static void ClearInfotip()
 LRESULT CALLBACK WndProcAbout(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     const WCHAR * url;
-    POINT pt;
+    PointI pt;
 
     switch (message)
     {
@@ -454,7 +470,7 @@ LRESULT CALLBACK WndProcAbout(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
                 StaticLinkInfo linkInfo;
                 if (GetStaticLink(gLinkInfo, pt.x, pt.y, &linkInfo)) {
                     CreateInfotipForLink(linkInfo);
-                    SetCursor(gCursorHand);
+                    SetCursor(IDC_HAND);
                     return TRUE;
                 }
             }
@@ -474,6 +490,11 @@ LRESULT CALLBACK WndProcAbout(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         case WM_CHAR:
             if (VK_ESCAPE == wParam)
                 DestroyWindow(hwnd);
+            break;
+
+        case WM_COMMAND:
+            if (IDM_COPY_SELECTION == LOWORD(wParam))
+                CopyAboutInfoToClipboard(hwnd);
             break;
 
         case WM_DESTROY:
@@ -497,8 +518,8 @@ void OnMenuAbout()
 
     if (!gAtomAbout) {
         WNDCLASSEX  wcex;
-        FillWndClassEx(wcex, ghinst, ABOUT_CLASS_NAME, WndProcAbout);
-        wcex.hIcon = LoadIcon(ghinst, MAKEINTRESOURCE(IDI_SUMATRAPDF));
+        FillWndClassEx(wcex, ABOUT_CLASS_NAME, WndProcAbout);
+        wcex.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_SUMATRAPDF));
         gAtomAbout = RegisterClassEx(&wcex);
         CrashIf(!gAtomAbout);
     }
@@ -509,14 +530,17 @@ void OnMenuAbout()
             CW_USEDEFAULT, CW_USEDEFAULT,
             CW_USEDEFAULT, CW_USEDEFAULT,
             NULL, NULL,
-            ghinst, NULL);
+            GetModuleHandle(NULL), NULL);
     if (!gHwndAbout)
         return;
+
+    ToggleWindowStyle(gHwndAbout, WS_EX_LAYOUTRTL | WS_EX_NOINHERITLAYOUT, IsUIRightToLeft(), GWL_EXSTYLE);
 
     // get the dimensions required for the about box's content
     RectI rc;
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(gHwndAbout, &ps);
+    SetLayout(hdc, LAYOUT_LTR);
     UpdateAboutLayoutInfo(gHwndAbout, hdc, &rc);
     EndPaint(gHwndAbout, &ps);
     rc.Inflate(ABOUT_RECT_PADDING, ABOUT_RECT_PADDING);
@@ -546,25 +570,23 @@ void DrawAboutPage(WindowInfo& win, HDC hdc)
 
 #define DOCLIST_SEPARATOR_DY        2
 #define DOCLIST_THUMBNAIL_BORDER_W  1
-#define DOCLIST_MARGIN_LEFT        40
-#define DOCLIST_MARGIN_BETWEEN_X   30
-#define DOCLIST_MARGIN_RIGHT       40
-#define DOCLIST_MARGIN_TOP         60
-#define DOCLIST_MARGIN_BETWEEN_Y   50
-#define DOCLIST_MARGIN_BOTTOM      40
+#define DOCLIST_MARGIN_LEFT         (int)(40 * win.uiDPIFactor)
+#define DOCLIST_MARGIN_BETWEEN_X    (int)(30 * win.uiDPIFactor)
+#define DOCLIST_MARGIN_RIGHT        (int)(40 * win.uiDPIFactor)
+#define DOCLIST_MARGIN_TOP          (int)(60 * win.uiDPIFactor)
+#define DOCLIST_MARGIN_BETWEEN_Y    (int)(50 * win.uiDPIFactor)
+#define DOCLIST_MARGIN_BOTTOM       (int)(40 * win.uiDPIFactor)
 #define DOCLIST_MAX_THUMBNAILS_X    5
-#define DOCLIST_BOTTOM_BOX_DY      50
+#define DOCLIST_BOTTOM_BOX_DY       (int)(50 * win.uiDPIFactor)
 
-static bool LoadThumbnail(DisplayState& state);
-
-void DrawStartPage(WindowInfo& win, HDC hdc, FileHistory& fileHistory, COLORREF colorRange[2])
+void DrawStartPage(WindowInfo& win, HDC hdc, FileHistory& fileHistory, COLORREF textColor, COLORREF backgroundColor)
 {
     HPEN penBorder = CreatePen(PS_SOLID, DOCLIST_SEPARATOR_DY, WIN_COL_BLACK);
     HPEN penThumbBorder = CreatePen(PS_SOLID, DOCLIST_THUMBNAIL_BORDER_W, WIN_COL_BLACK);
     HPEN penLinkLine = CreatePen(PS_SOLID, 1, COL_BLUE_LINK);
 
-    ScopedFont fontSumatraTxt(GetSimpleFont(hdc, L"MS Shell Dlg", 24));
-    ScopedFont fontLeftTxt(GetSimpleFont(hdc, L"MS Shell Dlg", 14));
+    ScopedFont fontSumatraTxt(CreateSimpleFont(hdc, L"MS Shell Dlg", 24));
+    ScopedFont fontLeftTxt(CreateSimpleFont(hdc, L"MS Shell Dlg", 14));
 
     HGDIOBJ origFont = SelectObject(hdc, fontSumatraTxt); /* Just to remember the orig font */
 
@@ -600,7 +622,7 @@ void DrawStartPage(WindowInfo& win, HDC hdc, FileHistory& fileHistory, COLORREF 
     fileHistory.GetFrequencyOrder(list);
 
     int width = limitValue((rc.dx - DOCLIST_MARGIN_LEFT - DOCLIST_MARGIN_RIGHT + DOCLIST_MARGIN_BETWEEN_X) / (THUMBNAIL_DX + DOCLIST_MARGIN_BETWEEN_X), 1, DOCLIST_MAX_THUMBNAILS_X);
-    int height = min((rc.dy - DOCLIST_MARGIN_TOP - DOCLIST_MARGIN_BOTTOM + DOCLIST_MARGIN_BETWEEN_Y) / (THUMBNAIL_DY + DOCLIST_MARGIN_BETWEEN_Y), FILE_HISTORY_MAX_FREQUENT / width);
+    int height = std::min((rc.dy - DOCLIST_MARGIN_TOP - DOCLIST_MARGIN_BOTTOM + DOCLIST_MARGIN_BETWEEN_Y) / (THUMBNAIL_DY + DOCLIST_MARGIN_BETWEEN_Y), FILE_HISTORY_MAX_FREQUENT / width);
     PointI offset(rc.x + DOCLIST_MARGIN_LEFT + (rc.dx - width * THUMBNAIL_DX - (width - 1) * DOCLIST_MARGIN_BETWEEN_X - DOCLIST_MARGIN_LEFT - DOCLIST_MARGIN_RIGHT) / 2, rc.y + DOCLIST_MARGIN_TOP);
     if (offset.x < ABOUT_INNER_PADDING)
         offset.x = ABOUT_INNER_PADDING;
@@ -630,8 +652,8 @@ void DrawStartPage(WindowInfo& win, HDC hdc, FileHistory& fileHistory, COLORREF 
             }
             DisplayState *state = list.At(h * width + w);
 
-            RectI page(offset.x + w * (int)(THUMBNAIL_DX + DOCLIST_MARGIN_BETWEEN_X * win.uiDPIFactor),
-                       offset.y + h * (int)(THUMBNAIL_DY + DOCLIST_MARGIN_BETWEEN_Y * win.uiDPIFactor),
+            RectI page(offset.x + w * (THUMBNAIL_DX + DOCLIST_MARGIN_BETWEEN_X),
+                       offset.y + h * (THUMBNAIL_DY + DOCLIST_MARGIN_BETWEEN_Y),
                        THUMBNAIL_DX, THUMBNAIL_DY);
             if (isRtl)
                 page.x = rc.dx - page.x - page.dx;
@@ -647,7 +669,7 @@ void DrawStartPage(WindowInfo& win, HDC hdc, FileHistory& fileHistory, COLORREF 
                 HRGN clip = CreateRoundRectRgn(page.x, page.y, page.x + page.dx, page.y + page.dy, 10, 10);
                 SelectClipRgn(hdc, clip);
                 RenderedBitmap *clone = state->thumbnail->Clone();
-                UpdateBitmapColorRange(clone->GetBitmap(), colorRange);
+                UpdateBitmapColors(clone->GetBitmap(), textColor, backgroundColor);
                 clone->StretchDIBits(hdc, page);
                 SelectClipRgn(hdc, NULL);
                 DeleteObject(clip);
@@ -708,150 +730,4 @@ void DrawStartPage(WindowInfo& win, HDC hdc, FileHistory& fileHistory, COLORREF 
     DeleteObject(penBorder);
     DeleteObject(penThumbBorder);
     DeleteObject(penLinkLine);
-}
-
-// TODO: create in TEMP directory instead?
-static WCHAR *GetThumbnailPath(const WCHAR *filePath)
-{
-	return NULL;
-    // create a fingerprint of a (normalized) path for the file name
-    // I'd have liked to also include the file's last modification time
-    // in the fingerprint (much quicker than hashing the entire file's
-    // content), but that's too expensive for files on slow drives
-    unsigned char digest[16];
-    ScopedMem<char> pathU(str::conv::ToUtf8(filePath));
-    if (path::HasVariableDriveLetter(filePath))
-        pathU[0] = '?'; // ignore the drive letter, if it might change
-    CalcMD5Digest((unsigned char *)pathU.Get(), str::Len(pathU), digest);
-    ScopedMem<char> fingerPrint(str::MemToHex(digest, 16));
-
-    ScopedMem<WCHAR> thumbsPath(AppGenDataFilename(THUMBNAILS_DIR_NAME));
-    if (!thumbsPath)
-        return NULL;
-    ScopedMem<WCHAR> fname(str::conv::FromAnsi(fingerPrint));
-
-    return str::Format(L"%s\\%s.png", thumbsPath, fname);
-}
-
-// removes thumbnails that don't belong to any frequently used item in file history
-void CleanUpThumbnailCache(FileHistory& fileHistory)
-{
-	return;
-
-    ScopedMem<WCHAR> thumbsPath(AppGenDataFilename(THUMBNAILS_DIR_NAME));
-    if (!thumbsPath)
-        return;
-    ScopedMem<WCHAR> pattern(path::Join(thumbsPath, L"*.png"));
-
-    WStrVec files;
-    WIN32_FIND_DATA fdata;
-
-    HANDLE hfind = FindFirstFile(pattern, &fdata);
-    if (INVALID_HANDLE_VALUE == hfind)
-        return;
-    do {
-        if (!(fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-            files.Append(str::Dup(fdata.cFileName));
-    } while (FindNextFile(hfind, &fdata));
-    FindClose(hfind);
-
-    Vec<DisplayState *> list;
-    fileHistory.GetFrequencyOrder(list);
-    for (size_t i = 0; i < list.Count() && i < FILE_HISTORY_MAX_FREQUENT * 2; i++) {
-        ScopedMem<WCHAR> bmpPath(GetThumbnailPath(list.At(i)->filePath));
-        if (!bmpPath)
-            continue;
-        int idx = files.Find(path::GetBaseName(bmpPath));
-        if (idx != -1) {
-            CrashIf(idx < 0 || files.Count() <= (size_t)idx);
-            WCHAR *fileName = files.At(idx);
-            files.RemoveAt(idx);
-            free(fileName);
-        }
-    }
-
-    for (size_t i = 0; i < files.Count(); i++) {
-        ScopedMem<WCHAR> bmpPath(path::Join(thumbsPath, files.At(i)));
-        file::Delete(bmpPath);
-    }
-}
-
-static RenderedBitmap *LoadRenderedBitmap(const WCHAR *filePath)
-{
-    size_t len;
-    ScopedMem<char> data(file::ReadAll(filePath, &len));
-    if (!data)
-        return NULL;
-    Bitmap *bmp = BitmapFromData(data, len);
-    if (!bmp)
-        return NULL;
-
-    HBITMAP hbmp;
-    RenderedBitmap *rendered = NULL;
-    if (bmp->GetHBITMAP((ARGB)Color::White, &hbmp) == Ok)
-        rendered = new RenderedBitmap(hbmp, SizeI(bmp->GetWidth(), bmp->GetHeight()));
-    delete bmp;
-
-    return rendered;
-}
-
-static bool LoadThumbnail(DisplayState& ds)
-{
-    delete ds.thumbnail;
-    ds.thumbnail = NULL;
-
-    ScopedMem<WCHAR> bmpPath(GetThumbnailPath(ds.filePath));
-    if (!bmpPath)
-        return false;
-
-    ds.thumbnail = LoadRenderedBitmap(bmpPath);
-    return ds.thumbnail != NULL;
-}
-
-bool HasThumbnail(DisplayState& ds)
-{
-    if (!ds.thumbnail && !LoadThumbnail(ds))
-        return false;
-
-    ScopedMem<WCHAR> bmpPath(GetThumbnailPath(ds.filePath));
-    if (!bmpPath)
-        return true;
-    FILETIME bmpTime = file::GetModificationTime(bmpPath);
-    FILETIME fileTime = file::GetModificationTime(ds.filePath);
-    // delete the thumbnail if the file is newer than the thumbnail
-    if (FileTimeDiffInSecs(fileTime, bmpTime) > 0) {
-        delete ds.thumbnail;
-        ds.thumbnail = NULL;
-    }
-
-    return ds.thumbnail != NULL;
-}
-
-void SaveThumbnail(DisplayState& ds)
-{
-    if (!ds.thumbnail)
-        return;
-
-    ScopedMem<WCHAR> bmpPath(GetThumbnailPath(ds.filePath));
-    if (!bmpPath)
-        return;
-    ScopedMem<WCHAR> thumbsPath(path::GetDir(bmpPath));
-    if (dir::Create(thumbsPath)) {
-        CrashIf(!str::EndsWithI(bmpPath, L".png"));
-        Bitmap bmp(ds.thumbnail->GetBitmap(), NULL);
-        CLSID tmpClsid = GetEncoderClsid(L"image/png");
-        bmp.Save(bmpPath, &tmpClsid);
-    }
-}
-
-void RemoveThumbnail(DisplayState& ds)
-{
-    if (!HasThumbnail(ds))
-        return;
-
-    ScopedMem<WCHAR> bmpPath(GetThumbnailPath(ds.filePath));
-    if (bmpPath)
-        file::Delete(bmpPath);
-    delete ds.thumbnail;
-    ds.thumbnail = NULL;
 }

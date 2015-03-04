@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef Selection_h
@@ -15,7 +15,7 @@ struct TextSel;
 /* Represents selected area on given page */
 class SelectionOnPage {
 public:
-    SelectionOnPage(int pageNo=0, RectD *rect=NULL) :
+    explicit SelectionOnPage(int pageNo=0, RectD *rect=NULL) :
         pageNo(pageNo), rect(rect ? *rect : RectD()) { }
 
     int     pageNo; // page this selection is on
@@ -38,6 +38,6 @@ void OnSelectAll(WindowInfo *win, bool textOnly=false);
 bool NeedsSelectionEdgeAutoscroll(WindowInfo *win, int x, int y);
 void OnSelectionEdgeAutoscroll(WindowInfo *win, int x, int y);
 void OnSelectionStart(WindowInfo *win, int x, int y, WPARAM key);
-void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted, bool shiftPressed);
+void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted);
 
 #endif

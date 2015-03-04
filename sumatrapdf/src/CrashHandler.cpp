@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD */
 
 #include "BaseUtil.h"
@@ -22,9 +22,9 @@
 
 #ifndef SYMBOL_DOWNLOAD_URL
 #ifdef SVN_PRE_RELEASE_VER
-#define SYMBOL_DOWNLOAD_URL L"http://kjkpub.s3.amazonaws.com/sumatrapdf/prerel/SumatraPDF-prerelease-" TEXT(QM(SVN_PRE_RELEASE_VER)) L".pdb.zip"
+#define SYMBOL_DOWNLOAD_URL L"http://kjkpub.s3.amazonaws.com/sumatrapdf/prerel/SumatraPDF-prerelease-" TEXT(QM(SVN_PRE_RELEASE_VER)) L".pdb.lzsa"
 #else
-#define SYMBOL_DOWNLOAD_URL L"http://kjkpub.s3.amazonaws.com/sumatrapdf/rel/SumatraPDF-" TEXT(QM(CURR_VERSION)) L".pdb.zip"
+#define SYMBOL_DOWNLOAD_URL L"http://kjkpub.s3.amazonaws.com/sumatrapdf/rel/SumatraPDF-" TEXT(QM(CURR_VERSION)) L".pdb.lzsa"
 #endif
 #endif
 
@@ -41,7 +41,7 @@ extern void CrashHandlerMessage();
 extern void GetProgramInfo(str::Str<char>& s);
 
 /* Note: we cannot use standard malloc()/free()/new()/delete() in crash handler.
-For multi-thread safety, there is a per-heap lock taken insid HeapAlloc() etc.
+For multi-thread safety, there is a per-heap lock taken by HeapAlloc() etc.
 It's possible that a crash originates from  inside such functions after a lock
 has been taken. If we then try to allocate memory from the same heap, we'll
 deadlock and won't send crash report.
@@ -133,7 +133,7 @@ static void SendCrashInfo(char *s)
         return;
     }
 
-    char *boundary = "0xKhTmLbOuNdArY";
+    const char *boundary = "0xKhTmLbOuNdArY";
     str::Str<char> headers(256, gCrashHandlerAllocator);
     headers.AppendFmt("Content-Type: multipart/form-data; boundary=%s", boundary);
 
@@ -319,7 +319,8 @@ static DWORD WINAPI CrashDumpThread(LPVOID data)
 #endif
     // always write a MiniDump (for the latest crash only)
     // set the SUMATRAPDF_FULLDUMP environment variable for more complete dumps
-    bool fullDump = (NULL != GetEnvironmentVariableA("SUMATRAPDF_FULLDUMP", NULL, 0));
+    DWORD n = GetEnvironmentVariableA("SUMATRAPDF_FULLDUMP", NULL, 0);
+    bool fullDump = (0 != n);
     dbghelp::WriteMiniDump(gCrashDumpPath, &gMei, fullDump);
     return 0;
 }
@@ -349,14 +350,18 @@ static LONG WINAPI DumpExceptionHandler(EXCEPTION_POINTERS *exceptionInfo)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static char *OsNameFromVer(OSVERSIONINFOEX ver)
+static const char *OsNameFromVer(OSVERSIONINFOEX ver)
 {
     if (VER_PLATFORM_WIN32_NT != ver.dwPlatformId)
         return "9x";
+    if (ver.dwMajorVersion == 6 && ver.dwMinorVersion == 3)
+        return "8.1"; // or Server 2012 R2
+    if (ver.dwMajorVersion == 6 && ver.dwMinorVersion == 2)
+        return "8"; // or Server 2012
     if (ver.dwMajorVersion == 6 && ver.dwMinorVersion == 1)
-        return "7"; // or Server 2008
+        return "7"; // or Server 2008 R2
     if (ver.dwMajorVersion == 6 && ver.dwMinorVersion == 0)
-        return "Vista";
+        return "Vista"; // or Server 2008
     if (ver.dwMajorVersion == 5 && ver.dwMinorVersion == 2)
         return "Server 2003";
     if (ver.dwMajorVersion == 5 && ver.dwMinorVersion == 1)
@@ -375,17 +380,22 @@ static void GetOsVersion(str::Str<char>& s)
     OSVERSIONINFOEX ver;
     ZeroMemory(&ver, sizeof(ver));
     ver.dwOSVersionInfoSize = sizeof(ver);
+#pragma warning(push)
+#pragma warning(disable: 4996) // 'GetVersionEx': was declared deprecated
+    // starting with Windows 8.1, GetVersionEx will report a wrong version number
+    // unless the OS's GUID has been explicitly added to the compatibility manifest
     BOOL ok = GetVersionEx((OSVERSIONINFO*)&ver);
+#pragma warning(pop)
     if (!ok)
         return;
-    char *os = OsNameFromVer(ver);
+    const char *os = OsNameFromVer(ver);
     int servicePackMajor = ver.wServicePackMajor;
     int servicePackMinor = ver.wServicePackMinor;
     int buildNumber = ver.dwBuildNumber & 0xFFFF;
 #ifdef _WIN64
-    char *arch = "64-bit";
+    const char *arch = "64-bit";
 #else
-    char *arch = IsRunningInWow64() ? "Wow64" : "32-bit";
+    const char *arch = IsRunningInWow64() ? "Wow64" : "32-bit";
 #endif
     if (0 == servicePackMajor)
         s.AppendFmt("OS: Windows %s build %d %s\r\n", os, buildNumber, arch);
@@ -404,7 +414,7 @@ static void GetProcessorName(str::Str<char>& s)
         return;
 
     ScopedMem<char> tmp(str::conv::ToUtf8(name));
-    s.AppendFmt("Processor: %s\r\n", tmp);
+    s.AppendFmt("Processor: %s\r\n", tmp.Get());
     free(name);
 }
 
@@ -426,6 +436,41 @@ static void GetMachineName(str::Str<char>& s)
 
     free(s1);
     free(s2);
+}
+
+#define GFX_DRIVER_KEY_FMT L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\%04d"
+
+static void GetGraphicsDriverInfo(str::Str<char>& s)
+{
+    // the info is in registry in:
+    // HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000\
+    //   Device Description REG_SZ (same as DriverDesc, so we don't read it)
+    //   DriverDesc REG_SZ
+    //   DriverVersion REG_SZ
+    //   UserModeDriverName REG_MULTI_SZ
+    //
+    // There can be more than one driver, they are in 0000, 0001 etc.
+    for (int i=0; ; i++)
+    {
+        ScopedMem<WCHAR> key(str::Format(GFX_DRIVER_KEY_FMT, i));
+        ScopedMem<WCHAR> v1(ReadRegStr(HKEY_LOCAL_MACHINE, key, L"DriverDesc"));
+        // I assume that if I can't read the value, there are no more drivers
+        if (!v1)
+            break;
+        ScopedMem<char> v1a(str::conv::ToUtf8(v1));
+        s.AppendFmt("Graphics driver %d\r\n", i);
+        s.AppendFmt("  DriverDesc:         %s\r\n", v1.Get());
+        v1.Set(ReadRegStr(HKEY_LOCAL_MACHINE, key, L"DriverVersion"));
+        if (v1) {
+            v1a.Set(str::conv::ToUtf8(v1));
+            s.AppendFmt("  DriverVersion:      %s\r\n", v1a.Get());
+        }
+        v1.Set(ReadRegStr(HKEY_LOCAL_MACHINE, key, L"UserModeDriverName"));
+        if (v1) {
+            v1a.Set(str::conv::ToUtf8(v1));
+            s.AppendFmt("  UserModeDriverName: %s\r\n", v1a.Get());
+        }
+    }
 }
 
 static void GetLanguage(str::Str<char>& s)
@@ -454,10 +499,9 @@ static void GetSystemInfo(str::Str<char>& s)
 
     GetMachineName(s);
     GetLanguage(s);
+    GetGraphicsDriverInfo(s);
 
     // Note: maybe more information, like:
-    // * amount of memory used by Sumatra,
-    // * graphics card and its driver version
     // * processor capabilities (mmx, sse, sse2 etc.)
 }
 
@@ -478,7 +522,7 @@ static bool GetModules(str::Str<char>& s)
         if (str::EqI(nameA.Get(), "winex11.drv"))
             isWine = true;
         ScopedMem<char> pathA(str::conv::ToUtf8(mod.szExePath));
-        s.AppendFmt("Module: %08X %06X %-16s %s\r\n", (DWORD)mod.modBaseAddr, (DWORD)mod.modBaseSize, nameA, pathA);
+        s.AppendFmt("Module: %08X %06X %-16s %s\r\n", (DWORD)mod.modBaseAddr, (DWORD)mod.modBaseSize, nameA.Get(), pathA.Get());
         cont = Module32Next(snap, &mod);
     }
     CloseHandle(snap);
@@ -649,8 +693,12 @@ void InstallCrashHandler(const WCHAR *crashDumpPath, const WCHAR *symDir)
     gPrevExceptionFilter = SetUnhandledExceptionFilter(DumpExceptionHandler);
 
     signal(SIGABRT, onSignalAbort);
+#if defined(_MSC_VER)
+    // those are only in msvc? There is std::set_terminate() and
+    // std::set_unexpected() in C++ in <exception>
     set_terminate(onTerminate);
     set_unexpected(onUnexpected);
+#endif
 }
 
 void UninstallCrashHandler()

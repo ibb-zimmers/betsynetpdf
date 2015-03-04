@@ -1,40 +1,46 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "ImagesEngine.h"
 
+#include "ArchUtil.h"
+#include "BaseEngine.h"
 #include "FileUtil.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
 #include "HtmlPullParser.h"
 #include "JsonParser.h"
+#include "PdfCreator.h"
 #include "WinUtil.h"
-#include "ZipUtil.h"
 
-#include "../ext/unrar/dll.hpp"
-
-// disable warning C4250 which is wrongly issued due to a compiler bug; cf.
-// http://connect.microsoft.com/VisualStudio/feedback/details/101259/disable-warning-c4250-class1-inherits-class2-member-via-dominance-when-weak-member-is-a-pure-virtual-function
-#pragma warning(disable: 4250) /* 'class1' : inherits 'class2::member' via dominance */
+// number of decoded bitmaps to cache for quicker rendering
+#define MAX_IMAGE_PAGE_CACHE    10
 
 ///// ImagesEngine methods apply to all types of engines handling full-page images /////
 
-class ImagesEngine : public virtual BaseEngine {
+struct ImagePage {
+    int pageNo;
+    Bitmap *bmp;
+    bool ownBmp;
+    int refs;
+
+    ImagePage(int pageNo, Bitmap *bmp) :
+        pageNo(pageNo), bmp(bmp), ownBmp(true), refs(1) { }
+};
+
+class ImageElement;
+
+class ImagesEngine : public BaseEngine {
+    friend ImageElement;
+
 public:
-    ImagesEngine() : fileName(NULL), fileExt(NULL) { }
-    virtual ~ImagesEngine() {
-        DeleteVecMembers(pages);
-        free(fileName);
-    }
+    ImagesEngine();
+    virtual ~ImagesEngine();
 
     virtual const WCHAR *FileName() const { return fileName; };
-    virtual int PageCount() const { return (int)pages.Count(); }
+    virtual int PageCount() const { return (int)mediaboxes.Count(); }
 
-    virtual RectD PageMediabox(int pageNo) {
-        assert(1 <= pageNo && pageNo <= PageCount());
-        return RectD(0, 0, pages.At(pageNo - 1)->GetWidth(), pages.At(pageNo - 1)->GetHeight());
-    }
+    virtual RectD PageMediabox(int pageNo);
 
     virtual RenderedBitmap *RenderBitmap(int pageNo, float zoom, int rotation,
                          RectD *pageRect=NULL, /* if NULL: defaults to the page's mediabox */
@@ -46,7 +52,7 @@ public:
     virtual RectD Transform(RectD rect, int pageNo, float zoom, int rotation, bool inverse=false);
 
     virtual unsigned char *GetFileData(size_t *cbCount);
-    virtual bool SaveFileAs(const WCHAR *copyFileName);
+    virtual bool SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots=false);
     virtual WCHAR * ExtractPageText(int pageNo, WCHAR *lineSep, RectI **coords_out=NULL,
                                     RenderTarget target=Target_View) { return NULL; }
     virtual bool HasClipOptimizations(int pageNo) { return false; }
@@ -56,28 +62,59 @@ public:
     virtual bool SupportsAnnotation(bool forSaving=false) const { return false; }
     virtual void UpdateUserAnnotations(Vec<PageAnnotation> *list) { }
 
-    virtual const WCHAR *GetDefaultFileExt() const { return fileExt; }
-
     virtual Vec<PageElement *> *GetElements(int pageNo);
     virtual PageElement *GetElementAtPos(int pageNo, PointD pt);
 
-    virtual bool BenchLoadPage(int pageNo) { return LoadImage(pageNo) != NULL; }
+    virtual bool BenchLoadPage(int pageNo) {
+        ImagePage *page = GetPage(pageNo);
+        if (page)
+            DropPage(page);
+        return page != NULL;
+    }
 
 protected:
     WCHAR *fileName;
-    const WCHAR *fileExt;
     ScopedComPtr<IStream> fileStream;
 
-    Vec<Bitmap *> pages;
+    CRITICAL_SECTION cacheAccess;
+    Vec<ImagePage *> pageCache;
+    Vec<RectD> mediaboxes;
 
     void GetTransform(Matrix& m, int pageNo, float zoom, int rotation);
 
-    // override for lazily loading images
-    virtual Bitmap *LoadImage(int pageNo) {
-        assert(1 <= pageNo && pageNo <= PageCount());
-        return pages.At(pageNo - 1);
-    }
+    virtual Bitmap *LoadBitmap(int pageNo, bool& deleteAfterUse) = 0;
+    virtual RectD LoadMediabox(int pageNo) = 0;
+
+    ImagePage *GetPage(int pageNo, bool tryOnly=false);
+    void DropPage(ImagePage *page, bool forceRemove=false);
 };
+
+ImagesEngine::ImagesEngine() : fileName(NULL)
+{
+    InitializeCriticalSection(&cacheAccess);
+}
+
+ImagesEngine::~ImagesEngine()
+{
+    EnterCriticalSection(&cacheAccess);
+    while (pageCache.Count() > 0) {
+        CrashIf(pageCache.Last()->refs != 1);
+        DropPage(pageCache.Last(), true);
+    }
+    LeaveCriticalSection(&cacheAccess);
+
+    free(fileName);
+
+    DeleteCriticalSection(&cacheAccess);
+}
+
+RectD ImagesEngine::PageMediabox(int pageNo)
+{
+    AssertCrash(1 <= pageNo && pageNo <= PageCount());
+    if (mediaboxes.At(pageNo - 1).IsEmpty())
+        mediaboxes.At(pageNo - 1) = LoadMediabox(pageNo);
+    return mediaboxes.At(pageNo - 1);
+}
 
 RenderedBitmap *ImagesEngine::RenderBitmap(int pageNo, float zoom, int rotation, RectD *pageRect, RenderTarget target, AbortCookie **cookie_out)
 {
@@ -85,26 +122,26 @@ RenderedBitmap *ImagesEngine::RenderBitmap(int pageNo, float zoom, int rotation,
     RectI screen = Transform(pageRc, pageNo, zoom, rotation).Round();
     screen.Offset(-screen.x, -screen.y);
 
-    HDC hDC = GetDC(NULL);
-    HDC hDCMem = CreateCompatibleDC(hDC);
-    HBITMAP hbmp = CreateCompatibleBitmap(hDC, screen.dx, screen.dy);
-    DeleteObject(SelectObject(hDCMem, hbmp));
+    HANDLE hMap = NULL;
+    HBITMAP hbmp = CreateMemoryBitmap(screen.Size(), &hMap);
+    HDC hDC = CreateCompatibleDC(NULL);
+    DeleteObject(SelectObject(hDC, hbmp));
 
-    bool ok = RenderPage(hDCMem, screen, pageNo, zoom, rotation, pageRect, target, cookie_out);
-    DeleteDC(hDCMem);
-    ReleaseDC(NULL, hDC);
+    bool ok = RenderPage(hDC, screen, pageNo, zoom, rotation, pageRect, target, cookie_out);
+    DeleteDC(hDC);
     if (!ok) {
         DeleteObject(hbmp);
+        CloseHandle(hMap);
         return NULL;
     }
 
-    return new RenderedBitmap(hbmp, screen.Size());
+    return new RenderedBitmap(hbmp, screen.Size(), hMap);
 }
 
 bool ImagesEngine::RenderPage(HDC hDC, RectI screenRect, int pageNo, float zoom, int rotation, RectD *pageRect, RenderTarget target, AbortCookie **cookie_out)
 {
-    Bitmap *bmp = LoadImage(pageNo);
-    if (!bmp)
+    ImagePage *page = GetPage(pageNo);
+    if (!page)
         return false;
 
     RectD pageRc = pageRect ? *pageRect : PageMediabox(pageNo);
@@ -129,7 +166,9 @@ bool ImagesEngine::RenderPage(HDC hDC, RectI screenRect, int pageNo, float zoom,
     RectI pageRcI = PageMediabox(pageNo).Round();
     ImageAttributes imgAttrs;
     imgAttrs.SetWrapMode(WrapModeTileFlipXY);
-    Status ok = g.DrawImage(bmp, pageRcI.ToGdipRect(), 0, 0, pageRcI.dx, pageRcI.dy, UnitPixel, &imgAttrs);
+    Status ok = g.DrawImage(page->bmp, pageRcI.ToGdipRect(), 0, 0, pageRcI.dx, pageRcI.dy, UnitPixel, &imgAttrs);
+
+    DropPage(page);
     return ok == Ok;
 }
 
@@ -164,33 +203,34 @@ RectD ImagesEngine::Transform(RectD rect, int pageNo, float zoom, int rotation, 
 }
 
 class ImageElement : public PageElement {
-    Bitmap *bmp;
-    int pageNo;
+    ImagesEngine *engine;
+    ImagePage *page;
 
 public:
-    ImageElement(int pageNo, Bitmap *bmp) : pageNo(pageNo), bmp(bmp) { }
+    explicit ImageElement(ImagesEngine *engine, ImagePage *page) : engine(engine), page(page) { }
+    virtual ~ImageElement() { engine->DropPage(page); }
 
     virtual PageElementType GetType() const { return Element_Image; }
-    virtual int GetPageNo() const { return pageNo; }
-    virtual RectD GetRect() const { return RectD(0, 0, bmp->GetWidth(), bmp->GetHeight()); }
+    virtual int GetPageNo() const { return page->pageNo; }
+    virtual RectD GetRect() const { return RectD(0, 0, page->bmp->GetWidth(), page->bmp->GetHeight()); }
     virtual WCHAR *GetValue() const { return NULL; }
 
     virtual RenderedBitmap *GetImage() {
         HBITMAP hbmp;
-        if (bmp->GetHBITMAP((ARGB)Color::White, &hbmp) != Ok)
+        if (page->bmp->GetHBITMAP((ARGB)Color::White, &hbmp) != Ok)
             return NULL;
-        return new RenderedBitmap(hbmp, SizeI(bmp->GetWidth(), bmp->GetHeight()));
+        return new RenderedBitmap(hbmp, SizeI(page->bmp->GetWidth(), page->bmp->GetHeight()));
     }
 };
 
 Vec<PageElement *> *ImagesEngine::GetElements(int pageNo)
 {
-    Bitmap *bmp = LoadImage(pageNo);
-    if (!bmp)
+    ImagePage *page = GetPage(pageNo);
+    if (!page)
         return NULL;
 
     Vec<PageElement *> *els = new Vec<PageElement *>();
-    els->Append(new ImageElement(pageNo, bmp));
+    els->Append(new ImageElement(this, page));
     return els;
 }
 
@@ -198,10 +238,10 @@ PageElement *ImagesEngine::GetElementAtPos(int pageNo, PointD pt)
 {
     if (!PageMediabox(pageNo).Contains(pt))
         return NULL;
-    Bitmap *bmp = LoadImage(pageNo);
-    if (!bmp)
+    ImagePage *page = GetPage(pageNo);
+    if (!page)
         return NULL;
-    return new ImageElement(pageNo, bmp);
+    return new ImageElement(this, page);
 }
 
 unsigned char *ImagesEngine::GetFileData(size_t *cbCount)
@@ -216,7 +256,7 @@ unsigned char *ImagesEngine::GetFileData(size_t *cbCount)
     return NULL;
 }
 
-bool ImagesEngine::SaveFileAs(const WCHAR *copyFileName)
+bool ImagesEngine::SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots)
 {
     if (fileName) {
         BOOL ok = CopyFile(fileName, copyFileName, FALSE);
@@ -230,26 +270,94 @@ bool ImagesEngine::SaveFileAs(const WCHAR *copyFileName)
     return false;
 }
 
+ImagePage *ImagesEngine::GetPage(int pageNo, bool tryOnly)
+{
+    ScopedCritSec scope(&cacheAccess);
+
+    ImagePage *result = NULL;
+
+    for (size_t i = 0; i < pageCache.Count(); i++) {
+        if (pageCache.At(i)->pageNo == pageNo) {
+            result = pageCache.At(i);
+            break;
+        }
+    }
+    if (!result && tryOnly)
+        return NULL;
+    if (!result) {
+        // TODO: drop most memory intensive pages first
+        // (i.e. formats which aren't IsGdiPlusNativeFormat)?
+        if (pageCache.Count() >= MAX_IMAGE_PAGE_CACHE) {
+            CrashIf(pageCache.Count() != MAX_IMAGE_PAGE_CACHE);
+            DropPage(pageCache.Last(), true);
+        }
+        result = new ImagePage(pageNo, NULL);
+        result->bmp = LoadBitmap(pageNo, result->ownBmp);
+        pageCache.InsertAt(0, result);
+    }
+    else if (result != pageCache.At(0)) {
+        // keep the list Most Recently Used first
+        pageCache.Remove(result);
+        pageCache.InsertAt(0, result);
+    }
+    // return NULL if a page failed to load
+    if (result && !result->bmp)
+        result = NULL;
+
+    if (result)
+        result->refs++;
+    return result;
+}
+
+void ImagesEngine::DropPage(ImagePage *page, bool forceRemove)
+{
+    ScopedCritSec scope(&cacheAccess);
+    page->refs--;
+
+    if (0 == page->refs || forceRemove)
+        pageCache.Remove(page);
+
+    if (0 == page->refs) {
+        if (page->ownBmp)
+            delete page->bmp;
+        delete page;
+    }
+}
+
 ///// ImageEngine handles a single image file /////
 
-class ImageEngineImpl : public ImagesEngine, public ImageEngine {
-    friend ImageEngine;
-
+class ImageEngineImpl : public ImagesEngine {
 public:
-    virtual ImageEngine *Clone();
+    ImageEngineImpl() : fileExt(NULL), image(NULL) { }
+    virtual ~ImageEngineImpl() { delete image; }
+
+    virtual BaseEngine *Clone();
 
     virtual WCHAR *GetProperty(DocumentProperty prop);
 
+    virtual float GetFileDPI() const { return image->GetHorizontalResolution(); }
+    virtual const WCHAR *GetDefaultFileExt() const { return fileExt; }
+
+    virtual bool SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots=false);
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+    static BaseEngine *CreateFromStream(IStream *stream);
+
 protected:
+    const WCHAR *fileExt;
+    Bitmap *image;
+
     bool LoadSingleFile(const WCHAR *fileName);
     bool LoadFromStream(IStream *stream);
-    bool FinishLoading(Bitmap *bmp);
+    bool FinishLoading();
+
+    virtual Bitmap *LoadBitmap(int pageNo, bool& deleteAfterUse);
+    virtual RectD LoadMediabox(int pageNo);
 };
 
-ImageEngine *ImageEngineImpl::Clone()
+BaseEngine *ImageEngineImpl::Clone()
 {
-    Bitmap *bmp = pages.At(0);
-    bmp = bmp->Clone(0, 0, bmp->GetWidth(), bmp->GetHeight(), PixelFormat32bppARGB);
+    Bitmap *bmp = image->Clone(0, 0, image->GetWidth(), image->GetHeight(), PixelFormat32bppARGB);
     if (!bmp)
         return NULL;
 
@@ -258,7 +366,8 @@ ImageEngine *ImageEngineImpl::Clone()
     clone->fileExt = fileExt;
     if (fileStream)
         fileStream->Clone(&clone->fileStream);
-    clone->FinishLoading(bmp);
+    clone->image = bmp;
+    clone->FinishLoading();
 
     return clone;
 }
@@ -273,8 +382,8 @@ bool ImageEngineImpl::LoadSingleFile(const WCHAR *file)
     ScopedMem<char> data(file::ReadAll(file, &len));
     fileExt = GfxFileExtFromData(data, len);
 
-    Bitmap *bmp = BitmapFromData(data, len);
-    return FinishLoading(bmp);
+    image = BitmapFromData(data, len);
+    return FinishLoading();
 }
 
 bool ImageEngineImpl::LoadFromStream(IStream *stream)
@@ -288,41 +397,35 @@ bool ImageEngineImpl::LoadFromStream(IStream *stream)
     if (ReadDataFromStream(stream, header, sizeof(header)))
         fileExt = GfxFileExtFromData(header, sizeof(header));
 
-    Bitmap *bmp;
     if (fileExt && !IsGdiPlusNativeFormat(header, sizeof(header))) {
         size_t len;
         ScopedMem<char> data((char *)GetDataFromStream(stream, &len));
-        bmp = BitmapFromData(data, len);
+        image = BitmapFromData(data, len);
     }
-    else
-        bmp = Bitmap::FromStream(stream);
+    else {
+        image = Bitmap::FromStream(stream);
+        if (!fileExt)
+            fileExt = L".png";
+    }
 
-    return FinishLoading(bmp);
+    return FinishLoading();
 }
 
-bool ImageEngineImpl::FinishLoading(Bitmap *bmp)
+bool ImageEngineImpl::FinishLoading()
 {
-    if (!bmp || bmp->GetLastStatus() != Ok)
+    if (!image || image->GetLastStatus() != Ok)
         return false;
-    pages.Append(bmp);
-    assert(pages.Count() == 1);
 
-    if (str::Eq(fileExt, L".tif")) {
-        // extract all frames from multi-page TIFFs
-        UINT frames = bmp->GetFrameCount(&FrameDimensionPage);
-        for (UINT i = 1; i < frames; i++) {
-            Bitmap *frame = bmp->Clone(0, 0, bmp->GetWidth(), bmp->GetHeight(), PixelFormat32bppARGB);
-            if (!frame)
-                continue;
-            Status ok = frame->SelectActiveFrame(&FrameDimensionPage, i);
-            if (Ok == ok)
-                pages.Append(frame);
-            else
-                delete frame;
-        }
+    mediaboxes.Append(RectD(0, 0, image->GetWidth(), image->GetHeight()));
+    AssertCrash(mediaboxes.Count() == 1);
+
+    // extract all frames from multi-page TIFFs and animated GIFs
+    if (str::Eq(fileExt, L".tif") || str::Eq(fileExt, L".gif")) {
+        const GUID *frameDimension = str::Eq(fileExt, L".tif") ? &FrameDimensionPage : &FrameDimensionTime;
+        mediaboxes.AppendBlanks(image->GetFrameCount(frameDimension) - 1);
     }
 
-    assert(fileExt);
+    CrashIf(!fileExt);
     return fileExt != NULL;
 }
 
@@ -359,27 +462,126 @@ WCHAR *ImageEngineImpl::GetProperty(DocumentProperty prop)
 {
     switch (prop) {
     case Prop_Title:
-        return GetImageProperty(LoadImage(1), PropertyTagImageDescription, PropertyTagXPTitle);
+        return GetImageProperty(image, PropertyTagImageDescription, PropertyTagXPTitle);
     case Prop_Subject:
-        return GetImageProperty(LoadImage(1), PropertyTagXPSubject);
+        return GetImageProperty(image, PropertyTagXPSubject);
     case Prop_Author:
-        return GetImageProperty(LoadImage(1), PropertyTagArtist, PropertyTagXPAuthor);
+        return GetImageProperty(image, PropertyTagArtist, PropertyTagXPAuthor);
     case Prop_Copyright:
-        return GetImageProperty(LoadImage(1), PropertyTagCopyright);
+        return GetImageProperty(image, PropertyTagCopyright);
     case Prop_CreationDate:
-        return GetImageProperty(LoadImage(1), PropertyTagDateTime, PropertyTagExifDTDigitized);
+        return GetImageProperty(image, PropertyTagDateTime, PropertyTagExifDTDigitized);
     case Prop_CreatorApp:
-        return GetImageProperty(LoadImage(1), PropertyTagSoftwareUsed);
+        return GetImageProperty(image, PropertyTagSoftwareUsed);
     default:
         return NULL;
     }
 }
 
-bool ImageEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
+Bitmap *ImageEngineImpl::LoadBitmap(int pageNo, bool& deleteAfterUse)
+{
+    if (1 == pageNo) {
+        deleteAfterUse = false;
+        return image;
+    }
+
+    // extract other frames from multi-page TIFFs and animated GIFs
+    CrashIf(!str::Eq(fileExt, L".tif") && !str::Eq(fileExt, L".gif"));
+    const GUID *frameDimension = str::Eq(fileExt, L".tif") ? &FrameDimensionPage : &FrameDimensionTime;
+    UINT frameCount = image->GetFrameCount(frameDimension);
+    CrashIf((unsigned int)pageNo > frameCount);
+    Bitmap *frame = image->Clone(0, 0, image->GetWidth(), image->GetHeight(), PixelFormat32bppARGB);
+    if (!frame)
+        return NULL;
+    Status ok = frame->SelectActiveFrame(frameDimension, pageNo - 1);
+    if (ok != Ok) {
+        delete frame;
+        return NULL;
+    }
+    deleteAfterUse = true;
+    return frame;
+}
+
+RectD ImageEngineImpl::LoadMediabox(int pageNo)
+{
+    if (1 == pageNo)
+        return RectD(0, 0, image->GetWidth(), image->GetHeight());
+
+    // fill the cache to prevent the first few frames from being unpacked twice
+    ImagePage *page = GetPage(pageNo, MAX_IMAGE_PAGE_CACHE == pageCache.Count());
+    if (page) {
+        RectD mbox(0, 0, page->bmp->GetWidth(), page->bmp->GetHeight());
+        DropPage(page);
+        return mbox;
+    }
+
+    CrashIf(!str::Eq(fileExt, L".tif") && !str::Eq(fileExt, L".gif"));
+    RectD mbox = RectD(0, 0, image->GetWidth(), image->GetHeight());
+    Bitmap *frame = image->Clone(0, 0, image->GetWidth(), image->GetHeight(), PixelFormat32bppARGB);
+    if (!frame)
+        return mbox;
+    const GUID *frameDimension = str::Eq(fileExt, L".tif") ? &FrameDimensionPage : &FrameDimensionTime;
+    Status ok = frame->SelectActiveFrame(frameDimension, pageNo - 1);
+    if (Ok == ok)
+        mbox = RectD(0, 0, frame->GetWidth(), frame->GetHeight());
+    delete frame;
+    return mbox;
+}
+
+bool ImageEngineImpl::SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots)
+{
+    bool ok = true;
+    PdfCreator *c = new PdfCreator();
+    if (fileName) {
+        size_t len;
+        ScopedMem<char> data(file::ReadAll(fileName, &len));
+        ok = data && c->AddImagePage(data, len, GetFileDPI());
+    }
+    else {
+        size_t len;
+        ScopedMem<char> data((char *)GetDataFromStream(fileStream, &len));
+        ok = data && c->AddImagePage(data, len, GetFileDPI());
+    }
+    for (int i = 2; i <= PageCount() && ok; i++) {
+        ImagePage *page = GetPage(i);
+        ok = page && c->AddImagePage(page->bmp, GetFileDPI());
+        DropPage(page);
+    }
+    if (ok) {
+        c->CopyProperties(this);
+        ok = c->SaveToFile(pdfFileName);
+    }
+    delete c;
+    return ok;
+}
+
+BaseEngine *ImageEngineImpl::CreateFromFile(const WCHAR *fileName)
+{
+    ImageEngineImpl *engine = new ImageEngineImpl();
+    if (!engine->LoadSingleFile(fileName)) {
+        delete engine;
+        return NULL;
+    }
+    return engine;
+}
+
+BaseEngine *ImageEngineImpl::CreateFromStream(IStream *stream)
+{
+    ImageEngineImpl *engine = new ImageEngineImpl();
+    if (!engine->LoadFromStream(stream)) {
+        delete engine;
+        return NULL;
+    }
+    return engine;
+}
+
+namespace ImageEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
 {
     if (sniff) {
-        char header[9] = { 0 };
-        file::ReadAll(fileName, header, sizeof(header));
+        char header[32] = { 0 };
+        file::ReadN(fileName, header, sizeof(header));
         fileName = GfxFileExtFromData(header, sizeof(header));
     }
 
@@ -390,43 +592,36 @@ bool ImageEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
            str::EndsWithI(fileName, L".bmp") ||
            str::EndsWithI(fileName, L".tga") ||
            str::EndsWithI(fileName, L".jxr") || str::EndsWithI(fileName, L".hdp") ||
-                                                str::EndsWithI(fileName, L".wdp");
+                                                str::EndsWithI(fileName, L".wdp") ||
+           str::EndsWithI(fileName, L".webp")||
+           str::EndsWithI(fileName, L".jp2");
 }
 
-ImageEngine *ImageEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *CreateFromFile(const WCHAR *fileName)
 {
-    assert(IsSupportedFile(fileName) || IsSupportedFile(fileName, true));
-    ImageEngineImpl *engine = new ImageEngineImpl();
-    if (!engine->LoadSingleFile(fileName)) {
-        delete engine;
-        return NULL;
-    }
-    return engine;
+    AssertCrash(ImageEngine::IsSupportedFile(fileName) || ImageEngine::IsSupportedFile(fileName, true));
+    return ImageEngineImpl::CreateFromFile(fileName);
 }
 
-ImageEngine *ImageEngine::CreateFromStream(IStream *stream)
+BaseEngine *CreateFromStream(IStream *stream)
 {
-    ImageEngineImpl *engine = new ImageEngineImpl();
-    if (!engine->LoadFromStream(stream)) {
-        delete engine;
-        return NULL;
-    }
-    return engine;
+    return ImageEngineImpl::CreateFromStream(stream);
+}
+
 }
 
 ///// ImageDirEngine handles a directory full of image files /////
 
-class ImageDirEngineImpl : public ImagesEngine, public ImageDirEngine {
-    friend ImageDirEngine;
-
+class ImageDirEngineImpl : public ImagesEngine {
 public:
-    virtual ImageDirEngine *Clone() {
+    ImageDirEngineImpl() : fileDPI(96.0f) { }
+
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
-    virtual RectD PageMediabox(int pageNo);
 
     virtual unsigned char *GetFileData(size_t *cbCount) { return NULL; }
-    virtual bool SaveFileAs(const WCHAR *copyFileName);
+    virtual bool SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots=false);
 
     virtual WCHAR *GetProperty(DocumentProperty prop) { return NULL; }
 
@@ -438,19 +633,27 @@ public:
     virtual bool HasTocTree() const { return true; }
     virtual DocTocItem *GetTocTree();
 
+    // TODO: better handle the case where images have different resolutions
+    virtual float GetFileDPI() const { return fileDPI; }
+    virtual const WCHAR *GetDefaultFileExt() const { return L""; }
+
+    virtual bool SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots=false);
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+
 protected:
     bool LoadImageDir(const WCHAR *dirName);
 
-    virtual Bitmap *LoadImage(int pageNo);
+    virtual Bitmap *LoadBitmap(int pageNo, bool& deleteAfterUse);
+    virtual RectD LoadMediabox(int pageNo);
 
-    Vec<RectD> mediaboxes;
     WStrVec pageFileNames;
+    float fileDPI;
 };
 
 bool ImageDirEngineImpl::LoadImageDir(const WCHAR *dirName)
 {
     fileName = str::Dup(dirName);
-    fileExt = L"";
 
     ScopedMem<WCHAR> pattern(path::Join(dirName, L"*"));
 
@@ -471,25 +674,15 @@ bool ImageDirEngineImpl::LoadImageDir(const WCHAR *dirName)
         return false;
     pageFileNames.SortNatural();
 
-    pages.AppendBlanks(pageFileNames.Count());
     mediaboxes.AppendBlanks(pageFileNames.Count());
 
-    return true;
-}
-
-RectD ImageDirEngineImpl::PageMediabox(int pageNo)
-{
-    assert(1 <= pageNo && pageNo <= PageCount());
-    if (!mediaboxes.At(pageNo - 1).IsEmpty())
-        return mediaboxes.At(pageNo - 1);
-
-    size_t len;
-    ScopedMem<char> bmpData(file::ReadAll(pageFileNames.At(pageNo - 1), &len));
-    if (bmpData) {
-        Size size = BitmapSizeFromData(bmpData, len);
-        mediaboxes.At(pageNo - 1) = RectD(0, 0, size.Width, size.Height);
+    ImagePage *page = GetPage(1);
+    if (page) {
+        fileDPI = page->bmp->GetHorizontalResolution();
+        DropPage(page);
     }
-    return mediaboxes.At(pageNo - 1);
+
+    return true;
 }
 
 WCHAR *ImageDirEngineImpl::GetPageLabel(int pageNo) const
@@ -514,20 +707,6 @@ int ImageDirEngineImpl::GetPageByLabel(const WCHAR *label) const
     return BaseEngine::GetPageByLabel(label);
 }
 
-Bitmap *ImageDirEngineImpl::LoadImage(int pageNo)
-{
-    assert(1 <= pageNo && pageNo <= PageCount());
-    if (pages.At(pageNo - 1))
-        return pages.At(pageNo - 1);
-
-    size_t len;
-    ScopedMem<char> bmpData(file::ReadAll(pageFileNames.At(pageNo - 1), &len));
-    if (bmpData)
-        pages.At(pageNo - 1) = BitmapFromData(bmpData, len);
-
-    return pages.At(pageNo - 1);
-}
-
 class ImageDirTocItem : public DocTocItem {
 public:
     ImageDirTocItem(WCHAR *title, int pageNo) : DocTocItem(title, pageNo) { }
@@ -547,7 +726,7 @@ DocTocItem *ImageDirEngineImpl::GetTocTree()
     return root;
 }
 
-bool ImageDirEngineImpl::SaveFileAs(const WCHAR *copyFileName)
+bool ImageDirEngineImpl::SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots)
 {
     // only copy the files if the target directory doesn't exist yet
     if (!CreateDirectory(copyFileName, NULL))
@@ -561,15 +740,45 @@ bool ImageDirEngineImpl::SaveFileAs(const WCHAR *copyFileName)
     return ok;
 }
 
-bool ImageDirEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
+Bitmap *ImageDirEngineImpl::LoadBitmap(int pageNo, bool& deleteAfterUse)
 {
-    // whether it actually contains images will be checked in LoadImageDir
-    return dir::Exists(fileName);
+    size_t len;
+    ScopedMem<char> bmpData(file::ReadAll(pageFileNames.At(pageNo - 1), &len));
+    if (bmpData) {
+        deleteAfterUse = true;
+        return BitmapFromData(bmpData, len);
+    }
+    return NULL;
 }
 
-ImageDirEngine *ImageDirEngine::CreateFromFile(const WCHAR *fileName)
+RectD ImageDirEngineImpl::LoadMediabox(int pageNo)
 {
-    assert(dir::Exists(fileName));
+    size_t len;
+    ScopedMem<char> bmpData(file::ReadAll(pageFileNames.At(pageNo - 1), &len));
+    if (bmpData) {
+        Size size = BitmapSizeFromData(bmpData, len);
+        return RectD(0, 0, size.Width, size.Height);
+    }
+    return RectD();
+}
+
+bool ImageDirEngineImpl::SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots)
+{
+    bool ok = true;
+    PdfCreator *c = new PdfCreator();
+    for (int i = 1; i <= PageCount() && ok; i++) {
+        size_t len;
+        ScopedMem<char> data(file::ReadAll(pageFileNames.At(i - 1), &len));
+        ok = data && c->AddImagePage(data, len, GetFileDPI());
+    }
+    ok = ok && c->SaveToFile(pdfFileName);
+    delete c;
+    return ok;
+}
+
+BaseEngine *ImageDirEngineImpl::CreateFromFile(const WCHAR *fileName)
+{
+    AssertCrash(dir::Exists(fileName));
     ImageDirEngineImpl *engine = new ImageDirEngineImpl();
     if (!engine->LoadImageDir(fileName)) {
         delete engine;
@@ -578,18 +787,31 @@ ImageDirEngine *ImageDirEngine::CreateFromFile(const WCHAR *fileName)
     return engine;
 }
 
-///// CbxEngine handles comic book files (either .cbz or .cbr) /////
+namespace ImageDirEngine {
 
-class CbxEngineImpl : public ImagesEngine, public CbxEngine, public json::ValueVisitor {
-    friend CbxEngine;
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    // whether it actually contains images will be checked in LoadImageDir
+    return dir::Exists(fileName);
+}
 
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return ImageDirEngineImpl::CreateFromFile(fileName);
+}
+
+}
+
+///// CbxEngine handles comic book files (either .cbz, .cbr, .cb7 or .cbt) /////
+
+enum CbxFormat { Arch_Zip, Arch_Rar, Arch_7z, Arch_Tar };
+
+class CbxEngineImpl : public ImagesEngine, public json::ValueVisitor {
 public:
-    CbxEngineImpl() : cbzFile(NULL) {
-        InitializeCriticalSection(&fileAccess);
-    }
-    virtual ~CbxEngineImpl();
+    CbxEngineImpl(ArchFile *arch, CbxFormat cbxFormat) : cbxFile(arch), cbxFormat(cbxFormat) { }
+    virtual ~CbxEngineImpl() { delete cbxFile; }
 
-    virtual CbxEngine *Clone() {
+    virtual BaseEngine *Clone() {
         if (fileStream) {
             ScopedComPtr<IStream> stm;
             HRESULT res = fileStream->Clone(&stm);
@@ -600,24 +822,37 @@ public:
             return CreateFromFile(fileName);
         return NULL;
     }
-    virtual RectD PageMediabox(int pageNo);
+
+    virtual bool SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots=false);
 
     virtual WCHAR *GetProperty(DocumentProperty prop);
+
+    // not using the resolution of the contained images seems to be
+    // expected, cf. http://forums.fofou.org/sumatrapdf/topic?id=3183827
+    // TODO: return win::GetHwndDpi(HWND_DESKTOP) instead?
+    virtual float GetFileDPI() const { return 96.0f; }
+    virtual const WCHAR *GetDefaultFileExt() const;
 
     // json::ValueVisitor
     virtual bool Visit(const char *path, const char *value, json::DataType type);
 
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+    static BaseEngine *CreateFromStream(IStream *stream);
+
 protected:
-    bool LoadCbzFile(const WCHAR *fileName);
-    bool LoadCbzStream(IStream *stream);
-    bool FinishLoadingCbz();
-    void ParseComicInfoXml(const char *xmlData);
-    bool LoadCbrFile(const WCHAR *fileName);
+    virtual Bitmap *LoadBitmap(int pageNo, bool& deleteAfterUse);
+    virtual RectD LoadMediabox(int pageNo);
 
-    virtual Bitmap *LoadImage(int pageNo);
+    bool LoadFromFile(const WCHAR *fileName);
+    bool LoadFromStream(IStream *stream);
+    bool FinishLoading();
+
     char *GetImageData(int pageNo, size_t& len);
+    void ParseComicInfoXml(const char *xmlData);
 
-    Vec<RectD> mediaboxes;
+    ArchFile *cbxFile;
+    CbxFormat cbxFormat;
+    Vec<size_t> fileIdxs;
 
     // extracted metadata
     ScopedMem<WCHAR> propTitle;
@@ -628,76 +863,25 @@ protected:
     ScopedMem<WCHAR> propSummary;
     // temporary state needed for extracting metadata
     ScopedMem<WCHAR> propAuthorTmp;
-
-    // used for lazily loading page images (only supported for .cbz files)
-    CRITICAL_SECTION fileAccess;
-    ZipFile *cbzFile;
-    Vec<size_t> fileIdxs;
 };
 
-CbxEngineImpl::~CbxEngineImpl()
-{
-    delete cbzFile;
-
-    DeleteCriticalSection(&fileAccess);
-}
-
-RectD CbxEngineImpl::PageMediabox(int pageNo)
-{
-    assert(1 <= pageNo && pageNo <= PageCount());
-    if (!mediaboxes.At(pageNo - 1).IsEmpty())
-        return mediaboxes.At(pageNo - 1);
-
-    if (pages.At(pageNo - 1)) {
-        Bitmap *bmp = pages.At(pageNo - 1);
-        mediaboxes.At(pageNo - 1) = RectD(0, 0, bmp->GetWidth(), bmp->GetHeight());
-        return mediaboxes.At(pageNo - 1);
-    }
-
-    size_t len;
-    ScopedMem<char> bmpData(GetImageData(pageNo, len));
-    if (bmpData) {
-        Size size = BitmapSizeFromData(bmpData, len);
-        mediaboxes.At(pageNo - 1) = RectD(0, 0, size.Width, size.Height);
-    }
-    return mediaboxes.At(pageNo - 1);
-}
-
-Bitmap *CbxEngineImpl::LoadImage(int pageNo)
-{
-    assert(1 <= pageNo && pageNo <= PageCount());
-    if (pages.At(pageNo - 1))
-        return pages.At(pageNo - 1);
-
-    size_t len;
-    ScopedMem<char> bmpData(GetImageData(pageNo, len));
-    if (bmpData)
-        pages.At(pageNo - 1) = BitmapFromData(bmpData, len);
-
-    return pages.At(pageNo - 1);
-}
-
-bool CbxEngineImpl::LoadCbzFile(const WCHAR *file)
+bool CbxEngineImpl::LoadFromFile(const WCHAR *file)
 {
     if (!file)
         return false;
     fileName = str::Dup(file);
 
-    cbzFile = new ZipFile(fileName);
-
-    return FinishLoadingCbz();
+    return FinishLoading();
 }
 
-bool CbxEngineImpl::LoadCbzStream(IStream *stream)
+bool CbxEngineImpl::LoadFromStream(IStream *stream)
 {
     if (!stream)
         return false;
     fileStream = stream;
     fileStream->AddRef();
 
-    cbzFile = new ZipFile(stream);
-
-    return FinishLoadingCbz();
+    return FinishLoading();
 }
 
 static int cmpAscii(const void *a, const void *b)
@@ -705,52 +889,58 @@ static int cmpAscii(const void *a, const void *b)
     return wcscmp(*(const WCHAR **)a, *(const WCHAR **)b);
 }
 
-bool CbxEngineImpl::FinishLoadingCbz()
+bool CbxEngineImpl::FinishLoading()
 {
-    fileExt = L".cbz";
+    CrashIf(!cbxFile);
+    if (!cbxFile)
+        return false;
 
     Vec<const WCHAR *> allFileNames;
+    Vec<const WCHAR *> pageFileNames;
 
-    for (size_t idx = 0; idx < cbzFile->GetFileCount(); idx++) {
-        const WCHAR *fileName = cbzFile->GetFileName(idx);
-        // bail, if we accidentally try to load an XPS file
-        if (fileName && str::StartsWith(fileName, L"_rels/.rels"))
-            return false;
+    for (size_t idx = 0; idx < cbxFile->GetFileCount(); idx++) {
+        const WCHAR *fileName = cbxFile->GetFileName(idx);
         if (fileName && ImageEngine::IsSupportedFile(fileName) &&
             // OS X occasionally leaves metadata with image extensions
             !str::StartsWith(path::GetBaseName(fileName), L".")) {
             allFileNames.Append(fileName);
+            pageFileNames.Append(fileName);
+        }
+        else if (Arch_Zip == cbxFormat && str::StartsWith(fileName, L"_rels/.rels")) {
+            // bail, if we accidentally try to load an XPS file
+            return false;
         }
         else {
             allFileNames.Append(NULL);
         }
     }
-    assert(allFileNames.Count() == cbzFile->GetFileCount());
+    AssertCrash(allFileNames.Count() == cbxFile->GetFileCount());
 
-    ScopedMem<char> metadata(cbzFile->GetFileDataByName(L"ComicInfo.xml"));
+    ScopedMem<char> metadata(cbxFile->GetFileDataByName(L"ComicInfo.xml"));
     if (metadata)
         ParseComicInfoXml(metadata);
-    metadata.Set(cbzFile->GetComment());
+    metadata.Set(cbxFile->GetComment());
     if (metadata)
         json::Parse(metadata, this);
 
-    Vec<const WCHAR *> pageFileNames;
-    for (const WCHAR **fn = allFileNames.IterStart(); fn; fn = allFileNames.IterNext()) {
-        if (*fn)
-            pageFileNames.Append(*fn);
-    }
     pageFileNames.Sort(cmpAscii);
     for (const WCHAR **fn = pageFileNames.IterStart(); fn; fn = pageFileNames.IterNext()) {
         fileIdxs.Append(allFileNames.Find(*fn));
     }
-    assert(pageFileNames.Count() == fileIdxs.Count());
+    AssertCrash(pageFileNames.Count() == fileIdxs.Count());
     if (fileIdxs.Count() == 0)
         return false;
 
-    pages.AppendBlanks(fileIdxs.Count());
     mediaboxes.AppendBlanks(fileIdxs.Count());
 
     return true;
+}
+
+char *CbxEngineImpl::GetImageData(int pageNo, size_t& len)
+{
+    AssertCrash(1 <= pageNo && pageNo <= PageCount());
+    ScopedCritSec scope(&cacheAccess);
+    return cbxFile->GetFileDataByIdx(fileIdxs.At(pageNo - 1), &len);
 }
 
 static char *GetTextContent(HtmlPullParser& parser)
@@ -765,6 +955,7 @@ static char *GetTextContent(HtmlPullParser& parser)
 // cf. http://comicrack.cyolito.com/downloads/comicrack/ComicRack/Support-Files/ComicInfoSchema.zip/
 void CbxEngineImpl::ParseComicInfoXml(const char *xmlData)
 {
+    // TODO: convert UTF-16 data and skip UTF-8 BOM
     HtmlPullParser parser(xmlData, str::Len(xmlData));
     HtmlToken *tok;
     while ((tok = parser.Next()) != NULL && !tok->IsError()) {
@@ -841,6 +1032,23 @@ bool CbxEngineImpl::Visit(const char *path, const char *value, json::DataType ty
            !propDate || str::FindChar(propDate, '/') <= propDate;
 }
 
+bool CbxEngineImpl::SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots)
+{
+    bool ok = true;
+    PdfCreator *c = new PdfCreator();
+    for (int i = 1; i <= PageCount() && ok; i++) {
+        size_t len;
+        ScopedMem<char> data(GetImageData(i, len));
+        ok = data && c->AddImagePage(data, len, GetFileDPI());
+    }
+    if (ok) {
+        c->CopyProperties(this);
+        ok = c->SaveToFile(pdfFileName);
+    }
+    delete c;
+    return ok;
+}
+
 WCHAR *CbxEngineImpl::GetProperty(DocumentProperty prop)
 {
     switch (prop) {
@@ -862,198 +1070,144 @@ WCHAR *CbxEngineImpl::GetProperty(DocumentProperty prop)
     }
 }
 
-class ImagesPage {
-public:
-    ScopedMem<WCHAR>fileName; // for sorting image files
-    Bitmap *        bmp;
-
-    ImagesPage(const WCHAR *fileName, Bitmap *bmp) : bmp(bmp),
-        fileName(str::Dup(fileName)) { }
-    ~ImagesPage() { delete bmp; }
-
-    static int cmpPageByName(const void *o1, const void *o2) {
-        ImagesPage *p1 = *(ImagesPage **)o1;
-        ImagesPage *p2 = *(ImagesPage **)o2;
-        return wcscmp(p1->fileName, p2->fileName);
-    }
-};
-
-struct RarDecompressData {
-    unsigned    totalSize;
-    char *      buf;
-    unsigned    currSize;
-};
-
-static int CALLBACK unrarCallback(UINT msg, LPARAM userData, LPARAM rarBuffer, LPARAM bytesProcessed)
+const WCHAR *CbxEngineImpl::GetDefaultFileExt() const
 {
-    if (UCM_PROCESSDATA != msg)
-        return -1;
-
-    if (!userData)
-        return -1;
-    RarDecompressData *rrd = (RarDecompressData*)userData;
-
-    if (rrd->currSize + bytesProcessed > rrd->totalSize)
-        return -1;
-
-    char *buf = rrd->buf + rrd->currSize;
-    memcpy(buf, (char *)rarBuffer, bytesProcessed);
-    rrd->currSize += (unsigned int)bytesProcessed;
-    return 1;
+    switch (cbxFormat) {
+    case Arch_Zip: return L".cbz";
+    case Arch_Rar: return L".cbr";
+    case Arch_7z:  return L".cb7";
+    case Arch_Tar: return L".cbt";
+    default: CrashIf(true); return NULL;
+    }
 }
 
-static char *LoadCurrentCbrFile(HANDLE hArc, RARHeaderDataEx& rarHeader, size_t *lenOut)
+Bitmap *CbxEngineImpl::LoadBitmap(int pageNo, bool& deleteAfterUse)
 {
-    ScopedMem<char> data((char *)malloc(rarHeader.UnpSize + sizeof(WCHAR)));
-
-    if (rarHeader.UnpSizeHigh != 0 || rarHeader.UnpSize == 0 ||
-        rarHeader.UnpSize + sizeof(WCHAR) < sizeof(WCHAR) || !data) {
-        RARProcessFile(hArc, RAR_SKIP, NULL, NULL);
-        return NULL;
-    }
-
-    RarDecompressData rdd;
-    rdd.totalSize = rarHeader.UnpSize;
-    rdd.buf = data;
-    rdd.currSize = 0;
-    RARSetCallback(hArc, unrarCallback, (LPARAM)&rdd);
-    int res = RARProcessFile(hArc, RAR_TEST, NULL, NULL);
-    if (0 != res || rdd.totalSize != rdd.currSize)
-        return NULL;
-    // zero-terminate for convenience
-    data[rdd.totalSize] = data[rdd.totalSize + 1] = '\0';
-
-    if (lenOut)
-        *lenOut = rdd.totalSize;
-    return data.StealData();
-}
-
-static ImagesPage *LoadCurrentCbrPage(HANDLE hArc, RARHeaderDataEx& rarHeader)
-{
-    size_t bmpDataSize;
-    ScopedMem<char> bmpData(LoadCurrentCbrFile(hArc, rarHeader, &bmpDataSize));
-    if (!bmpData)
-        return NULL;
-
-    Bitmap *bmp = BitmapFromData(bmpData, bmpDataSize);
-    if (!bmp)
-        return NULL;
-
-    return new ImagesPage(rarHeader.FileNameW, bmp);
-}
-
-bool CbxEngineImpl::LoadCbrFile(const WCHAR *file)
-{
-    if (!file)
-        return false;
-    fileName = str::Dup(file);
-    fileExt = L".cbr";
-
-    RAROpenArchiveDataEx  arcData = { 0 };
-    arcData.ArcNameW = (WCHAR *)file;
-    arcData.OpenMode = RAR_OM_EXTRACT;
-
-    HANDLE hArc = RAROpenArchiveEx(&arcData);
-    if (!hArc || arcData.OpenResult != 0)
-        return false;
-
-    // UnRAR does not seem to support extracting a single file by name,
-    // so lazy image loading doesn't seem possible
-
-    Vec<ImagesPage *> found;
-    for (;;) {
-        RARHeaderDataEx rarHeader;
-        int res = RARReadHeaderEx(hArc, &rarHeader);
-        if (0 != res)
-            break;
-
-        const WCHAR *fileName = rarHeader.FileNameW;
-        if (ImageEngine::IsSupportedFile(fileName)) {
-            ImagesPage *page = LoadCurrentCbrPage(hArc, rarHeader);
-            if (page)
-                found.Append(page);
-        }
-        else if (str::EqI(fileName, L"ComicInfo.xml")) {
-            ScopedMem<char> xmlData(LoadCurrentCbrFile(hArc, rarHeader, NULL));
-            if (xmlData)
-                ParseComicInfoXml(xmlData);
-        }
-        else
-            RARProcessFile(hArc, RAR_SKIP, NULL, NULL);
-
-    }
-    RARCloseArchive(hArc);
-
-    if (found.Count() == 0)
-        return false;
-    found.Sort(ImagesPage::cmpPageByName);
-
-    for (size_t i = 0; i < found.Count(); i++) {
-        pages.Append(found.At(i)->bmp);
-        found.At(i)->bmp = NULL;
-    }
-    mediaboxes.AppendBlanks(pages.Count());
-
-    DeleteVecMembers(found);
-    return true;
-}
-
-char *CbxEngineImpl::GetImageData(int pageNo, size_t& len)
-{
-    if (cbzFile) {
-        ScopedCritSec scope(&fileAccess);
-        return cbzFile->GetFileDataByIdx(fileIdxs.At(pageNo - 1), &len);
+    size_t len;
+    ScopedMem<char> bmpData(GetImageData(pageNo, len));
+    if (bmpData) {
+        deleteAfterUse = true;
+        return BitmapFromData(bmpData, len);
     }
     return NULL;
 }
 
-bool CbxEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
+RectD CbxEngineImpl::LoadMediabox(int pageNo)
+{
+    // fill the cache to prevent the first few images from being unpacked twice
+    ImagePage *page = GetPage(pageNo, MAX_IMAGE_PAGE_CACHE == pageCache.Count());
+    if (page) {
+        RectD mbox(0, 0, page->bmp->GetWidth(), page->bmp->GetHeight());
+        DropPage(page);
+        return mbox;
+    }
+
+    size_t len;
+    ScopedMem<char> bmpData(GetImageData(pageNo, len));
+    if (bmpData) {
+        Size size = BitmapSizeFromData(bmpData, len);
+        return RectD(0, 0, size.Width, size.Height);
+    }
+    return RectD();
+}
+
+#define RAR_SIGNATURE       "Rar!\x1A\x07\x00"
+#define RAR_SIGNATURE_LEN   7
+#define RAR5_SIGNATURE      "Rar!\x1A\x07\x01\x00"
+#define RAR5_SIGNATURE_LEN  8
+
+BaseEngine *CbxEngineImpl::CreateFromFile(const WCHAR *fileName)
+{
+    if (str::EndsWithI(fileName, L".cbz") || str::EndsWithI(fileName, L".zip") ||
+        file::StartsWithN(fileName, "PK\x03\x04", 4)) {
+        CbxEngineImpl *engine = new CbxEngineImpl(new ZipFile(fileName), Arch_Zip);
+        if (engine->LoadFromFile(fileName))
+            return engine;
+        delete engine;
+    }
+    // also try again if a .cbz or .zip file failed to load, it might
+    // just have been misnamed (which apparently happens occasionally)
+    if (str::EndsWithI(fileName, L".cbr") || str::EndsWithI(fileName, L".rar") ||
+        file::StartsWithN(fileName, RAR_SIGNATURE, RAR_SIGNATURE_LEN) ||
+        file::StartsWithN(fileName, RAR5_SIGNATURE, RAR5_SIGNATURE_LEN)) {
+        CbxEngineImpl *engine = new CbxEngineImpl(new RarFile(fileName), Arch_Rar);
+        if (engine->LoadFromFile(fileName))
+            return engine;
+        delete engine;
+    }
+    if (str::EndsWithI(fileName, L".cb7") || str::EndsWithI(fileName, L".7z") ||
+        file::StartsWith(fileName, "7z\xBC\xAF\x27\x1C")) {
+        CbxEngineImpl *engine = new CbxEngineImpl(new _7zFile(fileName), Arch_7z);
+        if (engine->LoadFromFile(fileName))
+            return engine;
+        delete engine;
+    }
+    if (str::EndsWithI(fileName, L".cbt") || str::EndsWithI(fileName, L".tar")) {
+        CbxEngineImpl *engine = new CbxEngineImpl(new TarFile(fileName), Arch_Tar);
+        if (engine->LoadFromFile(fileName))
+            return engine;
+        delete engine;
+    }
+    return NULL;
+}
+
+BaseEngine *CbxEngineImpl::CreateFromStream(IStream *stream)
+{
+    CbxEngineImpl *engine = new CbxEngineImpl(new ZipFile(stream), Arch_Zip);
+    if (engine->LoadFromStream(stream))
+        return engine;
+    delete engine;
+
+    engine = new CbxEngineImpl(new RarFile(stream), Arch_Rar);
+    if (engine->LoadFromStream(stream))
+        return engine;
+    delete engine;
+
+    engine = new CbxEngineImpl(new _7zFile(stream), Arch_7z);
+    if (engine->LoadFromStream(stream))
+        return engine;
+    delete engine;
+
+    engine = new CbxEngineImpl(new TarFile(stream), Arch_Tar);
+    if (engine->LoadFromStream(stream))
+        return engine;
+    delete engine;
+
+    return NULL;
+}
+
+namespace CbxEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
 {
     if (sniff) {
         // we don't also sniff for ZIP files, as these could also
         // be broken XPS files for which failure is expected
-        return file::StartsWith(fileName, "Rar!\x1A\x07\x00", 7);
+        // TODO: add TAR format sniffing
+        return file::StartsWithN(fileName, RAR_SIGNATURE, RAR_SIGNATURE_LEN) ||
+               file::StartsWithN(fileName, RAR5_SIGNATURE, RAR5_SIGNATURE_LEN) ||
+               file::StartsWith(fileName, "7z\xBC\xAF\x27\x1C");
     }
 
     return str::EndsWithI(fileName, L".cbz") ||
            str::EndsWithI(fileName, L".cbr") ||
+           str::EndsWithI(fileName, L".cb7") ||
+           str::EndsWithI(fileName, L".cbt") ||
            str::EndsWithI(fileName, L".zip") && !str::EndsWithI(fileName, L".fb2.zip") ||
-           str::EndsWithI(fileName, L".rar");
+           str::EndsWithI(fileName, L".rar") ||
+           str::EndsWithI(fileName, L".7z")  ||
+           str::EndsWithI(fileName, L".tar");
 }
 
-CbxEngine *CbxEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *CreateFromFile(const WCHAR *fileName)
 {
-    assert(IsSupportedFile(fileName) || IsSupportedFile(fileName, true));
-    CbxEngineImpl *engine = new CbxEngineImpl();
-    bool ok = false;
-    if (str::EndsWithI(fileName, L".cbz") || str::EndsWithI(fileName, L".zip") ||
-        file::StartsWith(fileName, "PK\x03\x04")) {
-        ok = engine->LoadCbzFile(fileName);
-    }
-    if (!ok) {
-        // also try again if a .cbz or .zip file failed to load, it might
-        // just have been misnamed (which apparently happens occasionally)
-        delete engine;
-        engine = new CbxEngineImpl();
-        if (str::EndsWithI(fileName, L".cbr") || str::EndsWithI(fileName, L".rar") ||
-            file::StartsWith(fileName, "Rar!\x1A\x07\x00", 7)) {
-            ok = engine->LoadCbrFile(fileName);
-        }
-    }
-    if (!ok) {
-        delete engine;
-        return NULL;
-    }
-    return engine;
+    AssertCrash(CbxEngine::IsSupportedFile(fileName) || CbxEngine::IsSupportedFile(fileName, true));
+    return CbxEngineImpl::CreateFromFile(fileName);
 }
 
-CbxEngine *CbxEngine::CreateFromStream(IStream *stream)
+BaseEngine *CreateFromStream(IStream *stream)
 {
-    CbxEngineImpl *engine = new CbxEngineImpl();
-    // TODO: UnRAR doesn't support reading from arbitrary data streams
-    if (!engine->LoadCbzStream(stream)) {
-        delete engine;
-        return NULL;
-    }
-    return engine;
+    return CbxEngineImpl::CreateFromStream(stream);
+}
+
 }

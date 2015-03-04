@@ -21,6 +21,7 @@ AC_SUBST([JBIG2DEC_LT_AGE], [0])
 # Checks for programs.
 AC_PROG_CC
 AM_PROG_CC_C_O
+AC_LIBTOOL_WIN32_DLL
 AC_PROG_LIBTOOL
 
 # platform specific compiler flags
@@ -48,7 +49,7 @@ if test "x$ac_cv_want_libpng" != "xno"; then
   AC_CHECK_LIB([png], [png_create_write_struct], [
     AC_CHECK_LIB([z], [deflate], [
       AC_DEFINE(HAVE_LIBPNG, 1, [Define if libpng is available (-lpng)])
-      LIBS="-lpng -lz $LIBS"
+      PNG_LIBS="-lpng -lz"
       AC_LIBOBJ([jbig2_image_png])
       have_libpng="yes"
     ])
@@ -59,6 +60,7 @@ if test "x$have_libpng" != "xyes"; then
   CFLAGS="$save_cflags"
   LDFLAGS="$save_ldflags"
 fi
+AC_SUBST(PNG_LIBS)
 
 # Checks for header files.
 AC_HEADER_STDC

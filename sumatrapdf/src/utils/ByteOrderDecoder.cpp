@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -64,6 +64,14 @@ uint32 ByteOrderDecoder::UInt32()
     left -= sizeof(v);
     curr += sizeof(v);
     return v;
+}
+
+uint64 ByteOrderDecoder::UInt64()
+{
+    uint64 first = UInt32();
+    if (LittleEndian == byteOrder)
+        return first | ((uint64)UInt32() << 32);
+    return (first << 32) | UInt32();
 }
 
 void ByteOrderDecoder::Bytes(char *dest, size_t len)

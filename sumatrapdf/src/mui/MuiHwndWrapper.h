@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Mui_h
@@ -30,6 +30,8 @@ public:
     // center the content within the window. Incompatible with sizeToFit
     bool                centerContent;
 
+    FrameRateWnd *      frameRateWnd;
+
     HwndWrapper(HWND hwnd = NULL);
     virtual ~HwndWrapper();
 
@@ -47,4 +49,6 @@ public:
     virtual void Arrange(const Rect finalRect);
 
     void           TopLevelLayout();
+
+    bool           IsInSizeMove() const;
 };

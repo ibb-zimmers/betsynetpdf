@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -13,6 +13,8 @@
 #ifdef DEBUG
 static void EnumeratePrinters()
 {
+    str::Str<WCHAR> output;
+
     PRINTER_INFO_5 *info5Arr = NULL;
     DWORD bufSize = 0, printersCount;
     bool fOk = EnumPrinters(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, NULL,
@@ -22,27 +24,39 @@ static void EnumeratePrinters()
         fOk = EnumPrinters(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, NULL,
             5, (LPBYTE)info5Arr, bufSize, &bufSize, &printersCount);
     }
-    if (!info5Arr)
+    if (!fOk || !info5Arr) {
+        output.AppendFmt(L"Call to EnumPrinters failed with error %#x", GetLastError());
+        MessageBox(NULL, output.Get(), L"SumatraPDF - EnumeratePrinters", MB_OK | MB_ICONERROR);
         return;
-    assert(fOk);
-    if (!fOk) return;
-    printf("Printers: %ld\n", printersCount);
+    }
+    ScopedMem<WCHAR> defName(GetDefaultPrinterName());
     for (DWORD i = 0; i < printersCount; i++) {
         const WCHAR *printerName = info5Arr[i].pPrinterName;
         const WCHAR *printerPort = info5Arr[i].pPortName;
-        bool fDefault = false;
-        if (info5Arr[i].Attributes & PRINTER_ATTRIBUTE_DEFAULT)
-            fDefault = true;
-        wprintf(L"Name: %s, port: %s, default: %d\n", printerName, printerPort, (int)fDefault);
-    }
-    WCHAR buf[512];
-    bufSize = dimof(buf);
-    fOk = GetDefaultPrinter(buf, &bufSize);
-    if (!fOk) {
-        if (ERROR_FILE_NOT_FOUND == GetLastError())
-            printf("No default printer\n");
+        bool fDefault = str::Eq(defName, printerName);
+        output.AppendFmt(L"%s (Port: %s, attributes: %#x%s)\n", printerName, printerPort, info5Arr[i].Attributes, fDefault ? L", default" : L"");
+
+        DWORD bins = DeviceCapabilities(printerName, printerPort, DC_BINS, NULL, NULL);
+        DWORD binNames = DeviceCapabilities(printerName, printerPort, DC_BINNAMES, NULL, NULL);
+        CrashIf(bins != binNames);
+        if (0 == bins) {
+            output.Append(L" - no paper bins available\n");
+        }
+        else if (bins == (DWORD)-1) {
+            output.AppendFmt(L" - Call to DeviceCapabilities failed with error %#x\n", GetLastError());
+        }
+        else {
+            ScopedMem<WORD> binValues(AllocArray<WORD>(bins));
+            DeviceCapabilities(printerName, printerPort, DC_BINS, (WCHAR *)binValues.Get(), NULL);
+            ScopedMem<WCHAR> binNameValues(AllocArray<WCHAR>(24 * binNames));
+            DeviceCapabilities(printerName, printerPort, DC_BINNAMES, binNameValues.Get(), NULL);
+            for (DWORD j = 0; j < bins; j++) {
+                output.AppendFmt(L" - '%s' (%d)\n", binNameValues.Get() + 24 * j, binValues.Get()[j]);
+            }
+        }
     }
     free(info5Arr);
+    MessageBox(NULL, output.Get(), L"SumatraPDF - EnumeratePrinters", MB_OK | MB_ICONINFORMATION);
 }
 #endif
 
@@ -89,23 +103,21 @@ static void ParseScrollValue(PointI *scroll, const WCHAR *txt)
 }
 
 /* parse argument list. we assume that all unrecognized arguments are file names. */
-void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
+void CommandLineInfo::ParseCommandLine(const WCHAR *cmdLine)
 {
     WStrVec argList;
     ParseCmdLine(cmdLine, argList);
     size_t argCount = argList.Count();
 
 #define is_arg(txt) str::EqI(TEXT(txt), argument)
-#define is_arg_with_param(txt) (is_arg(txt) && param != NULL)
+#define is_arg_with_param(txt) (is_arg(txt) && (argCount > n + 1))
 #define additional_param() argList.At(n + 1)
 #define has_additional_param() ((argCount > n + 1) && ('-' != additional_param()[0]))
+#define handle_string_param(name) name.Set(str::Dup(argList.At(++n)))
+#define handle_int_param(name) name = _wtoi(argList.At(++n))
 
     for (size_t n = 1; n < argCount; n++) {
         WCHAR *argument = argList.At(n);
-        WCHAR *param = NULL;
-        if (argCount > n + 1)
-            param = argList.At(n + 1);
-
         if (is_arg("-register-for-pdf")) {
             makeDefault = true;
             exitImmediately = true;
@@ -116,15 +128,13 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
             silent = true;
         }
         else if (is_arg("-print-to-default")) {
-            WCHAR *name = GetDefaultPrinterName();
-            if (name) {
-                str::ReplacePtr(&printerName, name);
-                free(name);
-            }
+            printerName.Set(GetDefaultPrinterName());
+            if (!printerName)
+                printDialog = true;
             exitWhenDone = true;
         }
         else if (is_arg_with_param("-print-to")) {
-            str::ReplacePtr(&printerName, argList.At(++n));
+            handle_string_param(printerName);
             exitWhenDone = true;
         }
         else if (is_arg("-print-dialog")) {
@@ -134,8 +144,9 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
             // argument is a comma separated list of page ranges and
             // advanced options [even|odd] and [noscale|shrink|fit]
             // e.g. -print-settings "1-3,5,10-8,odd,fit"
-            str::ReplacePtr(&printSettings, argList.At(++n));
+            handle_string_param(printSettings);
             str::RemoveChars(printSettings, L" ");
+            str::TransChars(printSettings, L";", L",");
         }
         else if (is_arg("-exit-when-done") || is_arg("-exit-on-print")) {
             // only affects -print-dialog (-print-to and -print-to-default
@@ -143,30 +154,23 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
             exitWhenDone = true;
         }
         else if (is_arg_with_param("-inverse-search")) {
-            str::ReplacePtr(&inverseSearchCmdLine, argList.At(++n));
+            str::ReplacePtr(&gGlobalPrefs->inverseSearchCmdLine, argList.At(++n));
+            gGlobalPrefs->enableTeXEnhancements = true;
         }
         else if ((is_arg_with_param("-forward-search") ||
                   is_arg_with_param("-fwdsearch")) && argCount > n + 2) {
             // -forward-search is for consistency with -inverse-search
             // -fwdsearch is for consistency with -fwdsearch-*
-            str::ReplacePtr(&forwardSearchOrigin, argList.At(++n));
-            forwardSearchLine = _wtoi(argList.At(++n));
-        }
-        else if (is_arg("-reuse-instance")) {
-            // find the window handle of a running instance of SumatraPDF
-            // TODO: there should be a mutex here to reduce possibility of
-            // race condition and having more than one copy launch because
-            // FindWindow() in one process is called before a window is created
-            // in another process
-            reuseInstance = (FindWindow(FRAME_CLASS_NAME, 0) != NULL);
+            handle_string_param(forwardSearchOrigin);
+            handle_int_param(forwardSearchLine);
         }
         else if (is_arg_with_param("-nameddest") || is_arg_with_param("-named-dest")) {
             // -nameddest is for backwards compat (was used pre-1.3)
             // -named-dest is for consistency
-            str::ReplacePtr(&destName, argList.At(++n));
+            handle_string_param(destName);
         }
         else if (is_arg_with_param("-page")) {
-            pageNumber = _wtoi(argList.At(++n));
+            handle_int_param(pageNumber);
         }
         else if (is_arg("-restrict")) {
             restrictedUse = true;
@@ -174,16 +178,15 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
         else if (is_arg("-invertcolors") || is_arg("-invert-colors")) {
             // -invertcolors is for backwards compat (was used pre-1.3)
             // -invert-colors is for consistency
-            // -invert-colors is a shortcut for -set-color-range 0xFFFFFF 0x000000
-            // (i.e. it sets white as foreground color and black as background color)
-            colorRange[0] = WIN_COL_WHITE;
-            colorRange[1] = WIN_COL_BLACK;
+            // -invert-colors used to be a shortcut for -set-color-range 0xFFFFFF 0x000000
+            // now it non-permanently swaps textColor and backgroundColor
+            gGlobalPrefs->fixedPageUI.invertColors = true;
         }
         else if (is_arg("-presentation")) {
             enterPresentation = true;
         }
         else if (is_arg("-fullscreen")) {
-            enterFullscreen = true;
+            enterFullScreen = true;
         }
         else if (is_arg_with_param("-view")) {
             ParseViewMode(&startView, argList.At(++n));
@@ -199,8 +202,8 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
         }
         else if (is_arg_with_param("-plugin")) {
             // -plugin [<URL>] <parent HWND>
-            if (!str::IsDigit(*param) && has_additional_param())
-                str::ReplacePtr(&pluginURL, argList.At(++n));
+            if (argCount > n + 2 && !str::IsDigit(*argList.At(n + 1)) && *argList.At(n + 2) != '-')
+                handle_string_param(pluginURL);
             // the argument is a (numeric) window handle to
             // become the parent of a frameless SumatraPDF
             // (used e.g. for embedding it into a browser plugin)
@@ -212,23 +215,19 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
             //      -stress-test file.pdf 1-3  render only pages 1, 2 and 3 of file.pdf
             //      -stress-test dir 301- 2x   render all files in dir twice, skipping first 300
             //      -stress-test dir *.pdf;*.xps  render all files in dir that are either PDF or XPS
-            str::ReplacePtr(&stressTestPath, argList.At(++n));
+            handle_string_param(stressTestPath);
             int num;
-            if (has_additional_param() && str::FindChar(additional_param(), '*')) {
-                str::ReplacePtr(&stressTestFilter, additional_param());
-                n++;
-            }
-            if (has_additional_param() && IsValidPageRange(additional_param())) {
-                str::ReplacePtr(&stressTestRanges, additional_param());
-                n++;
-            }
+            if (has_additional_param() && str::FindChar(additional_param(), '*'))
+                handle_string_param(stressTestFilter);
+            if (has_additional_param() && IsValidPageRange(additional_param()))
+                handle_string_param(stressTestRanges);
             if (has_additional_param() && str::Parse(additional_param(), L"%dx%$", &num) && num > 0) {
                 stressTestCycles = num;
                 n++;
             }
         }
         else if (is_arg_with_param("-n")) {
-            stressParallelCount = _wtoi(argList.At(++n));
+            handle_int_param(stressParallelCount);
         }
         else if (is_arg("-rand")) {
             stressRandomizeFiles = true;
@@ -238,8 +237,7 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
             pathsToBenchmark.Push(s);
             s = NULL;
             if (has_additional_param() && IsBenchPagesInfo(additional_param())) {
-                s = str::Dup(additional_param());
-                n++;
+                s = str::Dup(argList.At(++n));
             }
             pathsToBenchmark.Push(s);
             exitImmediately = true;
@@ -248,38 +246,46 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
             // builds possible
             crashOnOpen = true;
         }
+        else if (is_arg("-reuse-instance")) {
+            // for backwards compatibility, -reuse-instance reuses whatever
+            // instance has registered as DDE server
+            reuseDdeInstance = true;
+        }
         // TODO: remove the following deprecated options within a release or two
         else if (is_arg("-esc-to-exit")) {
-            escToExit = true;
+            gGlobalPrefs->escToExit = true;
         }
         else if (is_arg_with_param("-bgcolor") || is_arg_with_param("-bg-color")) {
             // -bgcolor is for backwards compat (was used pre-1.3)
             // -bg-color is for consistency
-            ParseColor(&bgColor, argList.At(++n));
+            ParseColor(&gGlobalPrefs->mainWindowBackground, argList.At(++n));
         }
         else if (is_arg_with_param("-lang")) {
-            free(lang);
-            lang = str::conv::ToAnsi(argList.At(++n));
+            lang.Set(str::conv::ToAnsi(argList.At(++n)));
         }
         else if (is_arg("-set-color-range") && argCount > n + 2) {
-            ParseColor(&colorRange[0], argList.At(++n));
-            ParseColor(&colorRange[1], argList.At(++n));
+            ParseColor(&gGlobalPrefs->fixedPageUI.textColor, argList.At(++n));
+            ParseColor(&gGlobalPrefs->fixedPageUI.backgroundColor, argList.At(++n));
         }
         else if (is_arg_with_param("-fwdsearch-offset")) {
-            forwardSearch.highlightOffset = _wtoi(argList.At(++n));
+            handle_int_param(gGlobalPrefs->forwardSearch.highlightOffset);
+            gGlobalPrefs->enableTeXEnhancements = true;
         }
         else if (is_arg_with_param("-fwdsearch-width")) {
-            forwardSearch.highlightWidth = _wtoi(argList.At(++n));
+            handle_int_param(gGlobalPrefs->forwardSearch.highlightWidth);
+            gGlobalPrefs->enableTeXEnhancements = true;
         }
         else if (is_arg_with_param("-fwdsearch-color")) {
-            ParseColor(&forwardSearch.highlightColor, argList.At(++n));
+            ParseColor(&gGlobalPrefs->forwardSearch.highlightColor, argList.At(++n));
+            gGlobalPrefs->enableTeXEnhancements = true;
         }
         else if (is_arg_with_param("-fwdsearch-permanent")) {
-            forwardSearch.highlightPermanent = _wtoi(argList.At(++n));
+            handle_int_param(gGlobalPrefs->forwardSearch.highlightPermanent);
+            gGlobalPrefs->enableTeXEnhancements = true;
         }
         else if (is_arg_with_param("-manga-mode")) {
-            WCHAR *s = argList.At(++n);
-            cbxMangaMode = str::EqI(L"true", s) || str::Eq(L"1", s);
+            const WCHAR *s = argList.At(++n);
+            gGlobalPrefs->comicBookUI.cbxMangaMode = str::EqI(L"true", s) || str::Eq(L"1", s);
         }
 #if defined(SUPPORTS_AUTO_UPDATE) || defined(DEBUG)
         else if (is_arg_with_param("-autoupdate")) {
@@ -308,4 +314,6 @@ void CommandLineInfo::ParseCommandLine(WCHAR *cmdLine)
 #undef is_arg_with_param
 #undef additional_param
 #undef has_additional_param
+#undef handle_string_param
+#undef handle_int_param
 }

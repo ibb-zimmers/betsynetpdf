@@ -1,19 +1,25 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef WindowInfo_h
 #define WindowInfo_h
 
-#include "DisplayModel.h"
+#include "Controller.h"
+#include "EngineManager.h"
 
-class Synchronizer;
 class DoubleBuffer;
-class SelectionOnPage;
 class LinkHandler;
 class Notifications;
+class SelectionOnPage;
 class StressTest;
-struct WatchedFile;
 class SumatraUIAutomationProvider;
+
+struct FrameRateWnd;
+struct LabelWithCloseWnd;
+struct TabData;
+struct SplitterWnd;
+struct WatchedFile;
+class CaptionInfo;
 
 /* Describes actions which can be performed by mouse */
 enum MouseAction {
@@ -23,6 +29,15 @@ enum MouseAction {
     MA_SELECTING,
     MA_SCROLLING,
     MA_SELECTING_TEXT
+};
+
+enum NotificationGroup {
+    NG_RESPONSE_TO_ACTION = 1,
+    NG_FIND_PROGRESS,
+    NG_PAGE_INFO_HELPER,
+    NG_CURSOR_POS_HELPER,
+    NG_STRESS_TEST_BENCHMARK,
+    NG_STRESS_TEST_SUMMARY,
 };
 
 enum PresentationMode {
@@ -53,25 +68,29 @@ struct StaticLinkInfo {
 
 /* Describes information related to one window with (optional) a document
    on the screen */
-class WindowInfo : public DisplayModelCallback
+class WindowInfo
 {
 public:
-    WindowInfo(HWND hwnd);
+    explicit WindowInfo(HWND hwnd);
     ~WindowInfo();
+
+	// BetsyNetPDF
 	void* betsyApi;
 
     // TODO: error windows currently have
     //       !IsAboutWindow() && !IsDocLoaded()
     //       which doesn't allow distinction between PDF, XPS, etc. errors
     bool IsAboutWindow() const { return !loadedFilePath; }
-    bool IsDocLoaded() const { return this->dm != NULL; }
+    bool IsDocLoaded() const { return this->ctrl != NULL; }
 
-    bool IsChm() const { return dm && dm->engineType == Engine_Chm; }
-    bool IsCbx() const { return dm && dm->engineType == Engine_ComicBook; }
-    bool IsNotPdf() const { return dm && dm->engineType != Engine_PDF; }
+    DisplayModel *AsFixed() const { return ctrl ? ctrl->AsFixed() : NULL; }
+    ChmModel *AsChm() const { return ctrl ? ctrl->AsChm() : NULL; }
+    EbookController *AsEbook() const { return ctrl ? ctrl->AsEbook() : NULL; }
+
+    EngineType GetEngineType() const;
 
     WCHAR *         loadedFilePath;
-    DisplayModel *  dm;
+    Controller *    ctrl;
 
     HWND            hwndFrame;
     HWND            hwndCanvas;
@@ -87,6 +106,7 @@ public:
 
     // state related to table of contents (PDF bookmarks etc.)
     HWND            hwndTocBox;
+    LabelWithCloseWnd *tocLabelWithClose;
     HWND            hwndTocTree;
     bool            tocLoaded;
     bool            tocVisible;
@@ -98,19 +118,32 @@ public:
 
     // state related to favorites
     HWND            hwndFavBox;
+    LabelWithCloseWnd *favLabelWithClose;
     HWND            hwndFavTree;
     Vec<DisplayState *> expandedFavorites;
 
     // vertical splitter for resizing left side panel
-    HWND            hwndSidebarSplitter;
+    SplitterWnd *   sidebarSplitter;
 
     // horizontal splitter for resizing favorites and bookmars parts
-    HWND            hwndFavSplitter;
+    SplitterWnd *   favSplitter;
+
+    HWND            hwndTabBar;
+    bool            tabsVisible;
+    bool            tabsInTitlebar;
+    // keeps the sequence of tab selection. This is needed for restoration 
+    // of the previous tab when the current one is closed.
+    Vec<TabData *> *tabSelectionHistory;
+
+    HWND            hwndCaption;
+    CaptionInfo *   caption;
+    int             extendedFrameHeight;
 
     HWND            hwndInfotip;
 
     bool            infotipVisible;
     HMENU           menu;
+    bool            isMenuHidden; // not persisted at shutdown
 
     int             dpi;
     float           uiDPIFactor;
@@ -142,20 +175,23 @@ public:
      * to user coordinates for each page which has not empty intersection with it */
     Vec<SelectionOnPage> *selectionOnPage;
 
+    // size of the current rectangular selection in document units
+    SizeD           selectionMeasure;
+
     // a list of static links (mainly used for About and Frequently Read pages)
     Vec<StaticLinkInfo> staticLinks;
 
     // file change watcher
     WatchedFile *   watcher;
 
-    bool            fullScreen;
+    bool            isFullScreen;
     PresentationMode presentation;
     // were we showing toc before entering full screen or presentation mode
     bool            tocBeforeFullScreen;
     int             windowStateBeforePresentation;
 
-    long            prevStyle;
-    RectI           frameRc; // window position before entering presentation/fullscreen mode
+    long            nonFullScreenWindowStyle;
+    RectI           nonFullScreenFrameRect;
     float           prevZoomVirtual;
     DisplayMode     prevDisplayMode;
 
@@ -177,8 +213,7 @@ public:
     PageElement *   linkOnLastButtonDown;
     const WCHAR *   url;
 
-    // synchronizer based on .pdfsync file
-    Synchronizer *  pdfsync;
+    ControllerCallback *cbHandler;
 
     /* when doing a forward search, the result location is highlighted with
      * rectangular marks in the document. These variables indicate the position of the markers
@@ -194,8 +229,7 @@ public:
 
     TouchState      touchState;
 
-    Vec<PageAnnotation> *userAnnots;
-    bool            userAnnotsModified;
+    FrameRateWnd *  frameRateWnd;
 
     SumatraUIAutomationProvider * uia_provider;
 
@@ -212,6 +246,7 @@ public:
     void Focus() {
         if (IsIconic(hwndFrame))
             ShowWindow(hwndFrame, SW_RESTORE);
+        SetForegroundWindow(hwndFrame);
         SetFocus(hwndFrame);
     }
 
@@ -220,29 +255,20 @@ public:
 
     void CreateInfotip(const WCHAR *text, RectI& rc, bool multiline=false);
     void DeleteInfotip();
+    void ShowNotification(const WCHAR *message, bool autoDismiss=true, bool highlight=false, NotificationGroup groupId=NG_RESPONSE_TO_ACTION);
 
     bool CreateUIAProvider();
-
-    // DisplayModelCallback implementation (incl. ChmNavigationCallback)
-    virtual void PageNoChanged(int pageNo);
-    virtual void LaunchBrowser(const WCHAR *url);
-    virtual void FocusFrame(bool always);
-    virtual void Repaint() { RepaintAsync(); };
-    virtual void UpdateScrollbars(SizeI canvas);
-    virtual void RequestRendering(int pageNo);
-    virtual void CleanUp(DisplayModel *dm);
 };
 
 class LinkHandler {
     WindowInfo *owner;
-    BaseEngine *engine() const;
 
     void ScrollTo(PageDestination *dest);
     void LaunchFile(const WCHAR *path, PageDestination *link);
     PageDestination *FindTocItem(DocTocItem *item, const WCHAR *name, bool partially=false);
 
 public:
-    LinkHandler(WindowInfo& win) : owner(&win) { }
+    explicit LinkHandler(WindowInfo& win) : owner(&win) { }
 
     void GotoLink(PageDestination *link);
     void GotoNamedDest(const WCHAR *name);
@@ -255,7 +281,7 @@ class LinkSaver : public LinkSaverUI {
 public:
     LinkSaver(WindowInfo& win, const WCHAR *fileName) : owner(&win), fileName(fileName) { }
 
-    virtual bool SaveEmbedded(unsigned char *data, size_t cbCount);
+    virtual bool SaveEmbedded(const unsigned char *data, size_t cbCount);
 };
 
 #endif

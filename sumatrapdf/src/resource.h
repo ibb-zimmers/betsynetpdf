@@ -37,6 +37,7 @@
 #define IDM_COPY_SELECTION              420
 #define IDM_VIEW_FULLSCREEN             421
 #define IDM_SELECT_ALL                  422
+#define IDM_VIEW_SHOW_HIDE_MENUBAR      423
 #define IDM_COPY_IMAGE                  427
 #define IDM_COPY_LINK_TARGET            428
 #define IDM_COPY_COMMENT                429
@@ -142,7 +143,7 @@
 #define IDC_SECTION_INVERSESEARCH       1040
 #define IDC_CMDLINE_LABEL               1041
 #define IDC_CMDLINE                     1042
-#define IDC_USE_SYS_COLORS              1045
+#define IDC_USE_TABS                    1045
 #define IDC_SECTION_PRINT_RANGE         1050
 #define IDC_PRINT_RANGE_ALL             1051
 #define IDC_PRINT_RANGE_EVEN            1052
@@ -154,15 +155,15 @@
 #define IDC_SECTION_PRINT_COMPATIBILITY 1070
 #define IDC_PRINT_AS_IMAGE              1071
 #define IDC_TOC_BOX                     1100
-#define IDC_TOC_TITLE                   1101
-#define IDC_TOC_CLOSE                   1102
-#define IDC_TOC_TREE                    1103
+#define IDC_TOC_LABEL_WITH_CLOSE        1101
+#define IDC_TOC_TREE                    1102
 #define IDC_FAV_BOX                     1105
-#define IDC_FAV_TITLE                   1106
-#define IDC_FAV_CLOSE                   1107
-#define IDC_FAV_TREE                    1108
+#define IDC_FAV_LABEL_WITH_CLOSE        1106
+#define IDC_FAV_TREE                    1107
+#define IDC_TABBAR                      1110
 #define IDB_TOOLBAR                     2000
 #define IDB_RELOADING_CUE               2010
+// TODO: which of these are (still) needed?
 #define IDT_FILE_NEW                    3000
 #define IDT_FILE_OPEN                   3001
 #define IDT_FILE_METAPATH               3002
@@ -191,8 +192,8 @@
 #define IDT_FILE_ADDTOFAV               3025
 #define IDT_VIEW_FIT_WIDTH              3026
 #define IDT_VIEW_FIT_PAGE               3027
-#define IDD_SAMPLE_MOBI                 3050
 #define IDD_EBOOK_WIN_DESC              3051
+#define IDD_PUBLIC_APP_KEY              3060
 #define IDC_SUMATRAPDF                  4000
 #define IDC_STATIC                      -1
 

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 #ifndef HtmlWindow_h
 #define HtmlWindow_h
@@ -7,6 +7,8 @@
 
 class FrameSite;
 class HtmlMoniker;
+
+bool IsBlankUrl(const WCHAR *);
 
 // HtmlWindowCallback allows HtmlWindow to notify other code about notable
 // events or delegate some of the functionality.
@@ -21,12 +23,17 @@ public:
     virtual void OnDocumentComplete(const WCHAR *url) = 0;
 
     // allows for providing data for a given url.
-    // returning false means data wasn't provided.
-    virtual bool GetDataForUrl(const WCHAR *url, char **data, size_t *len) = 0;
+    // returning NULL means data wasn't provided.
+    virtual const unsigned char *GetDataForUrl(const WCHAR *url, size_t *len) = 0;
 
     // called when left mouse button is clicked in the web control window.
     // we use it to maintain proper focus (since it's stolen by left click)
     virtual void OnLButtonDown() = 0;
+
+    // called when a file can't be displayed and has to be downloaded instead
+    virtual void DownloadData(const WCHAR *url, const unsigned char *data, size_t len) = 0;
+
+    virtual ~HtmlWindowCallback() { }
 };
 
 // HtmlWindow embeds a web browser (Internet Explorer) control
@@ -46,6 +53,9 @@ protected:
     HtmlMoniker *       htmlContent;
     HWND                oleObjectHwnd;
 
+    const char *        htmlSetInProgress;
+    const WCHAR *       htmlSetInProgressUrl;
+
     DWORD               adviseCookie;
     bool                blankWasShown;
 
@@ -58,6 +68,9 @@ protected:
 
     void SubclassHwnd();
     void UnsubclassHwnd();
+    void SetScrollbarToAuto();
+    void SetHtmlReal(const char *s, size_t len=-1);
+    void FreeHtmlSetInProgressData();
 
 public:
     ~HtmlWindow();
@@ -66,10 +79,10 @@ public:
     void SetVisible(bool visible);
     void NavigateToUrl(const WCHAR *url);
     void NavigateToDataUrl(const WCHAR *url);
-    void SetHtml(const char *s, size_t len=-1);
+    void SetHtml(const char *s, size_t len=-1, const WCHAR *url=NULL);
     void GoBack();
     void GoForward();
-    void PrintCurrentPage();
+    void PrintCurrentPage(bool showUI);
     void SetZoomPercent(int zoom);
     int  GetZoomPercent();
     void FindInCurrentPage();

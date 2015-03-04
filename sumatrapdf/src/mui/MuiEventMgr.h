@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Mui_h
@@ -38,6 +38,8 @@ class EventMgr
     Size    minSize;
     Size    maxSize;
 
+    bool    inSizeMove;
+
     struct EventHandler {
         Control *       ctrlSource;
         ControlEvents * events;
@@ -70,6 +72,8 @@ public:
     void           NotifyClicked(Control *c, int x, int y);
     void           NotifySizeChanged(Control *c, int dx, int dy);
     void           NotifyNamedEventClicked(Control *c, int x, int y);
+
+    bool           IsInSizeMove() const { return inSizeMove; }
 
     void SetMinSize(Size s);
     void SetMaxSize(Size s);

@@ -1,21 +1,22 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
 #include <wincodec.h>
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
 
 #include "ByteReader.h"
+#include "FzImgReader.h"
 #include "TgaReader.h"
+#include "WebpReader.h"
 #include "WinUtil.h"
 
 // Get width of each character and add them up.
 // Doesn't seem to be any different than MeasureTextAccurate() i.e. it still
 // underreports the width
-RectF MeasureTextAccurate2(Graphics *g, Font *f, const WCHAR *s, size_t len)
+RectF MeasureTextAccurate2(Graphics *g, Font *f, const WCHAR *s, int len)
 {
-    CrashIf(0 == len);
+    CrashIf(0 >= len);
     FixedArray<Region, 1024> regionBuf(len);
     Region *r = regionBuf.Get();
     StringFormat sf(StringFormat::GenericTypographic());
@@ -23,7 +24,7 @@ RectF MeasureTextAccurate2(Graphics *g, Font *f, const WCHAR *s, size_t len)
     RectF layoutRect;
     FixedArray<CharacterRange, 1024> charRangesBuf(len);
     CharacterRange *charRanges = charRangesBuf.Get();
-    for (size_t i = 0; i < len; i++) {
+    for (int i = 0; i < len; i++) {
         charRanges[i].First = i;
         charRanges[i].Length = 1;
     }
@@ -33,7 +34,7 @@ RectF MeasureTextAccurate2(Graphics *g, Font *f, const WCHAR *s, size_t len)
     RectF bbox;
     REAL maxDy = 0;
     REAL totalDx = 0;
-    for (size_t i = 0; i < len; i++) {
+    for (int i = 0; i < len; i++) {
         r[i].GetBounds(&bbox, g);
         if (bbox.Height > maxDy)
             maxDy = bbox.Height;
@@ -50,7 +51,7 @@ RectF MeasureTextAccurate2(Graphics *g, Font *f, const WCHAR *s, size_t len)
 #define PER_STR_DX_ADJUST  1.f
 
 // http://www.codeproject.com/KB/GDI-plus/measurestring.aspx
-RectF MeasureTextAccurate(Graphics *g, Font *f, const WCHAR *s, size_t len)
+RectF MeasureTextAccurate(Graphics *g, Font *f, const WCHAR *s, int len)
 {
     if (0 == len)
         return RectF(0, 0, 0, 0); // TODO: should set height to font's height
@@ -73,7 +74,7 @@ RectF MeasureTextAccurate(Graphics *g, Font *f, const WCHAR *s, size_t len)
 }
 
 // this usually reports size that is too large
-RectF MeasureTextStandard(Graphics *g, Font *f, const WCHAR *s, size_t len)
+RectF MeasureTextStandard(Graphics *g, Font *f, const WCHAR *s, int len)
 {
     RectF bbox;
     PointF pz(0,0);
@@ -81,8 +82,10 @@ RectF MeasureTextStandard(Graphics *g, Font *f, const WCHAR *s, size_t len)
     return bbox;
 }
 
-RectF MeasureTextQuick(Graphics *g, Font *f, const WCHAR *s, size_t len)
+RectF MeasureTextQuick(Graphics *g, Font *f, const WCHAR *s, int len)
 {
+    CrashIf(0 >= len);
+
     static Vec<Font *> fontCache;
     static Vec<bool> fixCache;
 
@@ -104,7 +107,7 @@ RectF MeasureTextQuick(Graphics *g, Font *f, const WCHAR *s, size_t len)
     // most documents look good enough with these adjustments
     if (!fixCache.At(idx)) {
         REAL correct = 0;
-        for (size_t i = 0; i < len; i++) {
+        for (int i = 0; i < len; i++) {
             switch (s[i]) {
             case 'i': case 'l': correct += 0.2f; break;
             case 't': case 'f': case 'I': correct += 0.1f; break;
@@ -121,11 +124,10 @@ RectF MeasureText(Graphics *g, Font *f, const WCHAR *s, size_t len, TextMeasureA
 {
     if (-1 == len)
         len = str::Len(s);
+    CrashIf(len > INT_MAX);
     if (algo)
-        return algo(g, f, s, len);
-    //RectF bbox = MeasureTextStandard(g, f, s, len);
-    RectF bbox = MeasureTextAccurate(g, f, s, len);
-    //RectF bbox = MeasureTextAccurate2(g, f, s, len);
+        return algo(g, f, s, (int)len);
+    RectF bbox = MeasureTextAccurate(g, f, s, (int)len);
     return bbox;
 }
 
@@ -135,13 +137,13 @@ RectF MeasureText(Graphics *g, Font *f, const WCHAR *s, size_t len, TextMeasureA
 // this shouldn't happen often, so that's fine. It's also possible that
 // a smarter approach is possible, but this usually only does 3 MeasureText
 // calls, so it's not that bad
-int StringLenForWidth(Graphics *g, Font *f, const WCHAR *s, size_t len, float dx, TextMeasureAlgorithm algo)
+size_t StringLenForWidth(Graphics *g, Font *f, const WCHAR *s, size_t len, float dx, TextMeasureAlgorithm algo)
 {
     RectF r = MeasureText(g, f, s, len, algo);
     if (r.Width <= dx)
         return len;
     // make the best guess of the length that fits
-    size_t n = (int)((dx / r.Width) * (float)len);
+    size_t n = (size_t)((dx / r.Width) * (float)len);
     CrashIf((0 == n) || (n > len));
     r = MeasureText(g, f, s, n, algo);
     // find the length len of s that fits within dx iff width of len+1 exceeds dx
@@ -186,47 +188,6 @@ REAL GetSpaceDx(Graphics *g, Font *f, TextMeasureAlgorithm algo)
 #endif
 }
 
-#define COL_CLOSE_X RGB(0xa0, 0xa0, 0xa0)
-#define COL_CLOSE_X_HOVER RGB(0xf9, 0xeb, 0xeb)  // white-ish
-#define COL_CLOSE_HOVER_BG RGB(0xC1, 0x35, 0x35) // red-ish
-
-// Draws the 'x' close button in regular state or onhover state
-// Tries to mimic visual style of Chrome tab close button
-void DrawCloseButton(DRAWITEMSTRUCT *dis)
-{
-    RectI r(RectI::FromRECT(dis->rcItem));
-    ScopedMem<WCHAR> s(win::GetText(dis->hwndItem));
-    bool onHover = str::Eq(s, BUTTON_HOVER_TEXT);
-
-    Graphics g(dis->hDC);
-    g.SetCompositingQuality(CompositingQualityHighQuality);
-    g.SetSmoothingMode(SmoothingModeAntiAlias);
-    g.SetPageUnit(UnitPixel);
-
-    Color c;
-    c.SetFromCOLORREF(GetSysColor(COLOR_BTNFACE)); // hoping this is always the right color
-    SolidBrush bgBrush(c);
-    g.FillRectangle(&bgBrush, r.x-1, r.y-1, r.dx+2, r.dy+2);  //A little bigger than our target to prevent edge smoothing blending background in
-
-    // in onhover state, background is a red-ish circle
-    if (onHover) {
-        c.SetFromCOLORREF(COL_CLOSE_HOVER_BG);
-        SolidBrush b(c);
-        g.FillEllipse(&b, r.x, r.y, r.dx-2, r.dy-2);
-    }
-
-    // draw 'x'
-    c.SetFromCOLORREF(onHover ? COL_CLOSE_X_HOVER : COL_CLOSE_X);
-    Pen p(c, 2);
-    if (onHover) {
-        g.DrawLine(&p, Point(4,      4), Point(r.dx-6, r.dy-6));
-        g.DrawLine(&p, Point(r.dx-6, 4), Point(4,      r.dy-6));
-    } else {
-        g.DrawLine(&p, Point(4,      5), Point(r.dx-6, r.dy-5));
-        g.DrawLine(&p, Point(r.dx-6, 5), Point(4,      r.dy-5));
-    }
-}
-
 void GetBaseTransform(Matrix& m, RectF pageRect, float zoom, int rotation)
 {
     rotation = rotation % 360;
@@ -246,7 +207,7 @@ void GetBaseTransform(Matrix& m, RectF pageRect, float zoom, int rotation)
     m.Rotate((REAL)rotation, MatrixOrderAppend);
 }
 
-Bitmap *WICDecodeImageFromStream(IStream *stream)
+static Bitmap *WICDecodeImageFromStream(IStream *stream)
 {
     ScopedCom com;
 
@@ -273,7 +234,7 @@ Bitmap *WICDecodeImageFromStream(IStream *stream)
     Status ok = bmp.LockBits(&bmpRect, ImageLockModeWrite, PixelFormat32bppARGB, &bmpData);
     if (ok != Ok)
         return NULL;
-    HR(pConverter->CopyPixels(NULL, bmpData.Stride, w * h * 4, (BYTE *)bmpData.Scan0));
+    HR(pConverter->CopyPixels(NULL, bmpData.Stride, bmpData.Stride * h, (BYTE *)bmpData.Scan0));
     bmp.UnlockBits(&bmpData);
     bmp.SetResolution((REAL)xres, (REAL)yres);
 #undef HR
@@ -284,12 +245,12 @@ Bitmap *WICDecodeImageFromStream(IStream *stream)
 
 enum ImgFormat {
     Img_Unknown, Img_BMP, Img_GIF, Img_JPEG,
-    Img_JXR, Img_PNG, Img_TGA, Img_TIFF,
+    Img_JXR, Img_PNG, Img_TGA, Img_TIFF, Img_WebP, Img_JP2,
 };
 
 static ImgFormat GfxFormatFromData(const char *data, size_t len)
 {
-    if (!data || len < 8)
+    if (!data || len < 12)
         return Img_Unknown;
     // check the most common formats first
     if (str::StartsWith(data, "\x89PNG\x0D\x0A\x1A\x0A"))
@@ -306,6 +267,10 @@ static ImgFormat GfxFormatFromData(const char *data, size_t len)
         return Img_TGA;
     if (memeq(data, "II\xBC\x01", 4) || memeq(data, "II\xBC\x00", 4))
         return Img_JXR;
+    if (webp::HasSignature(data, len))
+        return Img_WebP;
+    if (memeq(data, "\0\0\0\x0CjP  \x0D\x0A\x87\x0A", 12))
+        return Img_JP2;
     return Img_Unknown;
 }
 
@@ -319,16 +284,32 @@ const WCHAR *GfxFileExtFromData(const char *data, size_t len)
     case Img_PNG:  return L".png";
     case Img_TGA:  return L".tga";
     case Img_TIFF: return L".tif";
+    case Img_WebP: return L".webp";
+    case Img_JP2:  return L".jp2";
     default:       return NULL;
     }
+}
+
+static bool JpegUsesArithmeticCoding(const char *data, size_t len)
+{
+    CrashIf(GfxFormatFromData(data, len) != Img_JPEG);
+
+    ByteReader r(data, len);
+    for (size_t ix = 2; ix + 9 < len && r.Byte(ix) == 0xFF; ix += r.WordBE(ix + 2) + 2) {
+        if (0xC9 <= r.Byte(ix + 1) && r.Byte(ix + 1) <= 0xCB) {
+            // found the start of a frame using arithmetic coding
+            return true;
+        }
+    }
+    return false;
 }
 
 bool IsGdiPlusNativeFormat(const char *data, size_t len)
 {
     ImgFormat fmt = GfxFormatFromData(data, len);
     return Img_BMP == fmt || Img_GIF == fmt ||
-           Img_JPEG == fmt || Img_PNG == fmt ||
-           Img_TIFF == fmt;
+           (Img_JPEG == fmt && !JpegUsesArithmeticCoding(data, len)) ||
+           Img_PNG == fmt || Img_TIFF == fmt;
 }
 
 // cf. http://stackoverflow.com/questions/4598872/creating-hbitmap-from-memory-buffer/4616394#4616394
@@ -337,6 +318,12 @@ Bitmap *BitmapFromData(const char *data, size_t len)
     ImgFormat format = GfxFormatFromData(data, len);
     if (Img_TGA == format)
         return tga::ImageFromData(data, len);
+    if (Img_WebP == format)
+        return webp::ImageFromData(data, len);
+    if (Img_JP2 == format)
+        return fitz::ImageFromData(data, len);
+    if (Img_JPEG == format && JpegUsesArithmeticCoding(data, len))
+        return fitz::ImageFromData(data, len);
 
     ScopedComPtr<IStream> stream(CreateStreamFromData(data, len));
     if (!stream)
@@ -350,11 +337,9 @@ Bitmap *BitmapFromData(const char *data, size_t len)
         bmp = NULL;
     }
     // GDI+ under Windows XP sometimes fails to extract JPEG image dimensions
-    if (bmp && Img_JPEG == format && 0 == bmp->GetWidth() && 0 == bmp->GetHeight()) {
+    if (bmp && Img_JPEG == format && (0 == bmp->GetWidth() || 0 == bmp->GetHeight())) {
         delete bmp;
-        LARGE_INTEGER zero = { 0 };
-        stream->Seek(zero, STREAM_SEEK_SET, NULL);
-        bmp = WICDecodeImageFromStream(stream);
+        bmp = fitz::ImageFromData(data, len);
     }
     return bmp;
 }
@@ -408,9 +393,10 @@ Size BitmapSizeFromData(const char *data, size_t len)
         }
         break;
     case Img_JPEG:
-        // find the last start of frame marker for non-differential Huffman coding
+        // find the last start of frame marker for non-differential Huffman/arithmetic coding
         for (size_t ix = 2; ix + 9 < len && r.Byte(ix) == 0xFF; ) {
-            if (0xC0 <= r.Byte(ix + 1) && r.Byte(ix + 1) <= 0xC3) {
+            if (0xC0 <= r.Byte(ix + 1) && r.Byte(ix + 1) <= 0xC3 ||
+                0xC9 <= r.Byte(ix + 1) && r.Byte(ix + 1) <= 0xCB) {
                 result.Width = r.WordBE(ix + 7);
                 result.Height = r.WordBE(ix + 5);
             }
@@ -456,11 +442,43 @@ Size BitmapSizeFromData(const char *data, size_t len)
             result.Height = r.WordLE(14);
         }
         break;
+    case Img_WebP:
+        if (len >= 30 && str::StartsWith(data + 12, "VP8 ")) {
+            result.Width = r.WordLE(26) & 0x3fff;
+            result.Height = r.WordLE(28) & 0x3fff;
+        }
+        else {
+            result = webp::SizeFromData(data, len);
+        }
+        break;
+    case Img_JP2:
+        if (len >= 32) {
+            size_t ix = 0;
+            while (ix < len - 32) {
+                uint32_t lbox = r.DWordBE(ix);
+                uint32_t tbox = r.DWordBE(ix + 4);
+                if (0x6A703268 /* jp2h */ == tbox) {
+                    ix += 8;
+                    if (r.DWordBE(ix) == 24 && r.DWordBE(ix + 4) == 0x69686472 /* ihdr */) {
+                        result.Width = r.DWordBE(ix + 16);
+                        result.Height = r.DWordBE(ix + 12);
+                    }
+                    break;
+                }
+                else if (lbox != 0 && ix < UINT32_MAX - lbox) {
+                    ix += lbox;
+                }
+                else {
+                    break;
+                }
+            }
+        }
+        break;
     }
 
     if (result.Empty()) {
         // let GDI+ extract the image size if we've failed
-        // (currently happens for animated GIFs)
+        // (currently happens for animated GIF)
         Bitmap *bmp = BitmapFromData(data, len);
         if (bmp)
             result = Size(bmp->GetWidth(), bmp->GetHeight());
