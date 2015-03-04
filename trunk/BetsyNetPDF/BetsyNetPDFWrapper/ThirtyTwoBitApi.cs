@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012-2014 IBB Ehlert&Wolf GbR
+Copyright 2012-2015 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
