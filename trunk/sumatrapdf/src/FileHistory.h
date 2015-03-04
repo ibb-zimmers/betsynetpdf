@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef FileHistory_h
@@ -64,18 +64,22 @@ class FileHistory {
     }
 
 public:
-    FileHistory() { }
+    FileHistory() : states(NULL) { }
     ~FileHistory() { }
 
     void Clear(bool keepFavorites) {
         if (!states)
             return;
+        Vec<DisplayState *> keep;
         for (size_t i = 0; i < states->Count(); i++) {
-            if (keepFavorites && states->At(i)->favorites->Count() > 0)
-                continue;
-            DeleteDisplayState(states->At(i));
+            if (keepFavorites && states->At(i)->favorites->Count() > 0) {
+                states->At(i)->openCount = 0;
+                keep.Append(states->At(i));
+            }
+            else
+                DeleteDisplayState(states->At(i));
         }
-        states->Reset();
+        *states = keep;
     }
 
     void Append(DisplayState *state) { states->Append(state); }

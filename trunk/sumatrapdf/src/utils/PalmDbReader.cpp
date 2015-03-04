@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -6,6 +6,7 @@
 
 #include "ByteReader.h"
 #include "FileUtil.h"
+#include "WinUtil.h"
 
 #include <pshpack1.h>
 
@@ -45,6 +46,13 @@ PdbReader::PdbReader(const WCHAR *filePath) :
         recOffsets.Reset();
 }
 
+PdbReader::PdbReader(IStream *stream) :
+    data((char *)GetDataFromStream(stream, &dataSize))
+{
+    if (!ParseHeader())
+        recOffsets.Reset();
+}
+
 bool PdbReader::ParseHeader()
 {
     CrashIf(recOffsets.Count() > 0);
@@ -69,7 +77,7 @@ bool PdbReader::ParseHeader()
         recOffsets.Append(off);
     }
     // add sentinel value to simplify use
-    recOffsets.Append(dataSize);
+    recOffsets.Append(std::min((uint32_t)dataSize, (uint32_t)-1));
 
     // validate offsets
     for (int i = 0; i < pdbHeader.numRecords; i++) {

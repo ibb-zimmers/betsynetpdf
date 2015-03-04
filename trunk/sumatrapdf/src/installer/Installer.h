@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef Installer_h
@@ -39,8 +39,6 @@
 // the installer has to be 32bit as well, so that it goes into proper
 // place in registry (under Software\Wow6432Node\Microsoft\Windows\...
 #define REG_PATH_UNINST     L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" APP_NAME_STR
-// Legacy key, only read during an update and removed at uninstallation
-#define REG_PATH_SOFTWARE   L"Software\\" APP_NAME_STR
 
 #define REG_CLASSES_APP     L"Software\\Classes\\" APP_NAME_STR
 #define REG_CLASSES_PDF     L"Software\\Classes\\.pdf"
@@ -50,7 +48,11 @@
 #define PROG_ID               L"ProgId"
 #define APPLICATION           L"Application"
 
+#ifndef _WIN64
 #define REG_PATH_PLUGIN     L"Software\\MozillaPlugins\\@mozilla.zeniko.ch/SumatraPDF_Browser_Plugin"
+#else
+#define REG_PATH_PLUGIN     L"Software\\MozillaPlugins\\@mozilla.zeniko.ch/SumatraPDF_Browser_Plugin_x64"
+#endif
 #define PLUGIN_PATH         L"Path"
 
 // Keys we'll set in REG_PATH_UNINST path
@@ -71,7 +73,7 @@
 #define NO_REPAIR L"NoRepair"
 // REG_SZ, e.g. "Krzysztof Kowalczyk" (PUBLISHER_STR)
 #define PUBLISHER L"Publisher"
-// REG_SZ, path to uninstaller exe
+// REG_SZ, command line for uninstaller
 #define UNINSTALL_STRING L"UninstallString"
 // REG_SZ, e.g. "http://blog.kowalczyk.info/software/sumatrapdf/"
 #define URL_INFO_ABOUT L"URLInfoAbout"
@@ -80,9 +82,8 @@
 // REG_SZ, same as INSTALL_DIR below
 #define INSTALL_LOCATION L"InstallLocation"
 
-// Installation directory (set in HKLM REG_PATH_SOFTWARE
-// for compatibility with the old NSIS installer)
-#define INSTALL_DIR L"Install_Dir"
+// Legacy key, only removed at uninstallation
+#define REG_PATH_SOFTWARE   L"Software\\" APP_NAME_STR
 
 #define ID_BUTTON_EXIT                11
 
@@ -94,10 +95,11 @@ struct GlobalData {
     WCHAR * installDir;
 #ifndef BUILD_UNINSTALLER
     bool    registerAsDefault;
-    bool    installBrowserPlugin;
     bool    installPdfFilter;
     bool    installPdfPreviewer;
+    bool    keepBrowserPlugin;
     bool    justExtractFiles;
+    bool    autoUpdate;
 #endif
 
     WCHAR * firstError;
@@ -113,7 +115,6 @@ struct PayloadInfo {
 extern GlobalData   gGlobalData;
 extern PayloadInfo  gPayloadData[];
 extern WCHAR *      gSupportedExts[];
-extern HINSTANCE    ghinst;
 extern HWND         gHwndFrame;
 extern HWND         gHwndButtonExit;
 extern HWND         gHwndButtonInstUninst;
@@ -131,6 +132,7 @@ extern Gdiplus::Color COLOR_MSG_FAILED;
 void NotifyFailed(const WCHAR *msg);
 void SetMsg(const WCHAR *msg, Gdiplus::Color color);
 WCHAR *GetInstalledExePath();
+WCHAR *GetInstalledBrowserPluginPath();
 void OnCreateWindow(HWND hwnd);
 void ShowUsage();
 void CreateMainWindow();
@@ -150,7 +152,6 @@ void CreateButtonExit(HWND hwndParent);
 void OnButtonExit();
 HWND CreateDefaultButton(HWND hwndParent, const WCHAR *label, int width, int id=IDOK);
 int dpiAdjust(int value);
-void InstallBrowserPlugin();
 void InstallPdfFilter();
 void InstallPdfPreviewer();
 
@@ -166,7 +167,6 @@ DWORD WINAPI UninstallerThread(LPVOID data);
 extern HWND gHwndButtonRunSumatra;
 bool IsValidInstaller();
 void OnInstallationFinished();
-bool IsBrowserPluginInstalled();
 bool IsPdfFilterInstalled();
 bool IsPdfPreviewerInstalled();
 DWORD WINAPI InstallerThread(LPVOID data);

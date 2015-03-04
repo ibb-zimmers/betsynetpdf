@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 /* A driver for various tests. The idea is that instead of having a separate
@@ -6,17 +6,15 @@
    driver which dispatches desired test based on cmd-line arguments. */
 
 #include "BaseUtil.h"
-
 #include "CmdLineParser.h"
+#include "CryptoUtil.h"
 #include "DirIter.h"
 #include "EbookFormatter.h"
 #include "FileUtil.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
 #include "HtmlPrettyPrint.h"
 #include "MobiDoc.h"
 #include "Mui.h"
-#include "PdfEngine.h"
 #include "Timer.h"
 #include "WinUtil.h"
 #include "ZipUtil.h"
@@ -79,11 +77,11 @@ diff: 0.929000
 static void BenchMD5Size(void *data, size_t dataSize, char *desc)
 {
     unsigned char d1[16], d2[16];
-    Timer t1(true);
+    Timer t1;
     CalcMD5Digest((unsigned char*)data, dataSize, d1);
     double dur1 = t1.GetTimeInMs();
 
-    Timer t2(true);
+    Timer t2;
     CalcMD5DigestWin(data, dataSize, d2);
     bool same = memeq(d1, d2, 16);
     CrashAlwaysIf(!same);
@@ -113,7 +111,7 @@ static void MobiSaveHtml(const WCHAR *filePathBase, MobiDoc *mb)
     ScopedMem<WCHAR> outFile(str::Join(filePathBase, L"_pp.html"));
 
     size_t htmlLen;
-    const char *html = mb->GetBookHtmlData(htmlLen);
+    const char *html = mb->GetHtmlData(htmlLen);
     size_t ppHtmlLen;
     char *ppHtml = PrettyPrintHtml(html, htmlLen, ppHtmlLen);
     file::WriteAll(outFile.Get(), ppHtml, ppHtmlLen);
@@ -127,7 +125,7 @@ static void MobiSaveImage(const WCHAR *filePathBase, size_t imgNo, ImageData *im
     // it's valid to not have image data at a given index
     if (!img || !img->data)
         return;
-    const WCHAR *ext = GfxFileExtFromData((char*)img->data, img->len);
+    const WCHAR *ext = GfxFileExtFromData(img->data, img->len);
     CrashAlwaysIf(!ext);
     ScopedMem<WCHAR> fileName(str::Format(L"%s_img_%d%s", filePathBase, imgNo, ext));
     file::WriteAll(fileName.Get(), img->data, img->len);
@@ -150,7 +148,7 @@ static void MobiLayout(MobiDoc *mobiDoc)
     args.pageDy = 480;
     args.SetFontName(L"Tahoma");
     args.fontSize = 12;
-    args.htmlStr = mobiDoc->GetBookHtmlData(args.htmlStrLen);
+    args.htmlStr = mobiDoc->GetHtmlData(args.htmlStrLen);
     args.textAllocator = &textAllocator;
 
     MobiFormatter mf(&args, mobiDoc);
@@ -169,7 +167,7 @@ static void MobiTestFile(const WCHAR *filePath)
     }
 
     if (gLayout) {
-        Timer t(true);
+        Timer t;
         MobiLayout(mobiDoc);
         wprintf(L"Spent %.2f ms laying out %s\n", t.GetTimeInMs(), filePath);
     }
@@ -206,16 +204,8 @@ static bool IsMobiFile(const WCHAR *f)
 static void MobiTestDir(WCHAR *dir)
 {
     wprintf(L"Testing mobi files in '%s'\n", dir);
-    DirIter di;
-    if (!di.Start(dir, true)) {
-        wprintf(L"Error: invalid directory '%s'\n", dir);
-        return;
-    }
-
-    for (;;) {
-        const WCHAR *p = di.Next();
-        if (NULL == p)
-            break;
+    DirIter di(dir, true);
+    for (const WCHAR *p = di.First(); p; p = di.Next()) {
         if (IsMobiFile(p))
             MobiTestFile(p);
     }
@@ -235,22 +225,21 @@ void ZipCreateTest()
 {
     WCHAR *zipFileName = L"tester-tmp.zip";
     file::Delete(zipFileName);
-    ZipCreator *zc = new ZipCreator();
-    bool ok = zc->AddFile(L"makefile.deps");
+    ZipCreator zc(zipFileName);
+    bool ok = zc.AddFile(L"makefile.deps");
     if (!ok) {
         printf("ZipCreateTest(): failed to add makefile.deps");
         return;
     }
-    ok = zc->AddFile(L"makefile.msvc");
+    ok = zc.AddFile(L"makefile.msvc");
     if (!ok) {
         printf("ZipCreateTest(): failed to add makefile.msvc");
         return;
     }
-    ok = zc->SaveAs(zipFileName);
+    ok = zc.Finish();
     if (!ok) {
-        printf("ZipCreateTest(): SaveAs() failed");
+        printf("ZipCreateTest(): Finish() failed");
     }
-    delete zc;
 }
 
 int TesterMain()

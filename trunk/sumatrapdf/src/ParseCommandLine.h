@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef ParseCommandLine_h
@@ -18,78 +18,58 @@ public:
     bool        makeDefault;
     bool        exitWhenDone;
     bool        printDialog;
-    WCHAR *     printerName;
-    WCHAR *     printSettings;
-    COLORREF    bgColor;
-    WCHAR *     inverseSearchCmdLine;
-    WCHAR *     forwardSearchOrigin;
+    ScopedMem<WCHAR> printerName;
+    ScopedMem<WCHAR> printSettings;
+    ScopedMem<WCHAR> forwardSearchOrigin;
     int         forwardSearchLine;
-    ForwardSearch forwardSearch;
-    bool        escToExit;
-    bool        reuseInstance;
-    char *      lang;
-    WCHAR *     destName;
+    bool        reuseDdeInstance;
+    ScopedMem<WCHAR> destName;
     int         pageNumber;
     bool        restrictedUse;
-    COLORREF    colorRange[2]; // foreground color / background color
     bool        enterPresentation;
-    bool        enterFullscreen;
+    bool        enterFullScreen;
     DisplayMode startView;
     float       startZoom;
     PointI      startScroll;
     bool        showConsole;
     HWND        hwndPluginParent;
-    WCHAR *     pluginURL;
+    ScopedMem<WCHAR> pluginURL;
     bool        exitImmediately;
     bool        silent;
-    bool        cbxMangaMode;
 
     // stress-testing related
-    WCHAR *     stressTestPath;
-    WCHAR *     stressTestFilter; // NULL is equivalent to "*" (i.e. all files)
-    WCHAR *     stressTestRanges;
+    ScopedMem<WCHAR> stressTestPath;
+    ScopedMem<WCHAR> stressTestFilter; // NULL is equivalent to "*" (i.e. all files)
+    ScopedMem<WCHAR> stressTestRanges;
     int         stressTestCycles;
     int         stressParallelCount;
     bool        stressRandomizeFiles;
 
     bool        crashOnOpen;
 
-    CommandLineInfo() : makeDefault(false), exitWhenDone(false), printDialog(false),
-        printerName(NULL), printSettings(NULL), bgColor((COLORREF)-1),
-        escToExit(false), reuseInstance(false), lang(NULL),
-        destName(NULL), pageNumber(-1), inverseSearchCmdLine(NULL),
+    // deprecated flags
+    ScopedMem<char> lang;
+
+    CommandLineInfo(const WCHAR *cmdLine) : makeDefault(false), exitWhenDone(false), printDialog(false),
+        printerName(NULL), printSettings(NULL),
+        reuseDdeInstance(false), lang(NULL),
+        destName(NULL), pageNumber(-1),
         restrictedUse(false), pluginURL(NULL),
-        enterPresentation(false), enterFullscreen(false), hwndPluginParent(NULL),
+        enterPresentation(false), enterFullScreen(false), hwndPluginParent(NULL),
         startView(DM_AUTOMATIC), startZoom(INVALID_ZOOM), startScroll(PointI(-1, -1)),
-        showConsole(false), exitImmediately(false), silent(false), cbxMangaMode(false),
+        showConsole(false), exitImmediately(false), silent(false),
         forwardSearchOrigin(NULL), forwardSearchLine(0),
         stressTestPath(NULL), stressTestFilter(NULL),
         stressTestRanges(NULL), stressTestCycles(1), stressParallelCount(1),
         stressRandomizeFiles(false),
         crashOnOpen(false)
     {
-        colorRange[0] = RGB(0, 0, 0); // black
-        colorRange[1] = RGB(0xFF, 0xFF, 0xFF); // white
-        forwardSearch.highlightOffset = 0;
-        forwardSearch.highlightWidth = 0;
-        forwardSearch.highlightColor = (COLORREF)-1;
-        forwardSearch.highlightPermanent = false;
+        ParseCommandLine(cmdLine);
     }
 
-    ~CommandLineInfo() {
-        free(printerName);
-        free(printSettings);
-        free(inverseSearchCmdLine);
-        free(forwardSearchOrigin);
-        free(lang);
-        free(destName);
-        free(stressTestPath);
-        free(stressTestRanges);
-        free(stressTestFilter);
-        free(pluginURL);
-    }
+    ~CommandLineInfo() { }
 
-    void ParseCommandLine(WCHAR *cmdLine);
+    void ParseCommandLine(const WCHAR *cmdLine);
 };
 
 #endif

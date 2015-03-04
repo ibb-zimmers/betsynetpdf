@@ -1,14 +1,16 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
+#include "BitManip.h"
 #include "FileUtil.h"
 #include "WinUtil.h"
-#include <io.h>
-#include <fcntl.h>
 #include <mlang.h>
+#include "WinCursors.h"
 
 #include "DebugLog.h"
+
+static HFONT gDefaultGuiFont = NULL;
 
 // Loads a DLL explicitly from the system's library collection
 HMODULE SafeLoadLibrary(const WCHAR *dllName)
@@ -39,20 +41,20 @@ void InitAllCommonControls()
     InitCommonControlsEx(&cex);
 }
 
-void FillWndClassEx(WNDCLASSEX& wcex, HINSTANCE hInstance, const WCHAR *clsName, WNDPROC wndproc)
+void FillWndClassEx(WNDCLASSEX& wcex, const WCHAR *clsName, WNDPROC wndproc)
 {
     ZeroMemory(&wcex, sizeof(WNDCLASSEX));
     wcex.cbSize         = sizeof(WNDCLASSEX);
     wcex.style          = CS_HREDRAW | CS_VREDRAW;
-    wcex.hInstance      = hInstance;
-    wcex.hCursor        = LoadCursor(NULL, IDC_ARROW);
+    wcex.hInstance      = GetModuleHandle(NULL);
+    wcex.hCursor        = GetCursor(IDC_ARROW);
     wcex.lpszClassName  = clsName;
     wcex.lpfnWndProc    = wndproc;
 }
 
 // Return true if application is themed. Wrapper around IsAppThemed() in uxtheme.dll
 // that is compatible with earlier windows versions.
-bool IsAppThemed()
+bool _IsAppThemed()
 {
     FARPROC pIsAppThemed = LoadDllFunc(L"uxtheme.dll", "IsAppThemed");
     if (!pIsAppThemed)
@@ -62,10 +64,15 @@ bool IsAppThemed()
     return false;
 }
 
-WORD GetWindowsVersion()
+/* Vista is major: 6, minor: 0 */
+bool IsVistaOrGreater()
 {
-    DWORD ver = GetVersion();
-    return MAKEWORD(HIBYTE(ver), LOBYTE(ver));
+    OSVERSIONINFOEX osver = { 0 };
+    ULONGLONG condMask = 0;
+    osver.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
+    osver.dwMajorVersion = 6;
+    VER_SET_CONDITION(condMask, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    return VerifyVersionInfo(&osver, VER_MAJORVERSION, condMask);
 }
 
 bool IsRunningInWow64()
@@ -147,6 +154,13 @@ bool WriteRegStr(HKEY keySub, const WCHAR *keyName, const WCHAR *valName, const 
 {
     LSTATUS res = SHSetValue(keySub, keyName, valName, REG_SZ, (const VOID *)value, (DWORD)(str::Len(value) + 1) * sizeof(WCHAR));
     return ERROR_SUCCESS == res;
+}
+
+bool ReadRegDWORD(HKEY keySub, const WCHAR *keyName, const WCHAR *valName, DWORD& value)
+{
+    DWORD size = sizeof(DWORD);
+    LSTATUS res = SHGetValue(keySub, keyName, valName, NULL, &value, &size);
+    return ERROR_SUCCESS == res && sizeof(DWORD) == size;
 }
 
 bool WriteRegDWORD(HKEY keySub, const WCHAR *keyName, const WCHAR *valName, DWORD value)
@@ -276,6 +290,7 @@ WCHAR *GetExePath()
     WCHAR buf[MAX_PATH];
     buf[0] = 0;
     GetModuleFileName(NULL, buf, dimof(buf));
+    buf[dimof(buf) - 1] = '\0';
     // TODO: is normalization needed here at all?
     return path::Normalize(buf);
 }
@@ -515,6 +530,12 @@ void DrawCenteredText(HDC hdc, const RectI& r, const WCHAR *txt, bool isRTL)
     DrawText(hdc, txt, -1, &tmpRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | (isRTL ? DT_RTLREADING : 0));
 }
 
+void DrawCenteredText(HDC hdc, const RECT& r, const WCHAR *txt, bool isRTL)
+{
+    RectI rc = RectI::FromRECT(r);
+    DrawCenteredText(hdc, rc, txt, isRTL);
+}
+
 /* Return size of a text <txt> in a given <hwnd>, taking into account its font */
 SizeI TextSizeInHwnd(HWND hwnd, const WCHAR *txt)
 {
@@ -539,12 +560,14 @@ bool IsCursorOverWindow(HWND hwnd)
     return rcWnd.Contains(PointI(pt.x, pt.y));
 }
 
-bool GetCursorPosInHwnd(HWND hwnd, POINT& posOut)
+bool GetCursorPosInHwnd(HWND hwnd, PointI& posOut)
 {
-    if (!GetCursorPos(&posOut))
+    POINT pt;
+    if (!GetCursorPos(&pt))
         return false;
-    if (!ScreenToClient(hwnd, &posOut))
+    if (!ScreenToClient(hwnd, &pt))
         return false;
+    posOut = PointI(pt.x, pt.y);
     return true;
 }
 
@@ -638,11 +661,33 @@ bool CopyImageToClipboard(HBITMAP hbmp, bool appendOnly)
 void ToggleWindowStyle(HWND hwnd, DWORD flag, bool enable, int type)
 {
     DWORD style = GetWindowLong(hwnd, type);
+    DWORD newStyle;
     if (enable)
-        style = style | flag;
+        newStyle = style | flag;
     else
-        style = style & ~flag;
-    SetWindowLong(hwnd, type, style);
+        newStyle = style & ~flag;
+    if (newStyle != style)
+        SetWindowLong(hwnd, type, newStyle);
+}
+
+RectI ChildPosWithinParent(HWND hwnd)
+{
+    POINT pt = { 0, 0 };
+    ClientToScreen(GetParent(hwnd), &pt);
+    WindowRect rc(hwnd);
+    rc.Offset(-pt.x, -pt.y);
+    return rc;
+}
+
+HFONT GetDefaultGuiFont()
+{
+    if (!gDefaultGuiFont) {
+        NONCLIENTMETRICS ncm = { 0 };
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+        gDefaultGuiFont = CreateFontIndirect(&ncm.lfMessageFont);
+    }
+    return gDefaultGuiFont;
 }
 
 DoubleBuffer::DoubleBuffer(HWND hwnd, RectI rect) :
@@ -708,7 +753,7 @@ WCHAR *ToSafeString(const WCHAR *str)
     }
 }
 
-HFONT GetSimpleFont(HDC hdc, const WCHAR *fontName, int fontSize)
+HFONT CreateSimpleFont(HDC hdc, const WCHAR *fontName, int fontSize)
 {
     LOGFONT lf = { 0 };
 
@@ -807,26 +852,33 @@ bool ReadDataFromStream(IStream *stream, void *buffer, size_t len, size_t offset
     if (FAILED(res))
         return false;
     ULONG read;
-    res = stream->Read(buffer, len, &read);
-    if (read < len)
-        ((char *)buffer)[read] = '\0';
-    return SUCCEEDED(res);
+#ifdef _WIN64
+    for (; len > ULONG_MAX; len -= ULONG_MAX) {
+        res = stream->Read(buffer, ULONG_MAX, &read);
+        if (FAILED(res) || read != ULONG_MAX)
+            return false;
+        len -= ULONG_MAX;
+        buffer = (char *)buffer + ULONG_MAX;
+    }
+#endif
+    res = stream->Read(buffer, (ULONG)len, &read);
+    return SUCCEEDED(res) && read == len;
 }
 
-UINT GuessTextCodepage(const char *data, size_t len, UINT default)
+UINT GuessTextCodepage(const char *data, size_t len, UINT defVal)
 {
     // try to guess the codepage
     ScopedComPtr<IMultiLanguage2> pMLang;
     if (!pMLang.Create(CLSID_CMultiLanguage))
-        return default;
+        return defVal;
 
-    int ilen = (int)min(len, INT_MAX);
+    int ilen = std::min((int)len, INT_MAX);
     int count = 1;
     DetectEncodingInfo info = { 0 };
     HRESULT hr = pMLang->DetectInputCodepage(MLDETECTCP_NONE, CP_ACP, (char *)data,
                                              &ilen, &info, &count);
     if (FAILED(hr) || count != 1)
-        return default;
+        return defVal;
     return info.nCodePage;
 }
 
@@ -847,6 +899,12 @@ WCHAR *NormalizeString(const WCHAR *str, int /* NORM_FORM */ form)
     if (sizeEst <= 0)
         return NULL;
     return res.StealData();
+}
+
+bool IsRtl(HWND hwnd)
+{
+    DWORD style = GetWindowLong(hwnd, GWL_EXSTYLE);
+    return bit::IsMaskSet<DWORD>(style, WS_EX_LAYOUTRTL);
 }
 
 namespace win {
@@ -875,24 +933,32 @@ int GetHwndDpi(HWND hwnd, float *uiDPIFactor)
 
 int GlobalDpiAdjust(int value)
 {
-    static float dpiFactor = 0.f;
-    if (0.f == dpiFactor) {
-        win::GetHwndDpi(NULL, &dpiFactor);
-        if (0.f == dpiFactor)
-            dpiFactor = 1.f;
-    }
-    return (int)(value * dpiFactor);
+    return GlobalDpiAdjust((float)value);
 }
 
 int GlobalDpiAdjust(float value)
 {
     static float dpiFactor = 0.f;
     if (0.f == dpiFactor) {
-        win::GetHwndDpi(NULL, &dpiFactor);
+        win::GetHwndDpi(HWND_DESKTOP, &dpiFactor);
         if (0.f == dpiFactor)
             dpiFactor = 1.f;
     }
     return (int)(value * dpiFactor);
+}
+
+int DpiAdjust(HWND hwnd, float n)
+{
+    float dpiFactor;
+    GetHwndDpi(hwnd, &dpiFactor);
+    float res = n * dpiFactor;
+    return (int)ceilf(res);
+
+}
+
+int DpiAdjust(HWND hwnd, int n)
+{
+    return DpiAdjust(hwnd, (float)n);
 }
 
 }
@@ -912,25 +978,71 @@ inline int mul255(int a, int b)
     return x >> 8;
 }
 
-void UpdateBitmapColorRange(HBITMAP hbmp, COLORREF range[2])
+void UpdateBitmapColors(HBITMAP hbmp, COLORREF textColor, COLORREF bgColor)
 {
-    if ((range[0] & 0xFFFFFF) == WIN_COL_BLACK &&
-        (range[1] & 0xFFFFFF) == WIN_COL_WHITE)
+    if ((textColor & 0xFFFFFF) == WIN_COL_BLACK &&
+        (bgColor & 0xFFFFFF) == WIN_COL_WHITE)
         return;
 
     // color order in DIB is blue-green-red-alpha
-    int base[4] = { GetBValue(range[0]), GetGValue(range[0]), GetRValue(range[0]), 0 };
+    int base[4] = { GetBValueSafe(textColor), GetGValueSafe(textColor), GetRValueSafe(textColor), 0 };
     int diff[4] = {
-        GetBValue(range[1]) - base[0],
-        GetGValue(range[1]) - base[1],
-        GetRValue(range[1]) - base[2],
+        GetBValueSafe(bgColor) - base[0],
+        GetGValueSafe(bgColor) - base[1],
+        GetRValueSafe(bgColor) - base[2],
         255
     };
 
-    HDC hDC = GetDC(NULL);
-    BITMAPINFO bmi = { 0 };
-    SizeI size = GetBitmapSize(hbmp);
+    DIBSECTION info = { 0 };
+    int ret = GetObject(hbmp, sizeof(info), &info);
+    CrashIf(ret < sizeof(info.dsBm));
+    SizeI size(info.dsBm.bmWidth, info.dsBm.bmHeight);
 
+    // for mapped 32-bit DI bitmaps: directly access the pixel data
+    if (ret >= sizeof(info.dsBm) && info.dsBm.bmBits &&
+        32 == info.dsBm.bmBitsPixel && size.dx * 4 == info.dsBm.bmWidthBytes) {
+        int bmpBytes = size.dx * size.dy * 4;
+        BYTE *bmpData = (BYTE *)info.dsBm.bmBits;
+        for (int i = 0; i < bmpBytes; i++) {
+            int k = i % 4;
+            bmpData[i] = (BYTE)(base[k] + mul255(bmpData[i], diff[k]));
+        }
+        return;
+    }
+
+    // for mapped 24-bit DI bitmaps: directly access the pixel data
+    if (ret >= sizeof(info.dsBm) && info.dsBm.bmBits &&
+        24 == info.dsBm.bmBitsPixel && info.dsBm.bmWidthBytes >= size.dx * 3) {
+        BYTE *bmpData = (BYTE *)info.dsBm.bmBits;
+        for (int y = 0; y < size.dy; y++) {
+            for (int x = 0; x < size.dx * 3; x++) {
+                int k = x % 3;
+                bmpData[x] = (BYTE)(base[k] + mul255(bmpData[x], diff[k]));
+            }
+            bmpData += info.dsBm.bmWidthBytes;
+        }
+        return;
+    }
+
+    // for paletted DI bitmaps: only update the color palette
+    if (sizeof(info) == ret && info.dsBmih.biBitCount && info.dsBmih.biBitCount <= 8) {
+        CrashIf(info.dsBmih.biBitCount != 8);
+        RGBQUAD palette[256];
+        HDC hDC = CreateCompatibleDC(NULL);
+        DeleteObject(SelectObject(hDC, hbmp));
+        UINT num = GetDIBColorTable(hDC, 0, dimof(palette), palette);
+        for (UINT i = 0; i < num; i++) {
+            palette[i].rgbRed = (BYTE)(base[2] + mul255(palette[i].rgbRed, diff[2]));
+            palette[i].rgbGreen = (BYTE)(base[1] + mul255(palette[i].rgbGreen, diff[1]));
+            palette[i].rgbBlue = (BYTE)(base[0] + mul255(palette[i].rgbBlue, diff[0]));
+        }
+        if (num > 0)
+            SetDIBColorTable(hDC, 0, num, palette);
+        DeleteDC(hDC);
+        return;
+    }
+
+    BITMAPINFO bmi = { 0 };
     bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
     bmi.bmiHeader.biWidth = size.dx;
     bmi.bmiHeader.biHeight = size.dy;
@@ -938,18 +1050,20 @@ void UpdateBitmapColorRange(HBITMAP hbmp, COLORREF range[2])
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
 
+    HDC hDC = CreateCompatibleDC(NULL);
     int bmpBytes = size.dx * size.dy * 4;
-    ScopedMem<unsigned char> bmpData((unsigned char *)malloc(bmpBytes));
+    ScopedMem<BYTE> bmpData((BYTE *)malloc(bmpBytes));
     CrashIf(!bmpData);
+
     if (GetDIBits(hDC, hbmp, 0, size.dy, bmpData, &bmi, DIB_RGB_COLORS)) {
         for (int i = 0; i < bmpBytes; i++) {
             int k = i % 4;
-            bmpData[i] = (uint8_t)(base[k] + mul255(bmpData[i], diff[k]));
+            bmpData[i] = (BYTE)(base[k] + mul255(bmpData[i], diff[k]));
         }
         SetDIBits(hDC, hbmp, 0, size.dy, bmpData, &bmi, DIB_RGB_COLORS);
     }
 
-    ReleaseDC(NULL, hDC);
+    DeleteDC(hDC);
 }
 
 // create data for a .bmp file from this bitmap (if saved to disk, the HBITMAP
@@ -989,11 +1103,29 @@ unsigned char *SerializeBitmap(HBITMAP hbmp, size_t *bmpBytesOut)
     return bmpData;
 }
 
+HBITMAP CreateMemoryBitmap(SizeI size, HANDLE *hDataMapping)
+{
+    BITMAPINFO bmi = { 0 };
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = size.dx;
+    bmi.bmiHeader.biHeight = -size.dy;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    // trading speed for memory (32 bits yields far better performance)
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biSizeImage = size.dx * 4 * size.dy;
+
+    void *data = NULL;
+    if (hDataMapping && !*hDataMapping)
+        *hDataMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, bmi.bmiHeader.biSizeImage, NULL);
+    return CreateDIBSection(NULL, &bmi, DIB_RGB_COLORS, &data, hDataMapping ? *hDataMapping : NULL, 0);
+}
+
 COLORREF AdjustLightness(COLORREF c, float factor)
 {
-    BYTE R = GetRValue(c), G = GetGValue(c), B = GetBValue(c);
+    BYTE R = GetRValueSafe(c), G = GetGValueSafe(c), B = GetBValueSafe(c);
     // cf. http://en.wikipedia.org/wiki/HSV_color_space#Hue_and_chroma
-    BYTE M = max(max(R, G), B), m = min(min(R, G), B);
+    BYTE M = std::max(std::max(R, G), B), m = std::min(std::min(R, G), B);
     if (M == m) {
         // for grayscale values, lightness is proportional to the color value
         BYTE X = (BYTE)limitValue((int)floorf(M * factor + 0.5f), 0, 255);
@@ -1015,6 +1147,14 @@ COLORREF AdjustLightness(COLORREF c, float factor)
     G = (BYTE)floorf((M == G ? C1 : m != G ? X1 : 0) + m1 + 0.5f);
     B = (BYTE)floorf((M == B ? C1 : m != B ? X1 : 0) + m1 + 0.5f);
     return RGB(R, G, B);
+}
+
+// cf. http://en.wikipedia.org/wiki/HSV_color_space#Lightness
+float GetLightness(COLORREF c)
+{
+    BYTE R = GetRValueSafe(c), G = GetGValueSafe(c), B = GetBValueSafe(c);
+    BYTE M = std::max(std::max(R, G), B), m = std::min(std::min(R, G), B);
+    return (M + m) / 2.0f;
 }
 
 // This is meant to measure program startup time from the user perspective.
@@ -1063,7 +1203,8 @@ BOOL SafeDestroyWindow(HWND *hwnd)
 
 // based on http://mdb-blog.blogspot.com/2013/01/nsis-lunch-program-as-user-from-uac.html
 // uses $WINDIR\explorer.exe to launch cmd
-// Other primising approaches:
+// Other promising approaches:
+// - http://blogs.msdn.com/b/oldnewthing/archive/2013/11/18/10468726.aspx
 // - http://brandonlive.com/2008/04/27/getting-the-shell-to-run-an-application-for-you-part-2-how/
 // - http://www.codeproject.com/Articles/23090/Creating-a-process-with-Medium-Integration-Level-f
 // Approaches tried but didn't work:
@@ -1085,90 +1226,6 @@ void RunNonElevated(const WCHAR *exePath)
 Run:
     HANDLE h = LaunchProcess(cmd ? cmd : exePath);
     SafeCloseHandle(&h);
-}
-
-// Note: MS_ENH_RSA_AES_PROV_XP isn't defined in the SDK shipping with VS2008
-#ifndef MS_ENH_RSA_AES_PROV_XP
-#define MS_ENH_RSA_AES_PROV_XP L"Microsoft Enhanced RSA and AES Cryptographic Provider (Prototype)"
-#endif
-#ifndef PROV_RSA_AES
-#define PROV_RSA_AES 24
-#endif
-
-// MD5 digest that uses Windows' CryptoAPI. It's good for code that doesn't already
-// have MD5 code (smaller code) and it's probably faster than most other implementations
-// TODO: could try to use CryptoNG available starting in Vista. But then again, would that be worth it?
-void CalcMD5DigestWin(const void *data, size_t byteCount, unsigned char digest[16])
-{
-    HCRYPTPROV hProv = 0;
-    HCRYPTHASH hHash = 0;
-
-    // http://stackoverflow.com/questions/9794745/ms-cryptoapi-doesnt-work-on-windows-xp-with-cryptacquirecontext
-    BOOL ok = CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
-    if (!ok)
-        ok = CryptAcquireContext(&hProv, NULL, MS_ENH_RSA_AES_PROV_XP, PROV_RSA_AES, CRYPT_VERIFYCONTEXT);
-
-    CrashAlwaysIf(!ok);
-    ok = CryptCreateHash(hProv, CALG_MD5, 0, 0, &hHash);
-    CrashAlwaysIf(!ok);
-    CrashAlwaysIf(byteCount > UINT_MAX);
-    ok = CryptHashData(hHash, (const BYTE*)data, (DWORD)byteCount, 0);
-    CrashAlwaysIf(!ok);
-
-    DWORD hashLen;
-    DWORD argSize = sizeof(DWORD);
-    ok = CryptGetHashParam(hHash, HP_HASHSIZE, (BYTE *)&hashLen, &argSize, 0);
-    CrashIf(sizeof(DWORD) != argSize);
-    CrashAlwaysIf(!ok);
-    CrashAlwaysIf(16 != hashLen);
-    ok = CryptGetHashParam(hHash, HP_HASHVAL, digest, &hashLen, 0);
-    CrashAlwaysIf(!ok);
-    CrashAlwaysIf(16 != hashLen);
-    CryptDestroyHash(hHash);
-    CryptReleaseContext(hProv,0);
-}
-
-// SHA1 digest that uses Windows' CryptoAPI. It's good for code that doesn't already
-// have SHA1 code (smaller code) and it's probably faster than most other implementations
-// TODO: hasn't been tested for corectness
-void CalcSha1DigestWin(void *data, size_t byteCount, unsigned char digest[32])
-{
-    HCRYPTPROV hProv = 0;
-    HCRYPTHASH hHash = 0;
-
-    BOOL ok = CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
-    if (!ok) {
-        // TODO: test this on XP
-        ok = CryptAcquireContext(&hProv, NULL, MS_ENH_RSA_AES_PROV_XP, PROV_RSA_AES, CRYPT_VERIFYCONTEXT);
-    }
-    CrashAlwaysIf(!ok);
-    ok = CryptCreateHash(hProv, CALG_SHA1, 0, 0, &hHash);
-    CrashAlwaysIf(!ok);
-    CrashAlwaysIf(byteCount > UINT_MAX);
-    ok = CryptHashData(hHash, (const BYTE*)data, (DWORD)byteCount, 0);
-    CrashAlwaysIf(!ok);
-
-    DWORD hashLen;
-    DWORD argSize = sizeof(DWORD);
-    ok = CryptGetHashParam(hHash, HP_HASHSIZE, (BYTE *)&hashLen, &argSize, 0);
-    CrashIf(sizeof(DWORD) != argSize);
-    CrashAlwaysIf(!ok);
-    CrashAlwaysIf(32 != hashLen);
-    ok = CryptGetHashParam(hHash, HP_HASHVAL, digest, &hashLen, 0);
-    CrashAlwaysIf(!ok);
-    CrashAlwaysIf(32 != hashLen);
-    CryptDestroyHash(hHash);
-    CryptReleaseContext(hProv,0);
-}
-
-static int RectDx(RECT& r)
-{
-    return r.right - r.left;
-}
-
-static int RectDy(RECT& r)
-{
-    return r.bottom - r.top;
 }
 
 void ResizeHwndToClientArea(HWND hwnd, int dx, int dy, bool hasMenu)
@@ -1211,4 +1268,84 @@ char *LoadTextResource(int resId, size_t *sizeOut)
         *sizeOut = size;
     UnlockResource(res);
     return s;
+}
+
+static HDDEDATA CALLBACK DdeCallback(UINT uType, UINT uFmt, HCONV hconv, HSZ hsz1,
+    HSZ hsz2, HDDEDATA hdata, ULONG_PTR dwData1, ULONG_PTR dwData2)
+{
+    return 0;
+}
+
+bool DDEExecute(const WCHAR *server, const WCHAR *topic, const WCHAR *command)
+{
+    DWORD inst = 0;
+    HSZ hszServer = NULL, hszTopic = NULL;
+    HCONV hconv = NULL;
+    bool ok = false;
+
+    CrashIf(str::Len(command) >= INT_MAX - 1);
+    if (str::Len(command) >= INT_MAX - 1)
+        return false;
+
+    UINT result = DdeInitialize(&inst, DdeCallback, APPCMD_CLIENTONLY, 0);
+    if (result != DMLERR_NO_ERROR)
+        return false;
+
+    hszServer = DdeCreateStringHandle(inst, server, CP_WINNEUTRAL);
+    if (!hszServer)
+        goto Exit;
+    hszTopic = DdeCreateStringHandle(inst, topic, CP_WINNEUTRAL);
+    if (!hszTopic)
+        goto Exit;
+    hconv = DdeConnect(inst, hszServer, hszTopic, NULL);
+    if (!hconv)
+        goto Exit;
+
+    DWORD cbLen = ((DWORD)str::Len(command) + 1) * sizeof(WCHAR);
+    HDDEDATA answer = DdeClientTransaction((BYTE *)command, cbLen, hconv, 0, CF_UNICODETEXT, XTYP_EXECUTE, 10000, NULL);
+    if (answer) {
+        DdeFreeDataHandle(answer);
+        ok = true;
+    }
+
+Exit:
+    if (hconv)
+        DdeDisconnect(hconv);
+    if (hszTopic)
+        DdeFreeStringHandle(inst, hszTopic);
+    if (hszServer)
+        DdeFreeStringHandle(inst, hszServer);
+    DdeUninitialize(inst);
+
+    return ok;
+}
+
+// given r,  sets r1, r2 and r3 so that:
+//  [         r       ]
+//  [ r1 ][  r2 ][ r3 ]
+//        ^     ^
+//        y     y+dy
+void DivideRectV(const RECT&r, int x, int dx, RECT& r1, RECT& r2, RECT& r3)
+{
+    r1 = r2 = r3 = r;
+    r1.right = x;
+    r2.left = x;
+    r2.right = x + dx;
+    r3.left = x + dx + 1;
+}
+
+// like DivideRectV
+void DivideRectH(const RECT&r, int y, int dy, RECT& r1, RECT& r2, RECT& r3)
+{
+    r1 = r2 = r3 = r;
+    r1.bottom = y;
+    r2.top = y;
+    r2.bottom = y + dy;
+    r3.top = y + dy + 1;
+}
+
+void RectInflateTB(RECT& r, int top, int bottom)
+{
+    r.top += top;
+    r.bottom += bottom;
 }

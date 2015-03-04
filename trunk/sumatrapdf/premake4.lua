@@ -12,8 +12,8 @@ function solution_common()
   -- FatalWarnings - compiler warnigs are errors'
   -- NoMinimalRebuild - disable /Gm because it clashes with /MP
   flags {
-   "Symbols", "StaticRuntime", "ExtraWarnings", "FatalWarnings",
-   "NoRTTI", "Unicode", "NoExceptions", "NoMinimalRebuild"
+    "Symbols", "StaticRuntime", "ExtraWarnings", "FatalWarnings",
+    "NoRTTI", "Unicode", "NoExceptions", "NoMinimalRebuild"
   }
 
   configuration "Debug"
@@ -21,49 +21,22 @@ function solution_common()
     defines { "_DEBUG", "DEBUG" }
 
   configuration "Release"
-     targetdir "obj-rel"
-     flags { "Optimize" }
-     defines { "NDEBUG" }
-     -- 4189 - variable not used, happens with CrashIf() macros that are no-op
-     --        in release builds
-     buildoptions { "/wd4189" }
+    targetdir "obj-rel"
+    flags { "Optimize" }
+    defines { "NDEBUG" }
+    -- 4189 - variable not used, happens with CrashIf() macros that are no-op
+    --        in release builds
+    buildoptions { "/wd4189" }
 
   configuration {"vs*"}
-    -- defines { "_WIN32", "WIN32", "WINDOWS", "_CRT_SECURE_NO_WARNINGS" }
     defines { "_WIN32", "WIN32", "WINDOWS" }
     -- 4800 - int -> bool coversion
-    -- 4127 - conditional expression is constant
     -- 4100 - unreferenced formal parameter
-    -- 4244 - possible loss of data due to conversion
-    -- /MP  - use multi-cores for compilation
+    -- 4428 - universal-character-name encountered in source
     buildoptions {
-        "/wd4800", "/wd4127", "/wd4100", "/wd4244"
+        "/wd4800", "/wd4127", "/wd4100", "/wd4244", "/wd4428"
     }
 end
-
-solution "sertxt"
-  solution_common()
-
-  project "sertxt_test"
-    kind "ConsoleApp"
-    language "C++"
-    files {
-      "tools/sertxt_test/*.h",
-      "tools/sertxt_test/*.cpp",
-      "tools/sertxt_test/*.txt",
-      "src/utils/BaseUtil*",
-      "src/utils/FileUtil*",
-      "src/utils/StrSlice*",
-      "src/utils/StrUtil*",
-      "src/utils/TxtParser*",
-      "src/utils/VarintGob*",
-    }
-    excludes
-    {
-      "src/utils/*_ut.cpp",
-    }
-    includedirs { "src/utils", "src/utils/msvc" }
-    links { "Shlwapi" }
 
 solution "efi"
   solution_common()
@@ -79,10 +52,6 @@ solution "efi"
       "src/utils/BitManip.h",
       "src/utils/Dict*",
       "src/utils/StrUtil*",
-    }
-    excludes
-    {
-      "src/utils/*_ut.cpp",
     }
     includedirs { "src/utils", "src/utils/msvc" }
     links { }
@@ -109,38 +78,88 @@ solution "efi"
     includedirs { "src/utils", "src/utils/msvc" }
 --]]
 
-solution "muitest"
+solution "all_tests"
   solution_common()
 
-  project "muitest"
-    kind "WindowedApp"
+  project "test_util"
+    kind "ConsoleApp"
     language "C++"
-
-    flags { "NoManifest", "WinMain" }
-
     files {
-      "tools/mui_test/*",
       "src/utils/BaseUtil*",
-      "src/utils/BitManip.h",
+      "src/utils/BitManip*",
+      "src/utils/ByteOrderDecoder*",
+      "src/utils/CmdLineParser*",
+      "src/utils/CryptoUtil*",
+      "src/utils/CssParser*",
       "src/utils/Dict*",
       "src/utils/DebugLog*",
-      "src/Utils/FileUtil*",
-      "src/utils/GdiPlusUtil*",
+      "src/utils/FileUtil*",
+      "src/utils/GeomUtil.*",
       "src/utils/HtmlParserLookup*",
-      "src/utils/SerializeTxt*",
-      "src/utils/StrSlice*",
+      "src/utils/HtmlPrettyPrint*",
+      "src/utils/HtmlPullParser*",
+      "src/utils/JsonParser*",
+      "src/utils/Scoped.*",
+      "src/utils/SettingsUtil*",
+      "src/utils/SimpleLog*",
+      "src/utils/StrFormat*",
       "src/utils/StrUtil*",
-      "src/utils/TgaReader*",
-      "src/utils/TxtParser*",
+      "src/utils/SquareTreeParser*",
+      "src/utils/TrivialHtmlParser*",
+      "src/utils/UtAssert*",
+      "src/utils/VarintGob*",
+      "src/utils/Vec.*",
+      "src/utils/WinCursors*",
       "src/utils/WinUtil*",
-      "src/mui/*.h",
-      "src/mui/*.cpp",
+      "src/utils/tests/*",
+      --"src/AppTools.*",
+      --"src/ParseCommandLine.*",
+      --"src/StressTesting.*",
+      "src/AppUtil*",
+      "src/UnitTests.cpp",
+      "src/mui/SvgPath*",
+      "tools/tests/UnitMain.cpp"
     }
-    excludes
-    {
-      "src/utils/*_ut.cpp",
-      "src/mui/*_ut.cpp",
-      "src/mui/MiniMui*",
-    }
-    includedirs { "src", "src/utils", "src/utils/msvc", "src/mui"}
+    defines { "NO_LIBMUPDF" }
+    includedirs { "src/utils", "src/utils/msvc" }
     links { "gdiplus", "comctl32", "shlwapi", "Version" }
+
+solution "plugin-test"
+  solution_common()
+
+  project "plugin-test"
+    kind "WindowedApp"
+    language "C++"
+    files {
+      "src/utils/BaseUtil.*",
+      "src/utils/CmdLineParser.*",
+      "src/utils/FileUtil.*",
+      "src/utils/GeomUtil.*",
+      "src/utils/Scoped.*",
+      "src/utils/StrUtil.*",
+      "src/utils/Vec.*",
+      "tools/plugin-test/plugin-test.cpp"
+    }
+    includedirs { "src/utils", "src/utils/msvc" }
+    flags { "NoManifest", "WinMain" }
+    links { "shlwapi" }
+
+solution "signfile"
+  solution_common()
+
+  project "signfile"
+    kind "ConsoleApp"
+    language "C++"
+    files {
+      "src/utils/BaseUtil.*",
+      "src/utils/CmdLineParser.*",
+      "src/utils/CryptoUtil.*",
+      "src/utils/FileUtil.*",
+      "src/utils/Scoped.*",
+      "src/utils/StrUtil.*",
+      "src/utils/Vec.*",
+      "tools/signfile/signfile.cpp"
+    }
+    defines { "NO_LIBMUPDF" }
+    includedirs { "src/utils", "src/utils/msvc" }
+    links { "shlwapi", "crypt32" }

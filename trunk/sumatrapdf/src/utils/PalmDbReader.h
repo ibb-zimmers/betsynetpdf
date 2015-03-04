@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef PalmDbReader_h
@@ -19,7 +19,8 @@ class PdbReader {
     bool ParseHeader();
 
 public:
-    PdbReader(const WCHAR *filePath);
+    explicit PdbReader(const WCHAR *filePath);
+    explicit PdbReader(IStream *stream);
 
     const char *GetDbType();
     size_t GetRecordCount();

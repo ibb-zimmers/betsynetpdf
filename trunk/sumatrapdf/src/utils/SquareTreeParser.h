@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef SquareTreeParser_h
@@ -31,7 +31,7 @@ class SquareTree {
     ScopedMem<char> dataUtf8;
 
 public:
-    SquareTree(const char *data);
+    explicit SquareTree(const char *data);
     ~SquareTree() { delete root; }
 
     SquareTreeNode *root;

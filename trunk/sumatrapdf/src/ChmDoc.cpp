@@ -1,14 +1,15 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "ChmDoc.h"
 
+#include "BaseEngine.h"
 #include "ByteReader.h"
+#include "EbookBase.h"
 #include "FileUtil.h"
 #include "TrivialHtmlParser.h"
 
-#define CHM_MT
 #define PPC_BSTR
 #include <chm_lib.h>
 
@@ -145,7 +146,7 @@ static UINT LcidToCodepage(DWORD lcid)
         { 1025, 1256 }, { 2052,  936 }, { 1028,  950 }, { 1029, 1250 },
         { 1032, 1253 }, { 1037, 1255 }, { 1038, 1250 }, { 1041,  932 },
         { 1042,  949 }, { 1045, 1250 }, { 1049, 1251 }, { 1051, 1250 },
-        { 1060, 1250 }, { 1055, 1254 }
+        { 1060, 1250 }, { 1055, 1254 }, { 1026, 1251 },
     };
 
     for (int i = 0; i < dimof(lcidToCodepage); i++) {
@@ -234,8 +235,8 @@ bool ChmDoc::Load(const WCHAR *fileName)
         return false;
 
     if (!codepage) {
-        char header[24];
-        if (file::ReadAll(fileName, header, sizeof(header))) {
+        char header[24] = { 0 };
+        if (file::ReadN(fileName, header, sizeof(header))) {
             DWORD lcid = ByteReader(header, sizeof(header)).DWordLE(20);
             codepage = LcidToCodepage(lcid);
         }
@@ -297,10 +298,7 @@ Vec<char *> *ChmDoc::GetAllPaths()
 */
 static bool VisitChmTocItem(EbookTocVisitor *visitor, HtmlElement *el, UINT cp, int level)
 {
-    CrashIf(Tag_Li != el->tag);
-    el = el->GetChildByTag(Tag_Object);
-    if (!el)
-        return false;
+    CrashIf(el->tag != Tag_Object || level > 1 && (!el->up || el->up->tag != Tag_Li));
 
     ScopedMem<WCHAR> name, local;
     for (el = el->GetChildByTag(Tag_Param); el; el = el->next) {
@@ -345,10 +343,7 @@ static bool VisitChmTocItem(EbookTocVisitor *visitor, HtmlElement *el, UINT cp, 
 */
 static bool VisitChmIndexItem(EbookTocVisitor *visitor, HtmlElement *el, UINT cp, int level)
 {
-    CrashIf(Tag_Li != el->tag);
-    el = el->GetChildByTag(Tag_Object);
-    if (!el)
-        return false;
+    CrashIf(el->tag != Tag_Object || level > 1 && (!el->up || el->up->tag != Tag_Li));
 
     WStrVec references;
     ScopedMem<WCHAR> keyword, name;
@@ -402,11 +397,15 @@ static void WalkChmTocOrIndex(EbookTocVisitor *visitor, HtmlElement *list, UINT 
         for (HtmlElement *el = list->down; el; el = el->next) {
             if (Tag_Li != el->tag)
                 continue; // ignore unexpected elements
+
             bool valid;
-            if (isIndex)
-                valid = VisitChmIndexItem(visitor, el, cp, level);
+            HtmlElement *elObj = el->GetChildByTag(Tag_Object);
+            if (!elObj)
+                valid = false;
+            else if (isIndex)
+                valid = VisitChmIndexItem(visitor, elObj, cp, level);
             else
-                valid = VisitChmTocItem(visitor, el, cp, level);
+                valid = VisitChmTocItem(visitor, elObj, cp, level);
             if (!valid)
                 continue; // skip incomplete elements and all their children
 
@@ -418,6 +417,25 @@ static void WalkChmTocOrIndex(EbookTocVisitor *visitor, HtmlElement *list, UINT 
                 WalkChmTocOrIndex(visitor, nested, cp, isIndex, level + 1);
         }
     }
+}
+
+// ignores any <ul><li> list structure and just extracts a linear list of <object type="text/sitemap">...</object>
+static bool WalkBrokenChmTocOrIndex(EbookTocVisitor *visitor, HtmlParser& p, UINT cp, bool isIndex)
+{
+    bool hadOne = false;
+
+    HtmlElement *el = p.FindElementByName("body");
+    while ((el = p.FindElementByName("object", el)) != NULL) {
+        ScopedMem<WCHAR> type(el->GetAttribute("type"));
+        if (!str::EqI(type, L"text/sitemap"))
+            continue;
+        if (isIndex)
+            hadOne |= VisitChmIndexItem(visitor, el, cp, 1);
+        else
+            hadOne |= VisitChmTocItem(visitor, el, cp, 1);
+    }
+
+    return hadOne;
 }
 
 bool ChmDoc::ParseTocOrIndex(EbookTocVisitor *visitor, const char *path, bool isIndex)
@@ -447,7 +465,7 @@ bool ChmDoc::ParseTocOrIndex(EbookTocVisitor *visitor, const char *path, bool is
     // since <body> is optional, also continue without one
     el = p.FindElementByName("ul", el);
     if (!el)
-        return false;
+        return WalkBrokenChmTocOrIndex(visitor, p, cp, isIndex);
     WalkChmTocOrIndex(visitor, el, cp, isIndex);
     return true;
 }

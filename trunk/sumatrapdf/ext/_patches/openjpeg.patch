@@ -1,401 +1,189 @@
-diff -rPu5 openjpeg.orig\image.c openjpeg\image.c
---- openjpeg.orig\image.c	Thu Sep 13 09:58:39 2012
-+++ openjpeg\image.c	Thu Sep 20 19:28:51 2012
-@@ -81,9 +81,11 @@
- 					opj_free(image_comp->data);
- 				}
- 			}
- 			opj_free(image->comps);
- 		}
-+		/* SumatraPDF: fix memory leak */
-+		if (image->icc_profile_buf) opj_free(image->icc_profile_buf);
- 		opj_free(image);
- 	}
- }
- 
 diff -rPu5 openjpeg.orig\j2k.c openjpeg\j2k.c
---- openjpeg.orig\j2k.c	Thu Sep 13 09:58:39 2012
-+++ openjpeg\j2k.c	Tue Apr 09 20:53:17 2013
-@@ -420,11 +420,11 @@
- 	cp->tx0 = cio_read(cio, 4);		/* XT0siz */
- 	cp->ty0 = cio_read(cio, 4);		/* YT0siz */
- 	
- 	if ((image->x0<0)||(image->x1<0)||(image->y0<0)||(image->y1<0)) {
- 		opj_event_msg(j2k->cinfo, EVT_ERROR,
--									"%s: invalid image size (x0:%d, x1:%d, y0:%d, y1:%d)\n",
-+									"JPWL: invalid image size (x0:%d, x1:%d, y0:%d, y1:%d)\n",
- 									image->x0,image->x1,image->y0,image->y1);
- 		return;
- 	}
- 	
- 	image->numcomps = cio_read(cio, 2);	/* Csiz */
-@@ -466,10 +466,16 @@
- 		/* update components number in the jpwl_exp_comps filed */
- 		cp->exp_comps = image->numcomps;
- 	}
- #endif /* USE_JPWL */
+--- openjpeg.orig\j2k.c	Tue Apr 29 09:15:02 2014
++++ openjpeg\j2k.c	Wed Jul 09 02:05:04 2014
+@@ -3162,11 +3162,11 @@
+                                 &l_cp->tcps[p_j2k->m_current_tile_number] :
+                                 p_j2k->m_specific_param.m_decoder.m_default_tcp;
+         l_old_poc_nb = l_tcp->POC ? l_tcp->numpocs + 1 : 0;
+         l_current_poc_nb += l_old_poc_nb;
  
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=169 */
-+	if (cp->tdx <= 0 || cp->tdy <= 0) {
-+		opj_event_msg(j2k->cinfo, EVT_ERROR, "JPWL: invalid tile size (tdx: %d, tdy: %d)\n", cp->tdx, cp->tdy);
-+		return;
-+	}
+-        if(l_current_poc_nb >= 32)
++        if(l_current_poc_nb >= sizeof(l_tcp->pocs) / sizeof(l_tcp->pocs[0]))
+           {
+           opj_event_msg(p_manager, EVT_ERROR, "Too many POCs %d\n", l_current_poc_nb);
+           return OPJ_FALSE;
+           }
+         assert(l_current_poc_nb < 32);
+@@ -3645,11 +3645,12 @@
+                 p_header_size -= l_N_ppm;
+                 p_header_data += l_N_ppm;
+ 
+                 l_cp->ppm_data_read += l_N_ppm; /* Increase the number of data read*/
+ 
+-                if (p_header_size)
++                /* cf. https://code.google.com/p/openjpeg/issues/detail?id=362 */
++                if (p_header_size >= 4)
+                 {
+                         opj_read_bytes(p_header_data,&l_N_ppm,4);               /* N_ppm^i */
+                         p_header_data+=4;
+                         p_header_size-=4;
+                 }
+@@ -3686,11 +3687,12 @@
+ 
+         /* Need to read an incomplete Ippm series*/
+         if (l_remaining_data) {
+                 OPJ_BYTE *new_ppm_data;
+                 assert(l_cp->ppm_data == l_cp->ppm_buffer && "We need ppm_data and ppm_buffer to be the same when reallocating");
+-                new_ppm_data = (OPJ_BYTE *) opj_realloc(l_cp->ppm_data, l_cp->ppm_len + l_N_ppm);
++                /* cf. https://code.google.com/p/openjpeg/issues/detail?id=362 */
++                new_ppm_data = (OPJ_BYTE *) opj_realloc(l_cp->ppm_data, l_cp->ppm_len + l_remaining_data);
+                 if (! new_ppm_data) {
+                         opj_free(l_cp->ppm_data);
+                         l_cp->ppm_data = NULL;
+                         l_cp->ppm_buffer = NULL;  /* TODO: no need for a new local variable: ppm_buffer and ppm_data are enough */
+                         l_cp->ppm_len = 0;
+@@ -4070,10 +4072,14 @@
+                                                         "number of tile-part (%d), giving up\n", l_current_part, l_tcp->m_nb_tile_parts );
+                                         p_j2k->m_specific_param.m_decoder.m_last_tile_part = 1;
+                                         return OPJ_FALSE;
+                                 }
+                         }
++                        /* cf. https://code.google.com/p/openjpeg/issues/detail?id=254 */
++                        if (++l_num_parts < l_tcp->m_nb_tile_parts) {
++                                l_num_parts = l_tcp->m_nb_tile_parts;
++                        }
+                         if( l_current_part >= l_num_parts ) {
+                           /* testcase 451.pdf.SIGSEGV.ce9.3723 */
+                           opj_event_msg(p_manager, EVT_ERROR, "In SOT marker, TPSot (%d) is not valid regards to the current "
+                             "number of tile-part (header) (%d), giving up\n", l_current_part, l_num_parts );
+                           p_j2k->m_specific_param.m_decoder.m_last_tile_part = 1;
+@@ -4314,10 +4320,16 @@
+         l_current_data = &(l_tcp->m_data);
+         l_tile_len = &l_tcp->m_data_size;
+ 
+         /* Patch to support new PHR data */
+         if (p_j2k->m_specific_param.m_decoder.m_sot_length) {
++            /* cf. https://code.google.com/p/openjpeg/issues/detail?id=348 */
++            if (p_j2k->m_specific_param.m_decoder.m_sot_length > opj_stream_get_number_byte_left(p_stream)) {
++                opj_event_msg(p_manager, EVT_ERROR, "Not enough data to decode tile\n");
++                return OPJ_FALSE;
++            }
 +
- 	image->comps = (opj_image_comp_t*) opj_calloc(image->numcomps, sizeof(opj_image_comp_t));
- 	for (i = 0; i < image->numcomps; i++) {
- 		int tmp, w, h;
- 		tmp = cio_read(cio, 1);		/* Ssiz_i */
- 		image->comps[i].prec = (tmp & 0x7f) + 1;
-@@ -504,10 +510,16 @@
- 			}
- 			
- 		}
- #endif /* USE_JPWL */
- 
-+		/* cf. http://code.google.com/p/openjpeg/issues/detail?id=169 */
-+		if (image->comps[i].dx <= 0 || image->comps[i].dy <= 0) {
-+			opj_event_msg(j2k->cinfo, EVT_ERROR, "JPWL: invalid component size (dx: %d, dy: %d)\n", image->comps[i].dx, image->comps[i].dy);
-+			return;
-+		}
-+
- 		/* TODO: unused ? */
- 		w = int_ceildiv(image->x1 - image->x0, image->comps[i].dx);
- 		h = int_ceildiv(image->y1 - image->y0, image->comps[i].dy);
- 
- 		image->comps[i].resno_decoded = 0;	/* number of resolution decoded */
-@@ -555,17 +567,24 @@
- 			}
- 		}
- 	}
- #endif /* USE_JPWL */
- 
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=169 */
-+	if (cp->tw <= 0 || cp->th <= 0) {
-+		opj_event_msg(j2k->cinfo, EVT_ERROR, "JPWL: bad number of tiles (%d x %d)\n", cp->tw, cp->th);
-+		return;
-+	}
-+
- 	cp->tcps = (opj_tcp_t*) opj_calloc(cp->tw * cp->th, sizeof(opj_tcp_t));
-     if (cp->tcps == NULL)
-     {
-         opj_event_msg(j2k->cinfo, EVT_ERROR, "Out of memory\n");
-         return;
-     }
--	cp->tileno = (int*) opj_malloc(cp->tw * cp->th * sizeof(int));
-+	/* cf. http://code.google.com/p/sumatrapdf/issues/detail?id=2152 */
-+	cp->tileno = (int*) opj_calloc(cp->tw * cp->th, sizeof(int));
-     if (cp->tileno == NULL)
-     {
-         opj_event_msg(j2k->cinfo, EVT_ERROR, "Out of memory\n");
-         return;
-     }
-@@ -582,10 +601,16 @@
- 			}
- 		}
- 	}
- #endif /* USE_JPWL */
- 
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=169 */
-+	if (!cp->tcps) {
-+		opj_event_msg(j2k->cinfo, EVT_ERROR, "JPWL: could not alloc tcps field of cp\n");
-+		return;
-+	}
-+
- 	for (i = 0; i < cp->tw * cp->th; i++) {
- 		cp->tcps[i].POC = 0;
- 		cp->tcps[i].numpocs = 0;
- 		cp->tcps[i].first = 1;
- 	}
-@@ -821,10 +846,17 @@
- 	opj_image_t *image = j2k->image;
- 	opj_cio_t *cio = j2k->cio;
- 	
- 	len = cio_read(cio, 2);		/* Lcoc */
- 	compno = cio_read(cio, image->numcomps <= 256 ? 1 : 2);	/* Ccoc */
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=166 */
-+	if (compno >= image->numcomps) {
-+		opj_event_msg(j2k->cinfo, EVT_ERROR,
-+			"JPWL: bad component number in COC (%d out of a maximum of %d)\n",
-+			compno, image->numcomps);
-+		return;
-+	}
- 	tcp->tccps[compno].csty = cio_read(cio, 1);	/* Scoc */
- 	j2k_read_cox(j2k, compno);
- }
- 
- static void j2k_write_qcx(opj_j2k_t *j2k, int compno) {
-@@ -1005,10 +1037,18 @@
- 		/* keep your private count of tiles */
- 		backup_compno++;
- 	};
- #endif /* USE_JPWL */
- 
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=166 */
-+	if (compno >= j2k->image->numcomps) {
-+		opj_event_msg(j2k->cinfo, EVT_ERROR,
-+			"JPWL: bad component number in QCC (%d out of a maximum of %d)\n",
-+			compno, j2k->image->numcomps);
-+		return;
-+	}
-+
- 	j2k_read_qcx(j2k, compno, len - 2 - (numcomp <= 256 ? 1 : 2));
- }
- 
- static void j2k_write_poc(opj_j2k_t *j2k) {
- 	int len, numpchgs, i;
-@@ -1048,11 +1088,12 @@
- 	opj_cio_t *cio = j2k->cio;
- 	
- 	old_poc = tcp->POC ? tcp->numpocs + 1 : 0;
- 	tcp->POC = 1;
- 	len = cio_read(cio, 2);		/* Lpoc */
--	numpchgs = (len - 2) / (5 + 2 * (numcomps <= 256 ? 1 : 2));
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=165 */
-+	numpchgs = int_min((len - 2) / (5 + 2 * (numcomps <= 256 ? 1 : 2)), 32 - old_poc);
- 	
- 	for (i = old_poc; i < numpchgs + old_poc; i++) {
- 		opj_poc_t *poc;
- 		poc = &tcp->pocs[i];
- 		poc->resno0 = cio_read(cio, 1);	/* RSpoc_i */
-@@ -1323,10 +1364,15 @@
- 		while (i < cp->tileno_size && status == 0) {
- 			status = cp->tileno[i] == tileno ? 1 : 0;
- 			i++;
- 		}
- 		if (status == 0) {
-+			/* cf. http://code.google.com/p/sumatrapdf/issues/detail?id=2152 */
-+			if (cp->tileno_size >= cp->tw * cp->th) {
-+				opj_event_msg(j2k->cinfo, EVT_ERROR, "JPWL: too many tiles (max %d)\n", cp->tw * cp->th);
-+				return;
-+			}
- 			cp->tileno[cp->tileno_size] = tileno;
- 			cp->tileno_size++;
- 		}
- 	}
- 	
-@@ -1511,20 +1557,24 @@
- 
- 	if (len == cio_numbytesleft(cio) + 1) {
- 		truncate = 1;		/* Case of a truncate codestream */
- 	}	
- 
-+    /* cf. http://code.google.com/p/openjpeg/issues/detail?id=205 */
-+    if (len >= 4)
-    {/* chop padding bytes: */
-     unsigned char *s, *e; 
- 
-     s = cio_getbp(cio);
-     e = s + len;
- 
-   if(len > 8) s = e - 8;
- 
-   if(e[-2] == 0x00 && e[-1] == 0x00) /* padding bytes */
-   {
-+    /* cf. http://code.google.com/p/openjpeg/issues/detail?id=205 */
-+    if ((s = memchr(s, 0xff, e - s - 1)) != NULL && *(s + 1) == 0xd9)
- 	while(e > s)
-  {
- 	if(e[-2] == 0xff && e[-1] == 0xd9)	break;
-   --len; --e; truncate = 1;
-  }
-@@ -1588,10 +1638,18 @@
- 			}
- 		}
- 	};
- #endif /* USE_JPWL */
- 
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=166 */
-+	if (compno >= j2k->image->numcomps) {
-+		opj_event_msg(j2k->cinfo, EVT_ERROR,
-+			"JPWL: bad component number in RGN (%d out of a maximum of %d)\n",
-+			compno, j2k->image->numcomps);
-+		return;
-+	}
-+
- 	tcp->tccps[compno].roishift = cio_read(cio, 1);				/* SPrgn */
- }
- 
- static void j2k_write_eoc(opj_j2k_t *j2k) {
- 	opj_cio_t *cio = j2k->cio;
-@@ -2256,11 +2314,12 @@
- 		numpocs_tile = 0;
- 		tcp->POC = 0;
- 		if (parameters->numpocs) {
- 			/* initialisation of POC */
- 			tcp->POC = 1;
--			for (i = 0; i < parameters->numpocs; i++) {
-+			/* cf. http://code.google.com/p/openjpeg/issues/detail?id=165 */
-+			for (i = 0; i < int_min(parameters->numpocs, 32); i++) {
- 				if((tileno == parameters->POC[i].tile - 1) || (parameters->POC[i].tile == -1)) {
- 					opj_poc_t *tcp_poc = &tcp->pocs[numpocs_tile];
- 					tcp_poc->resno0		= parameters->POC[numpocs_tile].resno0;
- 					tcp_poc->compno0	= parameters->POC[numpocs_tile].compno0;
- 					tcp_poc->layno1		= parameters->POC[numpocs_tile].layno1;
-diff -rPu5 openjpeg.orig\jp2.c openjpeg\jp2.c
---- openjpeg.orig\jp2.c	Thu Sep 13 09:58:39 2012
-+++ openjpeg\jp2.c	Tue Apr 09 20:53:17 2013
-@@ -171,10 +171,15 @@
- 			box->length = cio_numbytesleft(cio) + 12;
- 	}
- 	else if (box->length == 0) {
- 		box->length = cio_numbytesleft(cio) + 8;
- 	}
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+	if (box->length < 0) {
-+		opj_event_msg(cinfo, EVT_ERROR, "Integer overflow in box->length\n");
-+		return OPJ_FALSE; // TODO: actually check jp2_read_boxhdr's return value
-+	}
- 	
- 	return OPJ_TRUE;
- }
- 
- #if 0
-@@ -652,10 +657,12 @@
-       if (box.type == JP2_JP2C) 
-         {
-         opj_event_msg(cinfo, EVT_ERROR, "Expected JP2H Marker\n");
-         return OPJ_FALSE;
-         }
-+	  /* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+	  if (box.length < 8) return OPJ_FALSE;
-       cio_skip(cio, box.length - 8);
- 
-       if(cio->bp >= cio->end) return OPJ_FALSE;
- 
-       if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
-@@ -677,46 +684,56 @@
-     {
-     if(box.type == JP2_COLR)
-       {
-       if( !jp2_read_colr(jp2, cio, &box, color))
-         {
-+        /* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+        if (box.length < 8) return OPJ_FALSE;
-         cio_seek(cio, box.init_pos + 8);
-         cio_skip(cio, box.length - 8);
-         }
-       if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
-       continue;
-       }
-     if(box.type == JP2_CDEF && !jp2->ignore_pclr_cmap_cdef)
-       {
-       if( !jp2_read_cdef(jp2, cio, &box, color))
-         {
-+        /* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+        if (box.length < 8) return OPJ_FALSE;
-         cio_seek(cio, box.init_pos + 8);
-         cio_skip(cio, box.length - 8);
-         }
-       if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
-       continue;
-       }
-     if(box.type == JP2_PCLR && !jp2->ignore_pclr_cmap_cdef)
-       {
-       if( !jp2_read_pclr(jp2, cio, &box, color))
-         {
-+        /* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+        if (box.length < 8) return OPJ_FALSE;
-         cio_seek(cio, box.init_pos + 8);
-         cio_skip(cio, box.length - 8);
-         }
-       if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
-       continue;
-       }
-     if(box.type == JP2_CMAP && !jp2->ignore_pclr_cmap_cdef)
-       {
-       if( !jp2_read_cmap(jp2, cio, &box, color))
-         {
-+        /* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+        if (box.length < 8) return OPJ_FALSE;
-         cio_seek(cio, box.init_pos + 8);
-         cio_skip(cio, box.length - 8);
-         }
-       if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
-       continue;
-       }
-+    /* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+    if (box.length < 8) return OPJ_FALSE;
-     cio_seek(cio, box.init_pos + 8);
-     cio_skip(cio, box.length - 8);
-     if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
- 
-     }/* while(cio_tell(cio) < box_end) */
-@@ -908,16 +925,20 @@
-     opj_event_msg(cinfo, EVT_ERROR, "Failed to read boxhdr\n");
-     return OPJ_FALSE;
-   }
- 	do {
- 		if(JP2_JP2C != box.type) {
-+			/* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+			if (box.length < 8) return OPJ_FALSE;
- 			cio_skip(cio, box.length - 8);
- 			if( jp2_read_boxhdr(cinfo, cio, &box) == OPJ_FALSE ) return OPJ_FALSE;
- 		}
- 	} while(JP2_JP2C != box.type);
- 
- 	*j2k_codestream_offset = cio_tell(cio);
-+	/* cf. http://code.google.com/p/openjpeg/issues/detail?id=155 */
-+	if (box.length < 8) return OPJ_FALSE;
- 	*j2k_codestream_length = box.length - 8;
- 
- 	return OPJ_TRUE;
- }
- 
-@@ -1196,11 +1217,11 @@
- 	  
- 	  pos_jp2c = cio_tell( cio);
- 	}
- 
- 	/* J2K encoding */
--	if(!(len_jp2c = jp2_write_jp2c( jp2, cio, image, cstr_info))){
-+	if((len_jp2c = jp2_write_jp2c( jp2, cio, image, cstr_info)) == 0){
- 	    opj_event_msg(jp2->cinfo, EVT_ERROR, "Failed to encode image\n");
- 	    return OPJ_FALSE;
- 	}
- 
- 	if( jp2->jpip_on){
+             if (! *l_current_data) {
+                 /* LH: oddly enough, in this path, l_tile_len!=0.
+                  * TODO: If this was consistant, we could simplify the code to only use realloc(), as realloc(0,...) default to malloc(0,...).
+                  */
+                 *l_current_data = (OPJ_BYTE*) opj_malloc(p_j2k->m_specific_param.m_decoder.m_sot_length);
 diff -rPu5 openjpeg.orig\opj_config.h openjpeg\opj_config.h
 --- openjpeg.orig\opj_config.h	Thu Jan 01 01:00:00 1970
-+++ openjpeg\opj_config.h	Thu Sep 20 20:35:01 2012
-@@ -0,0 +1,41 @@
-+/* If you want to build the library manually without using
-+ * 'configure' or 'CMake'
-+ * then copy this file 
-+ * 'opj_config.h.in.user' 
-+ *       to
-+ * 'opj_config.h'
-+ * 
-+ * Open 'opj_config.h' and change the file contents
-+ * if you want to define something because you know you have 
-+ * BOTH installed the library AND the header file(s).
-+ * Then e.g. write
-+#define HAVE_LIBPNG 1
-+ *  
-+ *
-+ * The file 'opj_config.h' will be included in some source files.
-+ * ==== YOU CAN NOT COMPILE WITHOUT IT. ====
-+ * === DO NOT FOREGET TO CHANGE 'config.nix' APPROPRIATELY. ====
-+*/
++++ openjpeg\opj_config.h	Thu May 15 21:53:22 2014
+@@ -0,0 +1,5 @@
++// #define OPJ_HAVE_STDINT_H
 +
-+/* DO NOT DEFINE BOTH VERSIONS OF LCMS */
-+/* define to 1 if you have both liblcms and lcms.h installed */
-+#undef HAVE_LIBLCMS1
-+/* #define HAVE_LIBLCMS1 1 */
++#define OPJ_VERSION_MAJOR 2
++#define OPJ_VERSION_MINOR 1
++#define OPJ_VERSION_BUILD 0
+diff -rPu5 openjpeg.orig\opj_config_private.h openjpeg\opj_config_private.h
+--- openjpeg.orig\opj_config_private.h	Thu Jan 01 01:00:00 1970
++++ openjpeg\opj_config_private.h	Thu May 15 21:56:02 2014
+@@ -0,0 +1,11 @@
++// #define OPJ_HAVE_STDINT_H
 +
-+/* define to 1 if you have both liblcms2 and lcms2.h installed */
-+#undef HAVE_LIBLCMS2
-+/* #define HAVE_LIBLCMS2 1 */
++#define OPJ_PACKAGE_VERSION "2.1.0"
 +
-+/* define to 1 if you have both libpng and png.h installed */
-+#undef HAVE_LIBPNG
-+/* #define HAVE_LIBPNG 1 */
++// #define OPJ_HAVE_INTTYPES_H
++// #define OPJ_HAVE_FSEEKO
 +
-+/* define to 1 if you have both libtiff and tiff.h installed */
-+#undef HAVE_LIBTIFF
-+/* #define HAVE_LIBTIFF 1 */
++#define OPJ_STATIC
++#define OPJ_EXPORTS
 +
-+/*---------------- DO NOT CHANGE BELOW THIS LINE ----------------*/
-+#define PACKAGE_URL "http://www.openjpeg.org/"
-+#define PACKAGE_BUGREPORT "http://code.google.com/p/openjpeg/"
-+
-+#define PACKAGE_VERSION "1.5.1"
++#define USE_JPIP
+diff -rPu5 openjpeg.orig\opj_malloc.h openjpeg\opj_malloc.h
+--- openjpeg.orig\opj_malloc.h	Tue Apr 29 09:15:02 2014
++++ openjpeg\opj_malloc.h	Thu May 15 22:00:14 2014
+@@ -53,11 +53,11 @@
+ #ifdef ALLOC_PERF_OPT
+ void * OPJ_CALLCONV opj_malloc(size_t size);
+ #else
+ /* prevent assertion on overflow for MSVC */
+ #ifdef _MSC_VER
+-#define opj_malloc(size) ((size_t)(size) >= (size_t)-0x100 ? NULL : malloc(size))
++#define opj_malloc(size) ((size_t)(size) >= 0x7ffdefff ? NULL : malloc(size))
+ #else
+ #define opj_malloc(size) malloc(size)
+ #endif
+ #endif
+ 
+@@ -70,11 +70,11 @@
+ #ifdef ALLOC_PERF_OPT
+ void * OPJ_CALLCONV opj_calloc(size_t _NumOfElements, size_t _SizeOfElements);
+ #else
+ /* prevent assertion on overflow for MSVC */
+ #ifdef _MSC_VER
+-#define opj_calloc(num, size) ((size_t)(num) != 0 && (size_t)(num) >= (size_t)-0x100 / (size_t)(size) ? NULL : calloc(num, size))
++#define opj_calloc(num, size) ((size_t)(num) != 0 && (size_t)(num) >= 0x7ffdefff / (size_t)(size) ? NULL : calloc(num, size))
+ #else
+ #define opj_calloc(num, size) calloc(num, size)
+ #endif
+ #endif
+ 
+@@ -154,11 +154,11 @@
+ #ifdef ALLOC_PERF_OPT
+ void * OPJ_CALLCONV opj_realloc(void * m, size_t s);
+ #else
+ /* prevent assertion on overflow for MSVC */
+ #ifdef _MSC_VER
+-#define opj_realloc(m, s) ((size_t)(s) >= (size_t)-0x100 ? NULL : realloc(m, s))
++#define opj_realloc(m, s) ((size_t)(s) >= 0x7ffdefff ? NULL : realloc(m, s))
+ #else
+ #define opj_realloc(m, s) realloc(m, s)
+ #endif
+ #endif
+ 
+diff -rPu5 openjpeg.orig\t2.c openjpeg\t2.c
+--- openjpeg.orig\t2.c	Tue Apr 29 09:15:02 2014
++++ openjpeg\t2.c	Thu May 15 22:12:09 2014
+@@ -861,14 +861,13 @@
+         /* SOP markers */
+ 
+         if (p_tcp->csty & J2K_CP_CSTY_SOP) {
+                 if (p_max_length < 6) {
+                         /* TODO opj_event_msg(p_t2->cinfo->event_mgr, EVT_WARNING, "Not enough space for expected SOP marker\n"); */
+-                        printf("Not enough space for expected SOP marker\n");
++                        fprintf(stderr, "Not enough space for expected SOP marker\n");
+                 } else if ((*l_current_data) != 0xff || (*(l_current_data + 1) != 0x91)) {
+                         /* TODO opj_event_msg(p_t2->cinfo->event_mgr, EVT_WARNING, "Expected SOP marker\n"); */
+-                        printf("Expected SOP marker\n");
+                         fprintf(stderr, "Error : expected SOP marker\n");
+                 } else {
+                         l_current_data += 6;
+                 }
+ 
+@@ -1015,10 +1014,15 @@
+ 
+                         do {
+                                 l_cblk->segs[l_segno].numnewpasses = (OPJ_UINT32)opj_int_min((OPJ_INT32)(l_cblk->segs[l_segno].maxpasses - l_cblk->segs[l_segno].numpasses), n);
+                                 l_cblk->segs[l_segno].newlen = opj_bio_read(l_bio, l_cblk->numlenbits + opj_uint_floorlog2(l_cblk->segs[l_segno].numnewpasses));
+                                         JAS_FPRINTF(stderr, "included=%d numnewpasses=%d increment=%d len=%d \n", l_included, l_cblk->segs[l_segno].numnewpasses, l_increment, l_cblk->segs[l_segno].newlen );
++                                /* testcase 1802.pdf.SIGSEGV.36e.894 */
++                                if (l_cblk->segs[l_segno].newlen > *l_modified_length_ptr) {
++                                        opj_bio_destroy(l_bio);
++                                        return OPJ_FALSE;
++                                }
+ 
+                                 n -= (OPJ_INT32)l_cblk->segs[l_segno].numnewpasses;
+                                 if (n > 0) {
+                                         ++l_segno;
+ 
+@@ -1157,10 +1161,11 @@
+                                 /* Check if the cblk->data have allocated enough memory */
+                                 if ((l_cblk->data_current_size + l_seg->newlen) > l_cblk->data_max_size) {
+                                     OPJ_BYTE* new_cblk_data = (OPJ_BYTE*) opj_realloc(l_cblk->data, l_cblk->data_current_size + l_seg->newlen);
+                                     if(! new_cblk_data) {
+                                         opj_free(l_cblk->data);
++                                        l_cblk->data = NULL;
+                                         l_cblk->data_max_size = 0;
+                                         /* opj_event_msg(p_manager, EVT_ERROR, "Not enough memory to realloc code block cata!\n"); */
+                                         return OPJ_FALSE;
+                                     }
+                                     l_cblk->data_max_size = l_cblk->data_current_size + l_seg->newlen;

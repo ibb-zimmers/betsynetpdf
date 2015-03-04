@@ -1,13 +1,8 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef AppPrefs_h
 #define AppPrefs_h
-
-#define PREFS_FILE_NAME         L"SumatraPDF-settings.txt"
-#ifdef ENABLE_SUMATRAPDF_USER_INI
-#define USER_PREFS_FILE_NAME    L"SumatraPDF-user.ini"
-#endif
 
 /* enum from windowState */
 enum {
@@ -25,9 +20,11 @@ void DeleteGlobalPrefs(GlobalPrefs *globalPrefs);
 
 namespace prefs {
 
+WCHAR *GetSettingsPath();
+
 bool Load();
 bool Save();
-bool Reload(bool forceReload=false);
+bool Reload();
 
 void RegisterForFileChanges();
 void UnregisterForFileChanges();
@@ -35,9 +32,9 @@ void UnregisterForFileChanges();
 namespace conv {
 
 const WCHAR *   FromDisplayMode(DisplayMode mode);
-DisplayMode     ToDisplayMode(const WCHAR *s, DisplayMode default=DM_AUTOMATIC);
+DisplayMode     ToDisplayMode(const WCHAR *s, DisplayMode defVal=DM_AUTOMATIC);
 void            FromZoom(char **dst, float zoom, DisplayState *stateForIssue2140=NULL);
-float           ToZoom(const char *s, float default=ZOOM_FIT_PAGE);
+float           ToZoom(const char *s, float defVal=ZOOM_FIT_PAGE);
 
 };
 

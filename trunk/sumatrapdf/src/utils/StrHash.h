@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef StrHash_h
@@ -54,7 +54,7 @@ class StrHashNT {
     VecSegmented<char>        values;
     size_t                    valueSize;
 public:
-    StrHashNT(size_t valueSize) : valueSize(valueSize)
+    explicit StrHashNT(size_t valueSize) : valueSize(valueSize)
     { }
     void *Create(const char *s, size_t strLen, uint32 hash, bool& createdOut) {
         return NULL; // TODO: write me

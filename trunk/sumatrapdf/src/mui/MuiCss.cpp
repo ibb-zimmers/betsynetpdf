@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -426,8 +426,13 @@ Prop *Prop::AllocColorSolid(PropType type, ARGB color)
     Prop p(type);
     p.color.type = ColorSolid;
     p.color.solid.color = color;
-    p.color.solid.cachedBrush = ::new SolidBrush(color);
-    return UniqifyProp(p);
+    p.color.solid.cachedBrush = NULL;
+    Prop *res = UniqifyProp(p);
+    CrashIf(res->color.type != ColorSolid);
+    CrashIf(res->color.solid.color != color);
+    if (!res->color.solid.cachedBrush)
+        res->color.solid.cachedBrush = ::new SolidBrush(color);
+    return res;
 }
 
 Prop *Prop::AllocColorSolid(PropType type, int a, int r, int g, int b)
@@ -474,7 +479,7 @@ Style* Style::GetInheritsFrom() const
 // Identity is a way to track changes to Style
 size_t Style::GetIdentity() const
 {
-    int identity = gen;
+    size_t identity = gen;
     Style *curr = inheritsFrom;
     while (curr) {
         identity += curr->gen;

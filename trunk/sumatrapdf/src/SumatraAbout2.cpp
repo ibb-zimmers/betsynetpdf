@@ -1,16 +1,15 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
-#include "BaseUtil.h"
+#include "Mui.h"
 #include "SumatraAbout2.h"
 
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
-#include "Mui.h"
 #include "resource.h"
 #include "SumatraPDF.h"
 #include "Translations.h"
 #include "Version.h"
+#include "WinCursors.h"
 #include "WinUtil.h"
 
 using namespace mui;
@@ -112,9 +111,9 @@ struct AboutLayoutInfoEl {
 #define URL_AUTHORS L"http://sumatrapdf.googlecode.com/svn/trunk/AUTHORS"
 #define URL_TRANSLATORS L"http://sumatrapdf.googlecode.com/svn/trunk/TRANSLATORS"
 #else
-#define URL_LICENSE L"http://sumatrapdf.googlecode.com/svn/tags/" CURR_VERSION_STR L"rel/AUTHORS"
-#define URL_AUTHORS L"http://sumatrapdf.googlecode.com/svn/tags/" CURR_VERSION_STR L"rel/AUTHORS"
-#define URL_TRANSLATORS L"http://sumatrapdf.googlecode.com/svn/tags/" CURR_VERSION_STR L"rel/TRANSLATORS"
+#define URL_LICENSE L"http://sumatrapdf.googlecode.com/svn/tags/" UPDATE_CHECK_VER L"rel/AUTHORS"
+#define URL_AUTHORS L"http://sumatrapdf.googlecode.com/svn/tags/" UPDATE_CHECK_VER L"rel/AUTHORS"
+#define URL_TRANSLATORS L"http://sumatrapdf.googlecode.com/svn/tags/" UPDATE_CHECK_VER L"rel/TRANSLATORS"
 #endif
 
 static AboutLayoutInfoEl gAboutLayoutInfo[] = {
@@ -155,7 +154,9 @@ Size SumatraLogo::Measure(const Size availableSize)
 {
     Graphics *gfx = AllocGraphicsForMeasureText();
     CachedStyle *s = cachedStyle;
-    Font *font = GetCachedFont(s->fontName, s->fontSize, s->fontWeight);
+    CachedFont *cachedFont = GetCachedFont(s->fontName, s->fontSize, s->fontWeight);
+    Font *font = cachedFont->font;
+    CrashIf(!font);
     const WCHAR *txt = LOGO_TEXT;
     RectF bbox;
     int textDx = 0;
@@ -175,7 +176,9 @@ void SumatraLogo::Paint(Graphics *gfx, int offX, int offY)
     CrashIf(!IsVisible());
 
     CachedStyle *s = cachedStyle;
-    Font *font = GetCachedFont(s->fontName, s->fontSize, s->fontWeight);
+    CachedFont *cachedFont = GetCachedFont(s->fontName, s->fontSize, s->fontWeight);
+    Font *font = cachedFont->font;
+    CrashIf(!font);
 
     int x = offX; int y = offY;
     int n = 0;
@@ -251,7 +254,7 @@ static void CreateAboutMuiWindow(HWND hwnd)
         if (url) {
             b = new Button(right, styleBtnRight, styleBtnRight);
             b->SetToolTip(url);
-            b->hCursor = gCursorHand;
+            b->hCursor = GetCursor(IDC_HAND);
         } else {
             b = new Button(right, styleBtnLeft, styleBtnLeft);
         }
@@ -271,6 +274,30 @@ static void DestroyAboutMuiWindow()
     gButtonUrlHandler = NULL;
 }
 
+static void CopyAboutInfoToClipboard(HWND hwnd)
+{
+    str::Str<WCHAR> info(512);
+    info.AppendFmt(L"%s %s\r\n", APP_NAME_STR, VERSION_TXT);
+    for (size_t i = info.Size() - 2; i > 0; i--) {
+        info.Append('-');
+    }
+    info.Append(L"\r\n");
+    // concatenate all the information into a single string
+    // (cf. CopyPropertiesToClipboard in SumatraProperties.cpp)
+    size_t maxLen = 0;
+    for (size_t i = 0; i < dimof(gAboutLayoutInfo); i++) {
+        AboutLayoutInfoEl& el = gAboutLayoutInfo[i];
+        maxLen = std::max(maxLen, str::Len(el.leftTxt));
+    }
+    for (size_t i = 0; i < dimof(gAboutLayoutInfo); i++) {
+        AboutLayoutInfoEl& el = gAboutLayoutInfo[i];
+        for (size_t j = maxLen - str::Len(el.leftTxt); j > 0; j--)
+            info.Append(' ');
+        info.AppendFmt(L"%s: %s\r\n", el.leftTxt, el.url ? el.url : el.rightTxt);
+    }
+    CopyTextToClipboard(info.LendData());
+}
+
 static LRESULT CALLBACK WndProcAbout2(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (mainWnd) {
@@ -288,6 +315,11 @@ static LRESULT CALLBACK WndProcAbout2(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
         case WM_CREATE:
             CreateAboutMuiWindow(hwnd);
+            break;
+
+        case WM_COMMAND:
+            if (IDM_COPY_SELECTION == LOWORD(wParam))
+                CopyAboutInfoToClipboard(hwnd);
             break;
 
         case WM_DESTROY:
@@ -310,8 +342,8 @@ void OnMenuAbout2()
     }
 
     if (!gAboutWndAtom) {
-        FillWndClassEx(wcex, ghinst, WND_CLASS_ABOUT2, WndProcAbout2);
-        wcex.hIcon = LoadIcon(ghinst, MAKEINTRESOURCE(IDI_SUMATRAPDF));
+        FillWndClassEx(wcex, WND_CLASS_ABOUT2, WndProcAbout2);
+        wcex.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_SUMATRAPDF));
         gAboutWndAtom = RegisterClassEx(&wcex);
         CrashIf(!gAboutWndAtom);
     }
@@ -321,11 +353,11 @@ void OnMenuAbout2()
             CW_USEDEFAULT, CW_USEDEFAULT,
             520, 400,
             NULL, NULL,
-            ghinst, NULL);
+            GetModuleHandle(NULL), NULL);
     if (!gHwndAbout2)
         return;
 
+    ToggleWindowStyle(gHwndAbout2, WS_EX_LAYOUTRTL | WS_EX_NOINHERITLAYOUT, IsUIRightToLeft(), GWL_EXSTYLE);
+
     ShowWindow(gHwndAbout2, SW_SHOW);
-
 }
-

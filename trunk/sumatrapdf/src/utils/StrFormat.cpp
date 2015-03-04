@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -54,7 +54,7 @@ struct FmtInfo {
     int tp;
     // if tp is Verbatim
     const char *start;
-    int len;
+    size_t len;
 
     // if tp is Positional
     int positionalArgNo;
@@ -174,7 +174,9 @@ static void SerializeArg(Str<char>& s, const Arg *arg)
     } else if (arg->tp == Arg::Int) {
         s.AppendFmt("%d", arg->i);
     } else if (arg->tp == Arg::WStr) {
-        CrashIf(true); // TODO: write me
+        // TODO: optimize by using a stack if possible
+        char *sUtf8 = str::conv::ToUtf8(arg->ws);
+        s.AppendAndFree(sUtf8);
     } else {
         CrashIf(true);
     }
@@ -197,7 +199,7 @@ char *Fmt(const char *fmt, const Arg& a0, const Arg& a1, const Arg& a2, const Ar
         if (fmtParts[i].tp == FmtInfo::Verbatim) {
             // TODO: unescape \{ ?
             const char *s = fmtParts[i].start;
-            int len = fmtParts[i].len;
+            size_t len = fmtParts[i].len;
             res.Append(s, len);
         } else if (fmtParts[i].tp == FmtInfo::Positional) {
             const Arg *arg = args[fmtParts[i].positionalArgNo];
@@ -211,14 +213,16 @@ char *Fmt(const char *fmt, const Arg& a0, const Arg& a1, const Arg& a2, const Ar
     return res.StealData();
 }
 
+// caller has to free()
 WCHAR *Fmt(const WCHAR *fmt, const Arg& a0, const Arg& a1, const Arg& a2, const Arg& a3, const Arg& a4, const Arg& a5)
 {
-    const Arg* args[MAX_FMT_ARGS];
-    args[0] = &a0; args[1] = &a1; args[2] = &a2;
-    args[3] = &a3; args[4] = &a4; args[5] = &a5;
-    int argsCount = ArgsCount(args);
-    CrashIf(0 == argsCount);
-    return str::Format(L"%d", argsCount);
+    // TODO: to be faster, do conversion on stack
+    char *fmtUtf8 = str::conv::ToUtf8(fmt);
+    char *resTmp = Fmt(fmtUtf8, a0, a1, a2, a3, a4, a5);
+    WCHAR *res = str::conv::FromUtf8(resTmp);
+    free(fmtUtf8);
+    free(resTmp);
+    return res;
 }
 
 }

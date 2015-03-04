@@ -1,10 +1,12 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef ChmDoc_h
 #define ChmDoc_h
 
-#include "EbookBase.h"
+#include "BaseEngine.h"
+
+class EbookTocVisitor;
 
 class ChmDoc {
     struct chmFile *chmHandle;

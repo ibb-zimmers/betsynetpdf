@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef TxtParser_h
@@ -33,7 +33,7 @@ struct TxtNode {
     char *          keyStart;
     char *          keyEnd;
 
-    TxtNode(TxtNodeType tp) {
+    explicit TxtNode(TxtNodeType tp) {
         type = tp;
     }
     ~TxtNode() { }

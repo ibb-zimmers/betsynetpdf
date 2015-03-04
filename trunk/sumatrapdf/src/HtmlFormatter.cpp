@@ -1,15 +1,17 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
 #include "HtmlFormatter.h"
 
 #include "CssParser.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
+#include "HtmlParserLookup.h"
 #include "HtmlPullParser.h"
 #include "Mui.h"
+#include "Timer.h"
 
+#define NOLOG 1
 #include "DebugLog.h"
 
 /*
@@ -60,7 +62,7 @@ Control objects further to make allocating hundreds of them cheaper or introduce
 other base element(s) with less functionality and less overhead).
 */
 
-bool ValidReparseIdx(int idx, HtmlPullParser *parser)
+bool ValidReparseIdx(ptrdiff_t idx, HtmlPullParser *parser)
 {
     if ((idx < 0) || (idx > (int)parser->Len()))
         return false;
@@ -75,7 +77,7 @@ DrawInstr DrawInstr::Str(const char *s, size_t len, RectF bbox, bool rtl)
     return di;
 }
 
-DrawInstr DrawInstr::SetFont(Font *font)
+DrawInstr DrawInstr::SetFont(mui::CachedFont *font)
 {
     DrawInstr di(InstrSetFont);
     di.font = font;
@@ -114,6 +116,8 @@ DrawInstr DrawInstr::Anchor(const char *s, size_t len, RectF bbox)
     di.bbox = bbox;
     return di;
 }
+
+StyleRule::StyleRule() : tag(Tag_NotFound), textIndentUnit(inherit), textAlign(Align_NotFound) { }
 
 // parses size in the form "1em", "3pt" or "15px"
 static void ParseSizeWithUnit(const char *s, size_t len, float *size, StyleRule::Unit *unit)
@@ -166,12 +170,19 @@ void StyleRule::Merge(StyleRule& source)
     }
 }
 
+HtmlFormatterArgs::HtmlFormatterArgs() :
+    pageDx(0), pageDy(0), fontSize(0),
+    textAllocator(NULL), htmlStr(0), htmlStrLen(0),
+    reparseIdx(0), textRenderMethod(mui::TextRenderMethodGdiplus)
+{
+}
+
 HtmlFormatter::HtmlFormatter(HtmlFormatterArgs *args) :
     pageDx(args->pageDx), pageDy(args->pageDy),
     textAllocator(args->textAllocator), currLineReparseIdx(NULL),
     currX(0), currY(0), currLineTopPadding(0), currLinkIdx(0),
     listDepth(0), preFormatted(false), dirRtl(false), currPage(NULL),
-    finishedParsing(false), pageCount(0), measureAlgo(args->measureAlgo),
+    finishedParsing(false), pageCount(0),
     keepTagNesting(false)
 {
     currReparseIdx = args->reparseIdx;
@@ -180,8 +191,10 @@ HtmlFormatter::HtmlFormatter(HtmlFormatterArgs *args) :
     CrashIf(!ValidReparseIdx(currReparseIdx, htmlParser));
 
     gfx = mui::AllocGraphicsForMeasureText();
+    textMeasure = CreateTextRender(args->textRenderMethod, gfx, 10, 10);
     defaultFontName.Set(str::Dup(args->GetFontName()));
     defaultFontSize = args->fontSize;
+
     DrawStyle style;
     style.font = mui::GetCachedFont(defaultFontName, defaultFontSize, FontStyleRegular);
     style.align = Align_Justify;
@@ -189,9 +202,11 @@ HtmlFormatter::HtmlFormatter(HtmlFormatterArgs *args) :
     styleStack.Append(style);
     nextPageStyle = styleStack.Last();
 
-    lineSpacing = CurrFont()->GetHeight(gfx);
+    textMeasure->SetFont(CurrFont());
+
+    lineSpacing = textMeasure->GetCurrFontLineSpacing();
     spaceDx = CurrFont()->GetSize() / 2.5f; // note: a heuristic
-    float spaceDx2 = GetSpaceDx(gfx, CurrFont(), measureAlgo);
+    float spaceDx2 = GetSpaceDx(textMeasure);
     if (spaceDx2 < spaceDx)
         spaceDx = spaceDx2;
 
@@ -203,8 +218,9 @@ HtmlFormatter::~HtmlFormatter()
     // delete all pages that were not consumed by the caller
     DeleteVecMembers(pagesToSend);
     delete currPage;
-    delete htmlParser;
+    delete textMeasure;
     mui::FreeGraphicsForMeasureText(gfx);
+    delete htmlParser;
 }
 
 void HtmlFormatter::AppendInstr(DrawInstr di)
@@ -218,22 +234,24 @@ void HtmlFormatter::AppendInstr(DrawInstr di)
 
 void HtmlFormatter::SetFont(const WCHAR *fontName, FontStyle fs, float fontSize)
 {
-    if (fontSize < 0)
+    if (fontSize < 0) {
         fontSize = CurrFont()->GetSize();
-    Font *newFont = mui::GetCachedFont(fontName, fontSize, fs);
-    if (CurrFont() != newFont)
+    }
+    mui::CachedFont *newFont = mui::GetCachedFont(fontName, fontSize, fs);
+    if (CurrFont() != newFont) {
         AppendInstr(DrawInstr::SetFont(newFont));
+    }
 
     DrawStyle style = styleStack.Last();
     style.font = newFont;
     styleStack.Append(style);
 }
 
-void HtmlFormatter::SetFont(Font *font, FontStyle fs, float fontSize)
+void HtmlFormatter::SetFontBasedOn(mui::CachedFont *font, FontStyle fs, float fontSize)
 {
-    LOGFONTW lfw;
-    Status ok = CurrFont()->GetLogFontW(gfx, &lfw);
-    const WCHAR *fontName = ok == Ok ? lfw.lfFaceName : defaultFontName;
+    const WCHAR *fontName = font->GetName();
+    if (NULL == fontName)
+        fontName = defaultFontName;
     SetFont(fontName, fs, fontSize);
 }
 
@@ -256,7 +274,7 @@ void HtmlFormatter::ChangeFontStyle(FontStyle fs, bool addStyle)
 {
     CrashIf(!ValidStyleForChangeFontStyle(fs));
     if (addStyle)
-        SetFont(CurrFont(), (FontStyle)(fs | CurrFont()->GetStyle()));
+        SetFontBasedOn(CurrFont(), (FontStyle)(fs | CurrFont()->GetStyle()));
     else
         RevertStyleChange();
 }
@@ -533,7 +551,8 @@ bool HtmlFormatter::FlushCurrLine(bool isParagraphBreak)
         // so we have to carry over some state (like current font)
         CrashIf(!CurrFont());
         EmitNewPage();
-        currPage->reparseIdx = currLineReparseIdx;
+        CrashIf(currLineReparseIdx > INT_MAX);
+        currPage->reparseIdx = (int)currLineReparseIdx;
         createdPage = true;
     }
     SetYPos(currLineInstr, currY + currLineTopPadding);
@@ -560,7 +579,8 @@ bool HtmlFormatter::FlushCurrLine(bool isParagraphBreak)
 
 void HtmlFormatter::EmitNewPage()
 {
-    currPage = new HtmlPage(currReparseIdx);
+    CrashIf(currReparseIdx > INT_MAX);
+    currPage = new HtmlPage((int)currReparseIdx);
     currPage->instructions.Append(DrawInstr::SetFont(nextPageStyle.font));
     currY = 0.f;
 }
@@ -602,12 +622,12 @@ static bool HasPreviousLineSingleImage(Vec<DrawInstr>& instrs)
     return imageY != -1;
 }
 
-void HtmlFormatter::EmitImage(ImageData *img)
+bool HtmlFormatter::EmitImage(ImageData *img)
 {
     CrashIf(!img->data);
     Size imgSize = BitmapSizeFromData(img->data, img->len);
     if (imgSize.Empty())
-        return;
+        return false;
 
     SizeF newSize((REAL)imgSize.Width, (REAL)imgSize.Height);
     // move overly large images to a new line (if they don't fit entirely)
@@ -615,12 +635,12 @@ void HtmlFormatter::EmitImage(ImageData *img)
         FlushCurrLine(false);
     // move overly large images to a new page
     // (if they don't fit even when scaled down to 75%)
-    REAL scalePage = min((pageDx - currX) / newSize.Width, pageDy / newSize.Height);
-    if (currY > 0 && currY + newSize.Height * min(scalePage, 0.75f) > pageDy)
+    REAL scalePage = std::min((pageDx - currX) / newSize.Width, pageDy / newSize.Height);
+    if (currY > 0 && currY + newSize.Height * std::min(scalePage, 0.75f) > pageDy)
         ForceNewPage();
     // if image is bigger than the available space, scale it down
     if (newSize.Width > pageDx - currX || newSize.Height > pageDy - currY) {
-        REAL scale = min(scalePage, (pageDy - currY) / newSize.Height);
+        REAL scale = std::min(scalePage, (pageDy - currY) / newSize.Height);
         // scale down images that follow right after a line
         // containing a single image as little as possible,
         // as they might be intended to be of the same size
@@ -629,14 +649,16 @@ void HtmlFormatter::EmitImage(ImageData *img)
             scale = scalePage;
         }
         if (scale < 1) {
-            newSize.Width = min(newSize.Width * scale, pageDx - currX);
-            newSize.Height = min(newSize.Height * scale, pageDy - currY);
+            newSize.Width = std::min(newSize.Width * scale, pageDx - currX);
+            newSize.Height = std::min(newSize.Height * scale, pageDy - currY);
         }
     }
 
     RectF bbox(PointF(currX, 0), newSize);
     AppendInstr(DrawInstr::Image(img->data, img->len, bbox));
     currX += bbox.Width;
+
+    return true;
 }
 
 // add horizontal line (<hr> in html terms)
@@ -718,7 +740,8 @@ void HtmlFormatter::EmitTextRun(const char *s, const char *end)
             currReparseIdx = s - htmlParser->Start();
 
         size_t strLen = str::Utf8ToWcharBuf(s, end - s, buf, dimof(buf));
-        RectF bbox = MeasureText(gfx, CurrFont(), buf, strLen, measureAlgo);
+        textMeasure->SetFont(CurrFont());
+        RectF bbox = textMeasure->Measure(buf, strLen);
         EnsureDx(bbox.Width);
         if (bbox.Width <= pageDx - currX) {
             AppendInstr(DrawInstr::Str(s, end - s, bbox, dirRtl));
@@ -726,23 +749,24 @@ void HtmlFormatter::EmitTextRun(const char *s, const char *end)
             break;
         }
 
-        int lenThatFits = StringLenForWidth(gfx, CurrFont(), buf, strLen, pageDx - NewLineX(), measureAlgo);
+        size_t lenThatFits = StringLenForWidth(textMeasure, buf, strLen, pageDx - NewLineX());
         // try to prevent a break in the middle of a word
         if (iswalnum(buf[lenThatFits])) {
-            for (int len = lenThatFits; len > 0; len--) {
+            for (size_t len = lenThatFits; len > 0; len--) {
                 if (!iswalnum(buf[len-1])) {
                     lenThatFits = len;
                     break;
                 }
             }
         }
-        bbox = MeasureText(gfx, CurrFont(), buf, lenThatFits, measureAlgo);
+        textMeasure->SetFont(CurrFont());
+        bbox = textMeasure->Measure(buf, lenThatFits);
         CrashIf(bbox.Width > pageDx);
         // s is UTF-8 and buf is UTF-16, so one
         // WCHAR doesn't always equal one char
         // TODO: this usually fails for non-BMP characters (i.e. hardly ever)
-        for (int i = lenThatFits - 1; i >= 0; i--) {
-            lenThatFits += buf[i] < 0x80 ? 0 : buf[i] < 0x800 ? 1 : 2;
+        for (size_t i = lenThatFits; i > 0; i--) {
+            lenThatFits += buf[i-1] < 0x80 ? 0 : buf[i-1] < 0x800 ? 1 : 2;
         }
         AppendInstr(DrawInstr::Str(s, lenThatFits, bbox, dirRtl));
         currX += bbox.Width;
@@ -787,14 +811,14 @@ void HtmlFormatter::HandleTagBr()
         FlushCurrLine(true);
 }
 
-static AlignAttr GetAlignAttr(HtmlToken *t, AlignAttr default)
+static AlignAttr GetAlignAttr(HtmlToken *t, AlignAttr defVal)
 {
     AttrInfo *attr = t->GetAttrByName("align");
     if (!attr)
-        return default;
+        return defVal;
     AlignAttr align = FindAlignAttr(attr->val, attr->valLen);
     if (Align_NotFound == align)
-        return default;
+        return defVal;
     return align;
 }
 
@@ -833,11 +857,9 @@ void HtmlFormatter::HandleTagFont(HtmlToken *t)
     }
 
     AttrInfo *attr = t->GetAttrByName("face");
-    LOGFONTW lfw;
-    CurrFont()->GetLogFontW(gfx, &lfw);
-    const WCHAR *faceName = lfw.lfFaceName;
+    const WCHAR *faceName = CurrFont()->GetName();
     if (attr) {
-        size_t strLen = str::Utf8ToWcharBuf(t->s, t->sLen, buf, dimof(buf));
+        size_t strLen = str::Utf8ToWcharBuf(attr->val, attr->valLen, buf, dimof(buf));
         // multiple font names can be comma separated
         if (strLen > 0 && *buf != ',') {
             str::TransChars(buf, L",", L"\0");
@@ -906,7 +928,7 @@ void HtmlFormatter::HandleTagHx(HtmlToken *t)
         float fontSize = defaultFontSize * pow(1.1f, '5' - t->s[1]);
         if (currY > 0)
             currY += fontSize / 2;
-        SetFont(CurrFont(), FontStyleBold, fontSize);
+        SetFontBasedOn(CurrFont(), FontStyleBold, fontSize);
 
         StyleRule rule = ComputeStyleRule(t);
         if (Align_NotFound == rule.textAlign)
@@ -968,7 +990,7 @@ StyleRule HtmlFormatter::ComputeStyleRule(HtmlToken *t)
         prevRule = FindStyleRule(t->tag, attr->val, attr->valLen);
         if (prevRule) rule.Merge(*prevRule);
     }
-    attr = attr = t->GetAttrByName("style");
+    attr = t->GetAttrByName("style");
     if (attr) {
         StyleRule newRule = StyleRule::Parse(attr->val, attr->valLen);
         rule.Merge(newRule);
@@ -1006,14 +1028,16 @@ void HtmlFormatter::HandleTagStyle(HtmlToken *t)
     if (attr && !attr->ValIs("text/css"))
         return;
 
-    const char *start = t->s + t->sLen + 2;
+    const char *start = t->s + t->sLen + 1;
     while (t && !t->IsError() && (!t->IsEndTag() || t->tag != Tag_Style)) {
         t = htmlParser->Next();
     }
     if (!t || !t->IsEndTag() || Tag_Style != t->tag)
         return;
     const char *end = t->s - 2;
+    CrashIf(start > end);
     ParseStyleSheet(start, end - start);
+    UpdateTagNesting(t);
 }
 
 // returns true if prev can't contain curr and should thus be closed
@@ -1194,9 +1218,13 @@ void HtmlFormatter::HandleHtmlTag(HtmlToken *t)
 void HtmlFormatter::HandleText(HtmlToken *t)
 {
     CrashIf(!t->IsText());
-    bool skipped;
-    const char *curr = t->s;
-    const char *end = t->s + t->sLen;
+    HandleText(t->s, t->sLen);
+}
+
+void HtmlFormatter::HandleText(const char *s, size_t sLen)
+{
+    const char *curr = s;
+    const char *end = s + sLen;
 
     if (preFormatted) {
         // don't collapse whitespace and respect text newlines
@@ -1221,7 +1249,7 @@ void HtmlFormatter::HandleText(HtmlToken *t)
     while (curr < end) {
         // collapse multiple, consecutive white-spaces into a single space
         currReparseIdx = curr - htmlParser->Start();
-        skipped = SkipWs(curr, end);
+        bool skipped = SkipWs(curr, end);
         if (skipped)
             EmitElasticSpace();
 
@@ -1236,7 +1264,7 @@ void HtmlFormatter::HandleText(HtmlToken *t)
 // we ignore the content of <head>, <script>, <style> and <title> tags
 bool HtmlFormatter::IgnoreText()
 {
-    for (HtmlTag *tag = htmlParser->tagNesting.IterStart(); tag; tag = htmlParser->tagNesting.IterNext()) {
+    for (HtmlTag *tag = tagNesting.IterStart(); tag; tag = tagNesting.IterNext()) {
         if ((Tag_Head == *tag) ||
             (Tag_Script == *tag) ||
             (Tag_Style == *tag) ||
@@ -1277,8 +1305,7 @@ HtmlPage *HtmlFormatter::Next(bool skipEmptyPages)
     {
         // send out all pages accumulated so far
         while (pagesToSend.Count() > 0) {
-            HtmlPage *ret = pagesToSend.At(0);
-            pagesToSend.RemoveAt(0);
+            HtmlPage *ret = pagesToSend.PopAt(0);
             pageCount++;
             if (skipEmptyPages && IsEmptyPage(ret))
                 delete ret;
@@ -1327,17 +1354,38 @@ Vec<HtmlPage*> *HtmlFormatter::FormatAllPages(bool skipEmptyPages)
 // mouse is over a link. There's a slight complication here: we only get explicit information about
 // strings, not about the whitespace and we should underline the whitespace as well. Also the text
 // should be underlined at a baseline
-void DrawHtmlPage(Graphics *g, Vec<DrawInstr> *drawInstructions, REAL offX, REAL offY, bool showBbox, Color textColor, bool *abortCookie)
+void DrawHtmlPage(Graphics *g, mui::ITextRender *textDraw, Vec<DrawInstr> *drawInstructions, REAL offX, REAL offY, bool showBbox, Color textColor, bool *abortCookie)
 {
-    SolidBrush brText(textColor);
     Pen debugPen(Color(255, 0, 0), 1);
     //Pen linePen(Color(0, 0, 0), 2.f);
     Pen linePen(Color(0x5F, 0x4B, 0x32), 2.f);
-    Font *font = NULL;
 
     WCHAR buf[512];
-    PointF pos;
     DrawInstr *i;
+
+    // GDI text rendering suffers terribly if we call GetHDC()/ReleaseHDC() around every
+    // draw, so first draw text and then paint everything else
+    textDraw->SetTextColor(textColor);
+    Status status = Ok;
+    Timer t;
+    textDraw->Lock();
+    for (i = drawInstructions->IterStart(); i; i = drawInstructions->IterNext()) {
+        RectF bbox = i->bbox;
+        bbox.X += offX;
+        bbox.Y += offY;
+        if (InstrString == i->type || InstrRtlString == i->type) {
+            size_t strLen = str::Utf8ToWcharBuf(i->str.s, i->str.len, buf, dimof(buf));
+            textDraw->Draw(buf, strLen, bbox, InstrRtlString == i->type);
+        } else if (InstrSetFont == i->type) {
+            textDraw->SetFont(i->font);
+        }
+        if (abortCookie && *abortCookie)
+            break;
+    }
+    textDraw->Unlock();
+    double dur = t.Stop();
+    lf("DrawHtmlPage: textDraw %.2f ms", dur);
+
     for (i = drawInstructions->IterStart(); i; i = drawInstructions->IterNext()) {
         RectF bbox = i->bbox;
         bbox.X += offX;
@@ -1347,26 +1395,20 @@ void DrawHtmlPage(Graphics *g, Vec<DrawInstr> *drawInstructions, REAL offX, REAL
             REAL y = floorf(bbox.Y + bbox.Height / 2.f + 0.5f);
             PointF p1(bbox.X, y);
             PointF p2(bbox.X + bbox.Width, y);
-            if (showBbox)
-                g->DrawRectangle(&debugPen, bbox);
-            g->DrawLine(&linePen, p1, p2);
-        } else if (InstrString == i->type) {
-            size_t strLen = str::Utf8ToWcharBuf(i->str.s, i->str.len, buf, dimof(buf));
-            bbox.GetLocation(&pos);
-            if (showBbox)
-                g->DrawRectangle(&debugPen, bbox);
-            g->DrawString(buf, strLen, font, pos, NULL, &brText);
-        } else if (InstrSetFont == i->type) {
-            font = i->font;
-        } else if ((InstrElasticSpace == i->type) ||
-            (InstrFixedSpace == i->type) ||
-            (InstrAnchor == i->type)) {
-            // ignore
+            if (showBbox) {
+                status = g->DrawRectangle(&debugPen, bbox);
+                CrashIf(status != Ok);
+            }
+            status = g->DrawLine(&linePen, p1, p2);
+            CrashIf(status != Ok);
         } else if (InstrImage == i->type) {
             // TODO: cache the bitmap somewhere (?)
             Bitmap *bmp = BitmapFromData(i->img.data, i->img.len);
-            if (bmp)
-                g->DrawImage(bmp, bbox, 0, 0, (REAL)bmp->GetWidth(), (REAL)bmp->GetHeight(), UnitPixel);
+            if (bmp) {
+                status = g->DrawImage(bmp, bbox, 0, 0, (REAL)bmp->GetWidth(), (REAL)bmp->GetHeight(), UnitPixel);
+                // GDI+ sometimes seems to succeed in loading an image because it lazily decodes it
+                CrashIf(status != Ok && status != Win32Error);
+            }
             delete bmp;
         } else if (InstrLinkStart == i->type) {
             // TODO: set text color to blue
@@ -1374,23 +1416,51 @@ void DrawHtmlPage(Graphics *g, Vec<DrawInstr> *drawInstructions, REAL offX, REAL
             PointF p1(bbox.X, y);
             PointF p2(bbox.X + bbox.Width, y);
             Pen linkPen(textColor);
-            g->DrawLine(&linkPen, p1, p2);
+            status = g->DrawLine(&linkPen, p1, p2);
+            CrashIf(status != Ok);
+        } else if (InstrString == i->type || InstrRtlString == i->type) {
+            if (showBbox) {
+                status = g->DrawRectangle(&debugPen, bbox);
+                CrashIf(status != Ok);
+            }
         } else if (InstrLinkEnd == i->type) {
             // TODO: set text color back again
-        } else if (InstrRtlString == i->type) {
-            size_t strLen = str::Utf8ToWcharBuf(i->str.s, i->str.len, buf, dimof(buf));
-            bbox.GetLocation(&pos);
-            if (showBbox)
-                g->DrawRectangle(&debugPen, bbox);
-            StringFormat rtl;
-            rtl.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
-            pos.X += bbox.Width;
-            g->DrawString(buf, strLen, font, pos, &rtl, &brText);
+        } else if ((InstrElasticSpace == i->type) ||
+                   (InstrFixedSpace == i->type) ||
+                   (InstrString == i->type) ||
+                   (InstrRtlString == i->type) ||
+                   (InstrSetFont == i->type) ||
+                   (InstrAnchor == i->type)) {
+            // ignore
         } else {
             CrashIf(true);
         }
-
         if (abortCookie && *abortCookie)
             break;
     }
+}
+
+static mui::TextRenderMethod gTextRenderMethod = mui::TextRenderMethodGdi;
+// static mui::TextRenderMethod gTextRenderMethod = mui::TextRenderMethodGdiplus;
+
+mui::TextRenderMethod GetTextRenderMethod()
+{
+    return gTextRenderMethod;
+}
+
+void SetTextRenderMethod(mui::TextRenderMethod method)
+{
+    gTextRenderMethod = method;
+}
+
+HtmlFormatterArgs *CreateFormatterDefaultArgs(int dx, int dy, Allocator *textAllocator)
+{
+    HtmlFormatterArgs *args = new HtmlFormatterArgs();
+    args->SetFontName(L"Georgia");
+    args->fontSize = 12.5f;
+    args->pageDx = (REAL)dx;
+    args->pageDy = (REAL)dy;
+    args->textAllocator = textAllocator;
+    args->textRenderMethod = GetTextRenderMethod();
+    return args;
 }

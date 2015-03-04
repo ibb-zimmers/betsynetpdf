@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 // note: include BaseUtil.h instead of including directly
@@ -18,8 +18,8 @@ public:
     PointT<S> Convert() const {
         return PointT<S>((S)x, (S)y);
     }
-    template <>
-    PointT<int> Convert() const {
+
+    PointT<int> ToInt() const {
         return PointT<int>((int)floor(x + 0.5), (int)floor(y + 0.5));
     }
 
@@ -44,8 +44,8 @@ public :
     SizeT<S> Convert() const {
         return SizeT<S>((S)dx, (S)dy);
     }
-    template <>
-    SizeT<int> Convert() const {
+
+    SizeT<int> ToInt() const {
         return SizeT<int>((int)floor(dx + 0.5), (int)floor(dy + 0.5));
     }
 
@@ -74,9 +74,9 @@ public:
 
     static RectT FromXY(T xs, T ys, T xe, T ye) {
         if (xs > xe)
-            Swap(xs, xe);
+            std::swap(xs, xe);
         if (ys > ye)
-            Swap(ys, ye);
+            std::swap(ys, ye);
         return RectT(xs, ys, xe - xs, ye - ys);
     }
     static RectT FromXY(PointT<T> TL, PointT<T> BR) {
@@ -87,8 +87,8 @@ public:
     RectT<S> Convert() const {
         return RectT<S>((S)x, (S)y, (S)dx, (S)dy);
     }
-    template <>
-    RectT<int> Convert() const {
+
+    RectT<int> ToInt() const {
         return RectT<int>((int)floor(x + 0.5), (int)floor(y + 0.5),
                           (int)floor(dx + 0.5), (int)floor(dy + 0.5));
     }
@@ -123,10 +123,10 @@ public:
     RectT Intersect(RectT other) const {
         /* The intersection starts with the larger of the start coordinates
            and ends with the smaller of the end coordinates */
-        T x = max(this->x, other.x);
-        T y = max(this->y, other.y);
-        T dx = min(this->x + this->dx, other.x + other.dx) - x;
-        T dy = min(this->y + this->dy, other.y + other.dy) - y;
+        T x = std::max(this->x, other.x);
+        T y = std::max(this->y, other.y);
+        T dx = std::min(this->x + this->dx, other.x + other.dx) - x;
+        T dy = std::min(this->y + this->dy, other.y + other.dy) - y;
 
         /* return an empty rectangle if the dimensions aren't positive */
         if (dx <= 0 || dy <= 0)
@@ -142,10 +142,10 @@ public:
 
         /* The union starts with the smaller of the start coordinates
            and ends with the larger of the end coordinates */
-        T x = min(this->x, other.x);
-        T y = min(this->y, other.y);
-        T dx = max(this->x + this->dx, other.x + other.dx) - x;
-        T dy = max(this->y + this->dy, other.y + other.dy) - y;
+        T x = std::min(this->x, other.x);
+        T y = std::min(this->y, other.y);
+        T dx = std::max(this->x + this->dx, other.x + other.dx) - x;
+        T dy = std::max(this->y + this->dy, other.y + other.dy) - y;
 
         return RectT(x, y, dx, dy);
     }
@@ -166,7 +166,7 @@ public:
 
 #ifdef _WIN32
     RECT ToRECT() const {
-        RectT<int> rectI(this->Convert<int>());
+        RectT<int> rectI(this->ToInt());
         RECT result = { rectI.x, rectI.y, rectI.x + rectI.dx, rectI.y + rectI.dy };
         return result;
     }
@@ -174,9 +174,9 @@ public:
         return FromXY(rect.left, rect.top, rect.right, rect.bottom);
     }
 
-#ifdef GDIPVER
+#if 1 //def GDIPVER, note: GDIPVER not defined in mingw?
     Gdiplus::Rect ToGdipRect() const {
-        RectT<int> rect(this->Convert<int>());
+        RectT<int> rect(this->ToInt());
         return Gdiplus::Rect(rect.x, rect.y, rect.dx, rect.dy);
     }
     Gdiplus::RectF ToGdipRectF() const {
@@ -210,7 +210,7 @@ typedef geomutil::RectT<double> RectD;
 
 class ClientRect : public RectI {
 public:
-    ClientRect(HWND hwnd) {
+    explicit ClientRect(HWND hwnd) {
         RECT rc;
         if (GetClientRect(hwnd, &rc)) {
             x = rc.left; dx = rc.right - rc.left;
@@ -221,7 +221,7 @@ public:
 
 class WindowRect : public RectI {
 public:
-    WindowRect(HWND hwnd) {
+    explicit WindowRect(HWND hwnd) {
         RECT rc;
         if (GetWindowRect(hwnd, &rc)) {
             x = rc.left; dx = rc.right - rc.left;

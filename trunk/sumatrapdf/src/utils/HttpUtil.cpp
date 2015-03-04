@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -31,7 +31,9 @@ DWORD HttpGet(const WCHAR *url, str::Str<char> *dataOut)
         char buf[1024];
         if (!InternetReadFile(hFile, buf, sizeof(buf), &dwRead))
             goto Error;
-        dataOut->Append(buf, dwRead);
+        bool ok = dataOut->AppendChecked(buf, dwRead);
+        if (!ok)
+            goto Error;
     } while (dwRead > 0);
 
 Exit:
@@ -147,7 +149,9 @@ bool HttpPost(const WCHAR *server, const WCHAR *url, str::Str<char> *headers, st
         char buf[1024];
         if (!InternetReadFile(hReq, buf, sizeof(buf), &dwRead))
             goto Exit;
-        resp.Append(buf, dwRead);
+        ok = resp.AppendChecked(buf, dwRead);
+        if (!ok)
+            goto Exit;
     } while (dwRead > 0);
 
 #if 0

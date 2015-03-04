@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 // engines which render flowed ebook formats into fixed pages through the BaseEngine API
@@ -7,20 +7,17 @@
 #include "BaseUtil.h"
 #include "EbookEngine.h"
 
+#include "BaseEngine.h"
 #include "EbookDoc.h"
 #include "EbookFormatter.h"
 #include "FileUtil.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
 #include "HtmlPullParser.h"
-#include "MiniMui.h"
+#include "Mui.h"
 #include "PalmDbReader.h"
 #include "TrivialHtmlParser.h"
+#include "WinUtil.h"
 #include "ZipUtil.h"
-
-// disable warning C4250 which is wrongly issued due to a compiler bug; cf.
-// http://connect.microsoft.com/VisualStudio/feedback/details/101259/disable-warning-c4250-class1-inherits-class2-member-via-dominance-when-weak-member-is-a-pure-virtual-function
-#pragma warning(disable: 4250) /* 'class1' : inherits 'class2::member' via dominance */
 
 static ScopedMem<WCHAR> gDefaultFontName;
 static float gDefaultFontSize = 10.f;
@@ -28,6 +25,13 @@ static float gDefaultFontSize = 10.f;
 static const WCHAR *GetDefaultFontName()
 {
     return gDefaultFontName ? gDefaultFontName : L"Georgia";
+}
+
+static float GetDefaultFontSize()
+{
+    // fonts are scaled at higher DPI settings,
+    // undo this here for (mostly) consistent results
+    return gDefaultFontSize * 96 / win::GetHwndDpi(HWND_DESKTOP);
 }
 
 void SetDefaultEbookFont(const WCHAR *name, float size)
@@ -39,30 +43,13 @@ void SetDefaultEbookFont(const WCHAR *name, float size)
     gDefaultFontSize = size * 0.8f;
 }
 
-/* common classes for EPUB, FictionBook2, Mobi, PalmDOC, CHM, TCR, HTML and TXT engines */
-
-namespace str {
-    namespace conv {
-
-inline WCHAR *FromHtmlUtf8(const char *s, size_t len)
-{
-    ScopedMem<char> tmp(str::DupN(s, len));
-    return DecodeHtmlEntitites(tmp, CP_UTF8);
-}
-
-    }
-}
-
-inline bool IsExternalUrl(const WCHAR *url)
-{
-    return str::FindChar(url, ':') != NULL;
-}
+/* common classes for EPUB, FictionBook2, Mobi, PalmDOC, CHM, HTML and TXT engines */
 
 struct PageAnchor {
     DrawInstr *instr;
     int pageNo;
 
-    PageAnchor(DrawInstr *instr=NULL, int pageNo=-1) : instr(instr), pageNo(pageNo) { }
+    explicit PageAnchor(DrawInstr *instr=NULL, int pageNo=-1) : instr(instr), pageNo(pageNo) { }
 };
 
 class EbookAbortCookie : public AbortCookie {
@@ -72,13 +59,13 @@ public:
     virtual void Abort() { abort = true; }
 };
 
-class EbookEngine : public virtual BaseEngine {
+class EbookEngine : public BaseEngine {
 public:
     EbookEngine();
     virtual ~EbookEngine();
 
     virtual const WCHAR *FileName() const { return fileName; };
-    virtual int PageCount() const { return pages ? pages->Count() : 0; }
+    virtual int PageCount() const { return pages ? (int)pages->Count() : 0; }
 
     virtual RectD PageMediabox(int pageNo) { return pageRect; }
     virtual RectD PageContentBox(int pageNo, RenderTarget target=Target_View) {
@@ -99,7 +86,7 @@ public:
     virtual unsigned char *GetFileData(size_t *cbCount) {
         return fileName ? (unsigned char *)file::ReadAll(fileName, cbCount) : NULL;
     }
-    virtual bool SaveFileAs(const WCHAR *copyFileName) {
+    virtual bool SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots=false) {
         return fileName ? CopyFile(fileName, copyFileName, FALSE) : false;
     }
     virtual WCHAR * ExtractPageText(int pageNo, WCHAR *lineSep, RectI **coords_out=NULL,
@@ -131,8 +118,6 @@ protected:
     CRITICAL_SECTION pagesAccess;
     // access to userAnnots is protected by pagesAccess
     Vec<PageAnnotation> userAnnots;
-    // needed to undo the DPI specific UnitPoint-UnitPixel conversion
-    int currFontDpi;
     // page dimensions can vary between filetypes
     RectD pageRect;
     float pageBorder;
@@ -141,7 +126,6 @@ protected:
         GetBaseTransform(m, pageRect.ToGdipRectF(), zoom, rotation);
     }
     bool ExtractPageAnchors();
-    void FixFontSizeForResolution(HDC hDC);
     WCHAR *ExtractFontList();
 
     virtual PageElement *CreatePageLink(DrawInstr *link, RectI rect, int pageNo);
@@ -239,7 +223,7 @@ public:
 
 EbookEngine::EbookEngine() : fileName(NULL), pages(NULL),
     pageRect(0, 0, 5.12 * GetFileDPI(), 7.8 * GetFileDPI()), // "B Format" paperback
-    pageBorder(0.4f * GetFileDPI()), currFontDpi(96)
+    pageBorder(0.4f * GetFileDPI())
 {
     InitializeCriticalSection(&pagesAccess);
 }
@@ -306,57 +290,29 @@ RenderedBitmap *EbookEngine::RenderBitmap(int pageNo, float zoom, int rotation, 
     RectI screen = Transform(pageRc, pageNo, zoom, rotation).Round();
     screen.Offset(-screen.x, -screen.y);
 
-    HDC hDC = GetDC(NULL);
-    HDC hDCMem = CreateCompatibleDC(hDC);
-    HBITMAP hbmp = CreateCompatibleBitmap(hDC, screen.dx, screen.dy);
-    DeleteObject(SelectObject(hDCMem, hbmp));
+    HANDLE hMap = NULL;
+    HBITMAP hbmp = CreateMemoryBitmap(screen.Size(), &hMap);
+    HDC hDC = CreateCompatibleDC(NULL);
+    DeleteObject(SelectObject(hDC, hbmp));
 
-    bool ok = RenderPage(hDCMem, screen, pageNo, zoom, rotation, pageRect, target, cookie_out);
-    DeleteDC(hDCMem);
-    ReleaseDC(NULL, hDC);
+    bool ok = RenderPage(hDC, screen, pageNo, zoom, rotation, pageRect, target, cookie_out);
+    DeleteDC(hDC);
     if (!ok) {
         DeleteObject(hbmp);
+        CloseHandle(hMap);
         return NULL;
     }
 
-    return new RenderedBitmap(hbmp, screen.Size());
-}
-
-void EbookEngine::FixFontSizeForResolution(HDC hDC)
-{
-    int dpi = GetDeviceCaps(hDC, LOGPIXELSY);
-    if (dpi == currFontDpi)
-        return;
-
-    ScopedCritSec scope(&pagesAccess);
-
-    float dpiFactor = 1.0f * currFontDpi / dpi;
-    Graphics g(hDC);
-    LOGFONTW lfw;
-
-    for (int pageNo = 1; pageNo <= PageCount(); pageNo++) {
-        Vec<DrawInstr> *pageInstrs = GetHtmlPage(pageNo);
-        for (DrawInstr *i = pageInstrs->IterStart(); i; i = pageInstrs->IterNext()) {
-            if (InstrSetFont == i->type) {
-                Status ok = i->font->GetLogFontW(&g, &lfw);
-                if (Ok == ok) {
-                    REAL newSize = i->font->GetSize() * dpiFactor;
-                    FontStyle newStyle = (FontStyle)i->font->GetStyle();
-                    i->font = mui::GetCachedFont(lfw.lfFaceName, newSize, newStyle);
-                }
-            }
-        }
-    }
-    currFontDpi = dpi;
+    return new RenderedBitmap(hbmp, screen.Size(), hMap);
 }
 
 // TODO: use AdjustLightness instead to compensate for the alpha?
 static Gdiplus::Color Unblend(PageAnnotation::Color c, BYTE alpha)
 {
     alpha = (BYTE)(alpha * c.a / 255.f);
-    BYTE R = (BYTE)floorf(max(c.r - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
-    BYTE G = (BYTE)floorf(max(c.g - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
-    BYTE B = (BYTE)floorf(max(c.b - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
+    BYTE R = (BYTE)floorf(std::max(c.r - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
+    BYTE G = (BYTE)floorf(std::max(c.g - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
+    BYTE B = (BYTE)floorf(std::max(c.b - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
     return Gdiplus::Color(alpha, R, G, B);
 }
 
@@ -420,11 +376,7 @@ bool EbookEngine::RenderPage(HDC hDC, RectI screenRect, int pageNo, float zoom, 
     RectI screen = Transform(pageRc, pageNo, zoom, rotation).Round();
 
     Graphics g(hDC);
-    // cf. InitGraphicsMode in MuiBase.cpp
-    g.SetCompositingQuality(CompositingQualityHighQuality);
-    g.SetSmoothingMode(SmoothingModeAntiAlias);
-    g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
-    g.SetPageUnit(UnitPixel);
+    mui::InitGraphicsMode(&g);
 
     Color white(0xFF, 0xFF, 0xFF);
     Rect screenR(screenRect.ToGdipRect());
@@ -443,9 +395,12 @@ bool EbookEngine::RenderPage(HDC hDC, RectI screenRect, int pageNo, float zoom, 
         *cookie_out = cookie = new EbookAbortCookie();
 
     ScopedCritSec scope(&pagesAccess);
-    FixFontSizeForResolution(hDC);
-    DrawHtmlPage(&g, GetHtmlPage(pageNo), pageBorder, pageBorder, false, Color((ARGB)Color::Black), cookie ? &cookie->abort : NULL);
+
+    mui::ITextRender *textDraw = mui::TextRenderGdiplus::Create(&g);
+    DrawHtmlPage(&g, textDraw, GetHtmlPage(pageNo), pageBorder, pageBorder, false, Color((ARGB)Color::Black), cookie ? &cookie->abort : NULL);
     DrawAnnotations(g, userAnnots, pageNo);
+    delete textDraw;
+
     return !(cookie && cookie->abort);
 }
 
@@ -529,8 +484,7 @@ WCHAR *EbookEngine::ExtractPageText(int pageNo, WCHAR *lineSep, RectI **coords_o
 
     if (coords_out) {
         CrashIf(coords.Count() != content.Count());
-        *coords_out = new RectI[coords.Count()];
-        memcpy(*coords_out, coords.LendData(), coords.Count() * sizeof(RectI));
+        *coords_out = coords.StealData();
     }
     return content.StealData();
 }
@@ -546,23 +500,19 @@ void EbookEngine::UpdateUserAnnotations(Vec<PageAnnotation> *list)
 
 PageElement *EbookEngine::CreatePageLink(DrawInstr *link, RectI rect, int pageNo)
 {
-    // internal links don't start with a protocol
-    bool isInternal = !memchr(link->str.s, ':', link->str.len);
-    if (!isInternal)
+    ScopedMem<WCHAR> url(str::conv::FromHtmlUtf8(link->str.s, link->str.len));
+    if (url::IsAbsolute(url))
         return new EbookLink(link, rect, NULL, pageNo);
 
-    ScopedMem<WCHAR> id;
     DrawInstr *baseAnchor = baseAnchors.At(pageNo-1);
     if (baseAnchor) {
         ScopedMem<char> basePath(str::DupN(baseAnchor->str.s, baseAnchor->str.len));
-        ScopedMem<char> url(str::DupN(link->str.s, link->str.len));
-        url.Set(NormalizeURL(url, basePath));
-        id.Set(str::conv::FromUtf8(url));
+        ScopedMem<char> relPath(ResolveHtmlEntities(link->str.s, link->str.len));
+        ScopedMem<char> absPath(NormalizeURL(relPath, basePath));
+        url.Set(str::conv::FromUtf8(absPath));
     }
-    else
-        id.Set(str::conv::FromHtmlUtf8(link->str.s, link->str.len));
 
-    PageDestination *dest = GetNamedDest(id);
+    PageDestination *dest = GetNamedDest(url);
     if (!dest)
         return NULL;
     return new EbookLink(link, rect, dest, pageNo);
@@ -664,7 +614,7 @@ WCHAR *EbookEngine::ExtractFontList()
 {
     ScopedCritSec scope(&pagesAccess);
 
-    Vec<Font *> seenFonts;
+    Vec<mui::CachedFont *> seenFonts;
     WStrVec fonts;
 
     for (int pageNo = 1; pageNo <= PageCount(); pageNo++) {
@@ -679,7 +629,12 @@ WCHAR *EbookEngine::ExtractFontList()
             seenFonts.Append(i->font);
 
             FontFamily family;
-            Status ok = i->font->GetFamily(&family);
+            if (!i->font->font) {
+                // TODO: handle gdi
+                CrashIf(!i->font->GetHFont());
+                continue;
+            }
+            Status ok = i->font->font->GetFamily(&family);
             if (ok != Ok)
                 continue;
             WCHAR fontName[LF_FACESIZE];
@@ -723,29 +678,28 @@ class EbookTocBuilder : public EbookTocVisitor {
     bool isIndex;
 
 public:
-    EbookTocBuilder(BaseEngine *engine) :
+    explicit EbookTocBuilder(BaseEngine *engine) :
         engine(engine), root(NULL), idCounter(0), isIndex(false) { }
 
     virtual void Visit(const WCHAR *name, const WCHAR *url, int level) {
         PageDestination *dest;
         if (!url)
             dest = NULL;
-        else if (IsExternalUrl(url))
+        else if (url::IsAbsolute(url))
             dest = new SimpleDest2(0, RectD(), str::Dup(url));
-        else if (str::FindChar(url, '%')) {
-            ScopedMem<WCHAR> decodedUrl(str::Dup(url));
-            str::UrlDecodeInPlace(decodedUrl);
-            dest = engine->GetNamedDest(decodedUrl);
-        }
-        else
+        else {
             dest = engine->GetNamedDest(url);
+            if (!dest && str::FindChar(url, '%')) {
+                ScopedMem<WCHAR> decodedUrl(str::Dup(url));
+                url::DecodeInPlace(decodedUrl);
+                dest = engine->GetNamedDest(decodedUrl);
+            }
+        }
 
         EbookTocItem *item = new EbookTocItem(str::Dup(name), dest);
         item->id = ++idCounter;
-        item->open = level <= 2;
         if (isIndex) {
             item->pageNo = 0;
-            item->open = level != 1;
             level++;
         }
         AppendTocItem(root, item, level);
@@ -757,15 +711,18 @@ public:
 
 /* BaseEngine for handling EPUB documents */
 
-class EpubEngineImpl : public EbookEngine, public EpubEngine {
-    friend EpubEngine;
-
+class EpubEngineImpl : public EbookEngine {
 public:
-    EpubEngineImpl() : EbookEngine(), doc(NULL) { }
-    virtual ~EpubEngineImpl() { delete doc; }
-    virtual EpubEngine *Clone() {
+    EpubEngineImpl() : EbookEngine(), doc(NULL), stream(NULL) { }
+    virtual ~EpubEngineImpl();
+    virtual BaseEngine *Clone() {
+        if (stream)
+            return CreateFromStream(stream);
         return fileName ? CreateFromFile(fileName) : NULL;
     }
+
+    virtual unsigned char *GetFileData(size_t *cbCount);
+    virtual bool SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots=false);
 
     virtual PageLayoutType PreferredLayout();
 
@@ -777,15 +734,24 @@ public:
     virtual bool HasTocTree() const { return doc->HasToc(); }
     virtual DocTocItem *GetTocTree();
 
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+    static BaseEngine *CreateFromStream(IStream *stream);
+
 protected:
     EpubDoc *doc;
+    IStream *stream;
 
     bool Load(const WCHAR *fileName);
     bool Load(IStream *stream);
     bool FinishLoading();
-
-    DocTocItem *BuildTocTree(HtmlPullParser& parser, int& idCounter);
 };
+
+EpubEngineImpl::~EpubEngineImpl()
+{
+    delete doc;
+    if (stream)
+        stream->Release();
+}
 
 bool EpubEngineImpl::Load(const WCHAR *fileName)
 {
@@ -803,6 +769,8 @@ bool EpubEngineImpl::Load(const WCHAR *fileName)
 
 bool EpubEngineImpl::Load(IStream *stream)
 {
+    stream->AddRef();
+    this->stream = stream;
     doc = EpubDoc::CreateFromStream(stream);
     return FinishLoading();
 }
@@ -813,19 +781,44 @@ bool EpubEngineImpl::FinishLoading()
         return false;
 
     HtmlFormatterArgs args;
-    args.htmlStr = doc->GetTextData(&args.htmlStrLen);
+    args.htmlStr = doc->GetHtmlData(&args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
-    args.measureAlgo = MeasureTextQuick;
+    args.textRenderMethod = mui::TextRenderMethodGdiplusQuick;
 
     pages = EpubFormatter(&args, doc).FormatAllPages(false);
     if (!ExtractPageAnchors())
         return false;
 
     return pages->Count() > 0;
+}
+
+unsigned char *EpubEngineImpl::GetFileData(size_t *cbCount)
+{
+    if (stream) {
+        ScopedMem<void> data(GetDataFromStream(stream, cbCount));
+        if (data)
+            return (unsigned char *)data.StealData();
+    }
+    if (!fileName)
+        return NULL;
+    return (unsigned char *)file::ReadAll(fileName, cbCount);
+}
+
+bool EpubEngineImpl::SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots)
+{
+    if (stream) {
+        size_t len;
+        ScopedMem<void> data(GetDataFromStream(stream, &len));
+        if (data && file::WriteAll(copyFileName, data, len))
+            return true;
+    }
+    if (!fileName)
+        return false;
+    return CopyFile(fileName, copyFileName, FALSE);
 }
 
 PageLayoutType EpubEngineImpl::PreferredLayout()
@@ -839,19 +832,13 @@ DocTocItem *EpubEngineImpl::GetTocTree()
 {
     EbookTocBuilder builder(this);
     doc->ParseToc(&builder);
-    return builder.GetRoot();
+    EbookTocItem *root = builder.GetRoot();
+    if (root)
+        root->OpenSingleNode();
+    return root;
 }
 
-bool EpubEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
-{
-    if (sniff && dir::Exists(fileName)) {
-        ScopedMem<WCHAR> mimetypePath(path::Join(fileName, L"mimetype"));
-        return file::StartsWith(mimetypePath, "application/epub+zip");
-    }
-    return EpubDoc::IsSupportedFile(fileName, sniff);
-}
-
-EpubEngine *EpubEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *EpubEngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     EpubEngineImpl *engine = new EpubEngineImpl();
     if (!engine->Load(fileName)) {
@@ -861,7 +848,7 @@ EpubEngine *EpubEngine::CreateFromFile(const WCHAR *fileName)
     return engine;
 }
 
-EpubEngine *EpubEngine::CreateFromStream(IStream *stream)
+BaseEngine *EpubEngineImpl::CreateFromStream(IStream *stream)
 {
     EpubEngineImpl *engine = new EpubEngineImpl();
     if (!engine->Load(stream)) {
@@ -871,15 +858,36 @@ EpubEngine *EpubEngine::CreateFromStream(IStream *stream)
     return engine;
 }
 
+namespace EpubEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    if (sniff && dir::Exists(fileName)) {
+        ScopedMem<WCHAR> mimetypePath(path::Join(fileName, L"mimetype"));
+        return file::StartsWith(mimetypePath, "application/epub+zip");
+    }
+    return EpubDoc::IsSupportedFile(fileName, sniff);
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return EpubEngineImpl::CreateFromFile(fileName);
+}
+
+BaseEngine *CreateFromStream(IStream *stream)
+{
+    return EpubEngineImpl::CreateFromStream(stream);
+}
+
+}
+
 /* BaseEngine for handling FictionBook2 documents */
 
-class Fb2EngineImpl : public EbookEngine, public Fb2Engine {
-    friend Fb2Engine;
-
+class Fb2EngineImpl : public EbookEngine {
 public:
     Fb2EngineImpl() : EbookEngine(), doc(NULL) { }
     virtual ~Fb2EngineImpl() { delete doc; }
-    virtual Fb2Engine *Clone() {
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -887,34 +895,49 @@ public:
         return prop != Prop_FontList ? doc->GetProperty(prop) : ExtractFontList();
     }
     virtual const WCHAR *GetDefaultFileExt() const {
-        return doc && doc->IsZipped() ? L".fb2z" : L".fb2";
+        return doc->IsZipped() ? L".fb2z" : L".fb2";
     }
 
-    virtual bool HasTocTree() const;
+    virtual bool HasTocTree() const { return doc->HasToc(); }
     virtual DocTocItem *GetTocTree();
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+    static BaseEngine *CreateFromStream(IStream *stream);
 
 protected:
     Fb2Doc *doc;
 
     bool Load(const WCHAR *fileName);
+    bool Load(IStream *stream);
+    bool FinishLoading();
 };
 
 bool Fb2EngineImpl::Load(const WCHAR *fileName)
 {
     this->fileName = str::Dup(fileName);
-
     doc = Fb2Doc::CreateFromFile(fileName);
+    return FinishLoading();
+}
+
+bool Fb2EngineImpl::Load(IStream *stream)
+{
+    doc = Fb2Doc::CreateFromStream(stream);
+    return FinishLoading();
+}
+
+bool Fb2EngineImpl::FinishLoading()
+{
     if (!doc)
         return false;
 
     HtmlFormatterArgs args;
-    args.htmlStr = doc->GetTextData(&args.htmlStrLen);
+    args.htmlStr = doc->GetXmlData(&args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
-    args.measureAlgo = MeasureTextQuick;
+    args.textRenderMethod = mui::TextRenderMethodGdiplusQuick;
 
     pages = Fb2Formatter(&args, doc).FormatAllPages(false);
     if (!ExtractPageAnchors())
@@ -923,69 +946,17 @@ bool Fb2EngineImpl::Load(const WCHAR *fileName)
     return pages->Count() > 0;
 }
 
-bool Fb2EngineImpl::HasTocTree() const
-{
-    CrashIf(str::Len(FB2_TOC_ENTRY_MARK) != 10);
-    for (size_t i = 0; i < anchors.Count(); i++) {
-        DrawInstr *instr = anchors.At(i).instr;
-        if (instr->str.len == 11 && str::EqN(instr->str.s, FB2_TOC_ENTRY_MARK "1", 11))
-            return true;
-    }
-    return false;
-}
-
 DocTocItem *Fb2EngineImpl::GetTocTree()
 {
-    EbookTocItem *root = NULL;
-    ScopedMem<WCHAR> itemText;
-    int titleCount = 0;
-    bool inTitle = false;
-    int level = 0;
-
-    size_t xmlLen;
-    const char *xmlData = doc->GetTextData(&xmlLen);
-    HtmlPullParser parser(xmlData, xmlLen);
-    HtmlToken *tok;
-    while ((tok = parser.Next()) != NULL && !tok->IsError()) {
-        if (tok->IsStartTag() && Tag_Section == tok->tag)
-            level++;
-        else if (tok->IsEndTag() && Tag_Section == tok->tag && level > 0)
-            level--;
-        else if (tok->IsStartTag() && Tag_Title == tok->tag) {
-            inTitle = true;
-            titleCount++;
-        }
-        else if (tok->IsEndTag() && Tag_Title == tok->tag) {
-            if (itemText)
-                str::NormalizeWS(itemText);
-            if (!str::IsEmpty(itemText.Get())) {
-                ScopedMem<WCHAR> name(str::Format(TEXT(FB2_TOC_ENTRY_MARK) L"%d", titleCount));
-                PageDestination *dest = GetNamedDest(name);
-                EbookTocItem *item = new EbookTocItem(itemText.StealData(), dest);
-                item->id = titleCount;
-                item->open = level <= 2;
-                AppendTocItem(root, item, level);
-            }
-            inTitle = false;
-        }
-        else if (inTitle && tok->IsText()) {
-            ScopedMem<WCHAR> text(str::conv::FromHtmlUtf8(tok->s, tok->sLen));
-            if (str::IsEmpty(itemText.Get()))
-                itemText.Set(text.StealData());
-            else
-                itemText.Set(str::Join(itemText, L" ", text));
-        }
-    }
-
+    EbookTocBuilder builder(this);
+    doc->ParseToc(&builder);
+    EbookTocItem *root = builder.GetRoot();
+    if (root)
+        root->OpenSingleNode();
     return root;
 }
 
-bool Fb2Engine::IsSupportedFile(const WCHAR *fileName, bool sniff)
-{
-    return Fb2Doc::IsSupportedFile(fileName, sniff);
-}
-
-Fb2Engine *Fb2Engine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *Fb2EngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     Fb2EngineImpl *engine = new Fb2EngineImpl();
     if (!engine->Load(fileName)) {
@@ -995,17 +966,44 @@ Fb2Engine *Fb2Engine::CreateFromFile(const WCHAR *fileName)
     return engine;
 }
 
+BaseEngine *Fb2EngineImpl::CreateFromStream(IStream *stream)
+{
+    Fb2EngineImpl *engine = new Fb2EngineImpl();
+    if (!engine->Load(stream)) {
+        delete engine;
+        return NULL;
+    }
+    return engine;
+}
+
+namespace Fb2Engine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    return Fb2Doc::IsSupportedFile(fileName, sniff);
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return Fb2EngineImpl::CreateFromFile(fileName);
+}
+
+BaseEngine *CreateFromStream(IStream *stream)
+{
+    return Fb2EngineImpl::CreateFromStream(stream);
+}
+
+}
+
 /* BaseEngine for handling Mobi documents */
 
 #include "MobiDoc.h"
 
-class MobiEngineImpl : public EbookEngine, public MobiEngine {
-    friend MobiEngine;
-
+class MobiEngineImpl : public EbookEngine {
 public:
-    MobiEngineImpl() : EbookEngine(), doc(NULL), tocReparsePoint(NULL) { }
+    MobiEngineImpl() : EbookEngine(), doc(NULL) { }
     virtual ~MobiEngineImpl() { delete doc; }
-    virtual MobiEngine *Clone() {
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -1015,53 +1013,50 @@ public:
     virtual const WCHAR *GetDefaultFileExt() const { return L".mobi"; }
 
     virtual PageDestination *GetNamedDest(const WCHAR *name);
-    virtual bool HasTocTree() const { return tocReparsePoint != NULL; }
+    virtual bool HasTocTree() const { return doc->HasToc(); }
     virtual DocTocItem *GetTocTree();
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+    static BaseEngine *CreateFromStream(IStream *stream);
 
 protected:
     MobiDoc *doc;
-    const char *tocReparsePoint;
-    ScopedMem<char> pdbHtml;
 
     bool Load(const WCHAR *fileName);
+    bool Load(IStream *stream);
+    bool FinishLoading();
 };
 
 bool MobiEngineImpl::Load(const WCHAR *fileName)
 {
     this->fileName = str::Dup(fileName);
-
     doc = MobiDoc::CreateFromFile(fileName);
+    return FinishLoading();
+}
+
+bool MobiEngineImpl::Load(IStream *stream)
+{
+    doc = MobiDoc::CreateFromStream(stream);
+    return FinishLoading();
+}
+
+bool MobiEngineImpl::FinishLoading()
+{
     if (!doc || Pdb_Mobipocket != doc->GetDocType())
         return false;
 
     HtmlFormatterArgs args;
-    args.htmlStr = doc->GetBookHtmlData(args.htmlStrLen);
+    args.htmlStr = doc->GetHtmlData(args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
-    args.measureAlgo = MeasureTextQuick;
+    args.textRenderMethod = mui::TextRenderMethodGdiplusQuick;
 
     pages = MobiFormatter(&args, doc).FormatAllPages();
     if (!ExtractPageAnchors())
         return false;
-
-    HtmlParser parser;
-    if (parser.Parse(args.htmlStr)) {
-        HtmlElement *ref = NULL;
-        while ((ref = parser.FindElementByName("reference", ref)) != NULL) {
-            ScopedMem<WCHAR> type(ref->GetAttribute("type"));
-            ScopedMem<WCHAR> filepos(ref->GetAttribute("filepos"));
-            if (str::EqI(type, L"toc") && filepos) {
-                unsigned int pos;
-                if (str::Parse(filepos, L"%u%$", &pos) && pos < args.htmlStrLen) {
-                    tocReparsePoint = args.htmlStr + pos;
-                    break;
-                }
-            }
-        }
-    }
 
     return pages->Count() > 0;
 }
@@ -1079,7 +1074,7 @@ PageDestination *MobiEngineImpl::GetNamedDest(const WCHAR *name)
     CrashIf(pageNo < 1 || pageNo > PageCount());
 
     size_t htmlLen;
-    char *start = doc->GetBookHtmlData(htmlLen);
+    char *start = doc->GetHtmlData(htmlLen);
     if ((size_t)filePos > htmlLen)
         return NULL;
 
@@ -1103,71 +1098,15 @@ PageDestination *MobiEngineImpl::GetNamedDest(const WCHAR *name)
 
 DocTocItem *MobiEngineImpl::GetTocTree()
 {
-    if (!tocReparsePoint)
-        return NULL;
-
-    EbookTocItem *root = NULL;
-    ScopedMem<WCHAR> itemText;
-    ScopedMem<WCHAR> itemLink;
-    int itemLevel = 0;
-    int idCounter = 0;
-
-    // there doesn't seem to be a standard for Mobi ToCs, so we try to
-    // determine the author's intentions by looking at commonly used tags
-    HtmlPullParser parser(tocReparsePoint, str::Len(tocReparsePoint));
-    HtmlToken *tok;
-    while ((tok = parser.Next()) != NULL && !tok->IsError()) {
-        if (itemLink && tok->IsText()) {
-            ScopedMem<WCHAR> linkText(str::conv::FromHtmlUtf8(tok->s, tok->sLen));
-            if (itemText)
-                itemText.Set(str::Join(itemText, L" ", linkText));
-            else
-                itemText.Set(linkText.StealData());
-        }
-        else if (!tok->IsTag())
-            continue;
-        else if (Tag_Mbp_Pagebreak == tok->tag)
-            break;
-        else if (!itemLink && tok->IsStartTag() && Tag_A == tok->tag) {
-            AttrInfo *attr = tok->GetAttrByName("filepos");
-            if (!attr)
-                attr = tok->GetAttrByName("href");
-            if (attr)
-                itemLink.Set(str::conv::FromHtmlUtf8(attr->val, attr->valLen));
-        }
-        else if (itemLink && tok->IsEndTag() && Tag_A == tok->tag) {
-            PageDestination *dest = NULL;
-            if (!itemText) {
-                itemLink.Set(NULL);
-                continue;
-            }
-            if (IsExternalUrl(itemLink))
-                dest = new SimpleDest2(0, RectD(), itemLink.StealData());
-            else
-                dest = GetNamedDest(itemLink);
-            EbookTocItem *item = new EbookTocItem(itemText.StealData(), dest);
-            item->id = ++idCounter;
-            item->open = itemLevel <= 2;
-            AppendTocItem(root, item, itemLevel);
-            itemLink.Set(NULL);
-        }
-        else if (Tag_Blockquote == tok->tag || Tag_Ul == tok->tag || Tag_Ol == tok->tag) {
-            if (tok->IsStartTag())
-                itemLevel++;
-            else if (tok->IsEndTag() && itemLevel > 0)
-                itemLevel--;
-        }
-    }
-
+    EbookTocBuilder builder(this);
+    doc->ParseToc(&builder);
+    EbookTocItem *root = builder.GetRoot();
+    if (root)
+        root->OpenSingleNode();
     return root;
 }
 
-bool MobiEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
-{
-    return MobiDoc::IsSupportedFile(fileName, sniff);
-}
-
-MobiEngine *MobiEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *MobiEngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     MobiEngineImpl *engine = new MobiEngineImpl();
     if (!engine->Load(fileName)) {
@@ -1177,15 +1116,42 @@ MobiEngine *MobiEngine::CreateFromFile(const WCHAR *fileName)
     return engine;
 }
 
+BaseEngine *MobiEngineImpl::CreateFromStream(IStream *stream)
+{
+    MobiEngineImpl *engine = new MobiEngineImpl();
+    if (!engine->Load(stream)) {
+        delete engine;
+        return NULL;
+    }
+    return engine;
+}
+
+namespace MobiEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    return MobiDoc::IsSupportedFile(fileName, sniff);
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return MobiEngineImpl::CreateFromFile(fileName);
+}
+
+BaseEngine *CreateFromStream(IStream *stream)
+{
+    return MobiEngineImpl::CreateFromStream(stream);
+}
+
+}
+
 /* BaseEngine for handling PalmDOC documents (and extensions such as TealDoc) */
 
-class PdbEngineImpl : public EbookEngine, public PdbEngine {
-    friend PdbEngine;
-
+class PdbEngineImpl : public EbookEngine {
 public:
     PdbEngineImpl() : EbookEngine(), doc(NULL) { }
     virtual ~PdbEngineImpl() { delete doc; }
-    virtual PdbEngine *Clone() {
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -1196,6 +1162,8 @@ public:
 
     virtual bool HasTocTree() const { return doc->HasToc(); }
     virtual DocTocItem *GetTocTree();
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
 
 protected:
     PalmDoc *doc;
@@ -1212,15 +1180,15 @@ bool PdbEngineImpl::Load(const WCHAR *fileName)
         return false;
 
     HtmlFormatterArgs args;
-    args.htmlStr = doc->GetTextData(&args.htmlStrLen);
+    args.htmlStr = doc->GetHtmlData(&args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
-    args.measureAlgo = MeasureTextQuick;
+    args.textRenderMethod = mui::TextRenderMethodGdiplusQuick;
 
-    pages = PdbFormatter(&args, doc).FormatAllPages();
+    pages = HtmlFormatter(&args).FormatAllPages();
     if (!ExtractPageAnchors())
         return false;
 
@@ -1234,12 +1202,7 @@ DocTocItem *PdbEngineImpl::GetTocTree()
     return builder.GetRoot();
 }
 
-bool PdbEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
-{
-    return PalmDoc::IsSupportedFile(fileName, sniff);
-}
-
-PdbEngine *PdbEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *PdbEngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     PdbEngineImpl *engine = new PdbEngineImpl();
     if (!engine->Load(fileName)) {
@@ -1247,6 +1210,20 @@ PdbEngine *PdbEngine::CreateFromFile(const WCHAR *fileName)
         return NULL;
     }
     return engine;
+}
+
+namespace PdbEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    return PalmDoc::IsSupportedFile(fileName, sniff);
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return PdbEngineImpl::CreateFromFile(fileName);
+}
+
 }
 
 /* formatting extensions for CHM */
@@ -1267,14 +1244,13 @@ public:
         }
     }
 
-    const char *GetTextData(size_t *lenOut) {
+    const char *GetHtmlData(size_t *lenOut) {
         *lenOut = str::Len(html);
         return html;
     }
 
     ImageData *GetImageData(const char *id, const char *pagePath) {
         ScopedMem<char> url(NormalizeURL(id, pagePath));
-        str::UrlDecodeInPlace(url);
         for (size_t i = 0; i < images.Count(); i++) {
             if (str::Eq(images.At(i).id, url))
                 return &images.At(i).base;
@@ -1291,7 +1267,6 @@ public:
 
     char *GetFileData(const char *relPath, const char *pagePath, size_t *lenOut) {
         ScopedMem<char> url(NormalizeURL(relPath, pagePath));
-        str::UrlDecodeInPlace(url);
         return (char *)doc->GetData(url, lenOut);
     }
 };
@@ -1315,13 +1290,16 @@ void ChmFormatter::HandleTagImg(HtmlToken *t)
     CrashIf(!chmDoc);
     if (t->IsEndTag())
         return;
+    bool needAlt = true;
     AttrInfo *attr = t->GetAttrByName("src");
-    if (!attr)
-        return;
-    ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
-    ImageData *img = chmDoc->GetImageData(src, pagePath);
-    if (img)
-        EmitImage(img);
+    if (attr) {
+        ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+        url::DecodeInPlace(src);
+        ImageData *img = chmDoc->GetImageData(src, pagePath);
+        needAlt = !img || !EmitImage(img);
+    }
+    if (needAlt && (attr = t->GetAttrByName("alt")) != NULL)
+        HandleText(attr->val, attr->valLen);
 }
 
 void ChmFormatter::HandleTagPagebreak(HtmlToken *t)
@@ -1355,6 +1333,7 @@ void ChmFormatter::HandleTagLink(HtmlToken *t)
 
     size_t len;
     ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+    url::DecodeInPlace(src);
     ScopedMem<char> data(chmDoc->GetFileData(src, pagePath, &len));
     if (data)
         ParseStyleSheet(data, len);
@@ -1362,8 +1341,10 @@ void ChmFormatter::HandleTagLink(HtmlToken *t)
 
 /* BaseEngine for handling CHM documents */
 
-class Chm2EngineImpl : public EbookEngine, public Chm2Engine {
-    friend Chm2Engine;
+class ChmEmbeddedDest;
+
+class Chm2EngineImpl : public EbookEngine {
+    friend ChmEmbeddedDest;
 
 public:
     Chm2EngineImpl() : EbookEngine(), doc(NULL), dataCache(NULL) {
@@ -1374,7 +1355,7 @@ public:
         delete dataCache;
         delete doc;
     }
-    virtual Chm2Engine *Clone() {
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -1388,13 +1369,16 @@ public:
     virtual bool HasTocTree() const { return doc->HasToc() || doc->HasIndex(); }
     virtual DocTocItem *GetTocTree();
 
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+
 protected:
     ChmDoc *doc;
     ChmDataCache *dataCache;
 
     bool Load(const WCHAR *fileName);
 
-    DocTocItem *BuildTocTree(HtmlPullParser& parser, int& idCounter);
+    virtual PageElement *CreatePageLink(DrawInstr *link, RectI rect, int pageNo);
+    bool SaveEmbedded(LinkSaverUI& saveUI, const char *path);
 };
 
 // cf. http://www.w3.org/TR/html4/charset.html#h-5.2.2
@@ -1403,7 +1387,7 @@ static UINT ExtractHttpCharset(const char *html, size_t htmlLen)
     if (!strstr(html, "charset="))
         return 0;
 
-    HtmlPullParser parser(html, min(htmlLen, 1024));
+    HtmlPullParser parser(html, std::min(htmlLen, (size_t)1024));
     HtmlToken *tok;
     while ((tok = parser.Next()) != NULL && !tok->IsError()) {
         if (tok->tag != Tag_Meta)
@@ -1443,7 +1427,7 @@ class ChmHtmlCollector : public EbookTocVisitor {
     str::Str<char> html;
 
 public:
-    ChmHtmlCollector(ChmDoc *doc) : doc(doc) { }
+    explicit ChmHtmlCollector(ChmDoc *doc) : doc(doc) { }
 
     char *GetHtml() {
         // first add the homepage
@@ -1472,9 +1456,9 @@ public:
     }
 
     virtual void Visit(const WCHAR *name, const WCHAR *url, int level) {
-        if (!url || IsExternalUrl(url))
+        if (!url || url::IsAbsolute(url))
             return;
-        ScopedMem<WCHAR> plainUrl(str::ToPlainUrl(url));
+        ScopedMem<WCHAR> plainUrl(url::GetFullPath(url));
         if (added.FindI(plainUrl) != -1)
             return;
         ScopedMem<char> urlUtf8(str::conv::ToUtf8(plainUrl));
@@ -1499,13 +1483,13 @@ bool Chm2EngineImpl::Load(const WCHAR *fileName)
     dataCache = new ChmDataCache(doc, html);
 
     HtmlFormatterArgs args;
-    args.htmlStr = dataCache->GetTextData(&args.htmlStrLen);
+    args.htmlStr = dataCache->GetHtmlData(&args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
-    args.measureAlgo = MeasureTextQuick;
+    args.textRenderMethod = mui::TextRenderMethodGdiplusQuick;
 
     pages = ChmFormatter(&args, dataCache).FormatAllPages(false);
     if (!ExtractPageAnchors())
@@ -1526,15 +1510,54 @@ DocTocItem *Chm2EngineImpl::GetTocTree()
         builder.SetIsIndex(true);
         doc->ParseIndex(&builder);
     }
-    return builder.GetRoot();
+    EbookTocItem *root = builder.GetRoot();
+    if (root)
+        root->OpenSingleNode();
+    return root;
 }
 
-bool Chm2Engine::IsSupportedFile(const WCHAR *fileName, bool sniff)
+class ChmEmbeddedDest : public PageDestination {
+    Chm2EngineImpl *engine;
+    ScopedMem<char> path;
+
+public:
+    ChmEmbeddedDest(Chm2EngineImpl *engine, const char *path) : engine(engine), path(str::Dup(path)) { }
+
+    virtual PageDestType GetDestType() const { return Dest_LaunchEmbedded; }
+    virtual int GetDestPageNo() const { return 0; }
+    virtual RectD GetDestRect() const { return RectD(); }
+    virtual WCHAR *GetDestValue() const { return str::conv::FromUtf8(path::GetBaseName(path)); }
+
+    virtual bool SaveEmbedded(LinkSaverUI& saveUI) { return engine->SaveEmbedded(saveUI, path); }
+};
+
+PageElement *Chm2EngineImpl::CreatePageLink(DrawInstr *link, RectI rect, int pageNo)
 {
-    return ChmDoc::IsSupportedFile(fileName, sniff);
+    PageElement *linkEl = EbookEngine::CreatePageLink(link, rect, pageNo);
+    if (linkEl)
+        return linkEl;
+
+    DrawInstr *baseAnchor = baseAnchors.At(pageNo-1);
+    ScopedMem<char> basePath(str::DupN(baseAnchor->str.s, baseAnchor->str.len));
+    ScopedMem<char> url(str::DupN(link->str.s, link->str.len));
+    url.Set(NormalizeURL(url, basePath));
+    if (!doc->HasData(url))
+        return NULL;
+
+    PageDestination *dest = new ChmEmbeddedDest(this, url);
+    return new EbookLink(link, rect, dest, pageNo);
 }
 
-Chm2Engine *Chm2Engine::CreateFromFile(const WCHAR *fileName)
+bool Chm2EngineImpl::SaveEmbedded(LinkSaverUI& saveUI, const char *path)
+{
+    size_t len;
+    ScopedMem<unsigned char> data(doc->GetData(path, &len));
+    if (!data)
+        return false;
+    return saveUI.SaveEmbedded(data, len);
+}
+
+BaseEngine *Chm2EngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     Chm2EngineImpl *engine = new Chm2EngineImpl();
     if (!engine->Load(fileName)) {
@@ -1544,76 +1567,24 @@ Chm2Engine *Chm2Engine::CreateFromFile(const WCHAR *fileName)
     return engine;
 }
 
-/* BaseEngine for handling TCR documents */
+namespace Chm2Engine {
 
-class TcrEngineImpl : public EbookEngine, public TcrEngine {
-    friend TcrEngine;
-
-public:
-    TcrEngineImpl() : EbookEngine(), doc(NULL) {
-        // ISO 216 A4 (210mm x 297mm)
-        pageRect = RectD(0, 0, 8.27 * GetFileDPI(), 11.693 * GetFileDPI());
-    }
-    virtual ~TcrEngineImpl() { delete doc; }
-    virtual TcrEngine *Clone() {
-        return fileName ? CreateFromFile(fileName) : NULL;
-    }
-
-    virtual WCHAR *GetProperty(DocumentProperty prop) {
-        return prop != Prop_FontList ? doc->GetProperty(prop) : ExtractFontList();
-    }
-    virtual const WCHAR *GetDefaultFileExt() const { return L".tcr"; }
-    virtual PageLayoutType PreferredLayout() { return Layout_Single; }
-
-protected:
-    TcrDoc *doc;
-
-    bool Load(const WCHAR *fileName);
-};
-
-bool TcrEngineImpl::Load(const WCHAR *fileName)
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
 {
-    this->fileName = str::Dup(fileName);
-
-    doc = TcrDoc::CreateFromFile(fileName);
-    if (!doc)
-        return false;
-
-    HtmlFormatterArgs args;
-    args.htmlStr = doc->GetTextData(&args.htmlStrLen);
-    args.pageDx = (float)pageRect.dx - 2 * pageBorder;
-    args.pageDy = (float)pageRect.dy - 2 * pageBorder;
-    args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
-    args.textAllocator = &allocator;
-    args.measureAlgo = MeasureTextQuick;
-
-    pages = HtmlFormatter(&args).FormatAllPages(false);
-
-    return pages->Count() > 0;
+    return ChmDoc::IsSupportedFile(fileName, sniff);
 }
 
-bool TcrEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
+BaseEngine *CreateFromFile(const WCHAR *fileName)
 {
-    return TcrDoc::IsSupportedFile(fileName, sniff);
+    return Chm2EngineImpl::CreateFromFile(fileName);
 }
 
-TcrEngine *TcrEngine::CreateFromFile(const WCHAR *fileName)
-{
-    TcrEngineImpl *engine = new TcrEngineImpl();
-    if (!engine->Load(fileName)) {
-        delete engine;
-        return NULL;
-    }
-    return engine;
 }
 
 /* BaseEngine for handling HTML documents */
 /* (mainly to allow creating minimal regression test testcases more easily) */
 
-class HtmlEngineImpl : public EbookEngine, public HtmlEngine {
-    friend HtmlEngine;
-
+class HtmlEngineImpl : public EbookEngine {
 public:
     HtmlEngineImpl() : EbookEngine(), doc(NULL) {
         // ISO 216 A4 (210mm x 297mm)
@@ -1622,7 +1593,7 @@ public:
     virtual ~HtmlEngineImpl() {
         delete doc;
     }
-    virtual HtmlEngine *Clone() {
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -1631,6 +1602,8 @@ public:
     }
     virtual const WCHAR *GetDefaultFileExt() const { return L".html"; }
     virtual PageLayoutType PreferredLayout() { return Layout_Single; }
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
 
 protected:
     HtmlDoc *doc;
@@ -1649,12 +1622,13 @@ bool HtmlEngineImpl::Load(const WCHAR *fileName)
         return false;
 
     HtmlFormatterArgs args;
-    args.htmlStr = doc->GetTextData(&args.htmlStrLen);
+    args.htmlStr = doc->GetHtmlData(&args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
+    args.textRenderMethod = mui::TextRenderMethodGdiplus;
 
     pages = HtmlFileFormatter(&args, doc).FormatAllPages(false);
     if (!ExtractPageAnchors())
@@ -1667,7 +1641,7 @@ class RemoteHtmlDest : public SimpleDest2 {
     ScopedMem<WCHAR> name;
 
 public:
-    RemoteHtmlDest(const WCHAR *relativeURL) : SimpleDest2(0, RectD()) {
+    explicit RemoteHtmlDest(const WCHAR *relativeURL) : SimpleDest2(0, RectD()) {
         const WCHAR *id = str::FindChar(relativeURL, '#');
         if (id) {
             value.Set(str::DupN(relativeURL, id - relativeURL));
@@ -1683,21 +1657,18 @@ public:
 
 PageElement *HtmlEngineImpl::CreatePageLink(DrawInstr *link, RectI rect, int pageNo)
 {
-    bool isInternal = !memchr(link->str.s, ':', link->str.len);
-    if (!isInternal || !link->str.len || '#' == *link->str.s)
-        return EbookEngine::CreatePageLink(link, rect, pageNo);
+    if (0 == link->str.len)
+        return NULL;
 
     ScopedMem<WCHAR> url(str::conv::FromHtmlUtf8(link->str.s, link->str.len));
+    if (url::IsAbsolute(url) || '#' == *url)
+        return EbookEngine::CreatePageLink(link, rect, pageNo);
+
     PageDestination *dest = new RemoteHtmlDest(url);
     return new EbookLink(link, rect, dest, pageNo, true);
 }
 
-bool HtmlEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
-{
-    return HtmlDoc::IsSupportedFile(fileName, sniff);
-}
-
-HtmlEngine *HtmlEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *HtmlEngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     HtmlEngineImpl *engine = new HtmlEngineImpl();
     if (!engine->Load(fileName)) {
@@ -1707,18 +1678,30 @@ HtmlEngine *HtmlEngine::CreateFromFile(const WCHAR *fileName)
     return engine;
 }
 
+namespace HtmlEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    return HtmlDoc::IsSupportedFile(fileName, sniff);
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return HtmlEngineImpl::CreateFromFile(fileName);
+}
+
+}
+
 /* BaseEngine for handling TXT documents */
 
-class TxtEngineImpl : public EbookEngine, public TxtEngine {
-    friend TxtEngine;
-
+class TxtEngineImpl : public EbookEngine {
 public:
     TxtEngineImpl() : EbookEngine(), doc(NULL) {
         // ISO 216 A4 (210mm x 297mm)
         pageRect = RectD(0, 0, 8.27 * GetFileDPI(), 11.693 * GetFileDPI());
     }
     virtual ~TxtEngineImpl() { delete doc; }
-    virtual TxtEngine *Clone() {
+    virtual BaseEngine *Clone() {
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -1732,6 +1715,8 @@ public:
 
     virtual bool HasTocTree() const { return doc->HasToc(); }
     virtual DocTocItem *GetTocTree();
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
 
 protected:
     TxtDoc *doc;
@@ -1753,12 +1738,13 @@ bool TxtEngineImpl::Load(const WCHAR *fileName)
     }
 
     HtmlFormatterArgs args;
-    args.htmlStr = doc->GetTextData(&args.htmlStrLen);
+    args.htmlStr = doc->GetHtmlData(&args.htmlStrLen);
     args.pageDx = (float)pageRect.dx - 2 * pageBorder;
     args.pageDy = (float)pageRect.dy - 2 * pageBorder;
     args.SetFontName(GetDefaultFontName());
-    args.fontSize = gDefaultFontSize;
+    args.fontSize = GetDefaultFontSize();
     args.textAllocator = &allocator;
+    args.textRenderMethod = mui::TextRenderMethodGdiplus;
 
     pages = TxtFormatter(&args).FormatAllPages(false);
     if (!ExtractPageAnchors())
@@ -1774,12 +1760,7 @@ DocTocItem *TxtEngineImpl::GetTocTree()
     return builder.GetRoot();
 }
 
-bool TxtEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
-{
-    return TxtDoc::IsSupportedFile(fileName, sniff);
-}
-
-TxtEngine *TxtEngine::CreateFromFile(const WCHAR *fileName)
+BaseEngine *TxtEngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     TxtEngineImpl *engine = new TxtEngineImpl();
     if (!engine->Load(fileName)) {
@@ -1787,4 +1768,18 @@ TxtEngine *TxtEngine::CreateFromFile(const WCHAR *fileName)
         return NULL;
     }
     return engine;
+}
+
+namespace TxtEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    return TxtDoc::IsSupportedFile(fileName, sniff);
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return TxtEngineImpl::CreateFromFile(fileName);
+}
+
 }

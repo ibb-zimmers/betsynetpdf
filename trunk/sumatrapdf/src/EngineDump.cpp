@@ -1,15 +1,15 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "BaseEngine.h"
-#include "ChmEngine.h"
 #include "CmdLineParser.h"
-#include "Doc.h"
+#include "EngineManager.h"
 #include "FileModifications.h"
 #include "FileUtil.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
+#include "MiniMui.h"
+#include "PdfCreator.h"
 #include "PdfEngine.h"
 #include "TgaReader.h"
 #include "WinUtil.h"
@@ -82,7 +82,7 @@ void DumpProperties(BaseEngine *engine, bool fullDump)
     if (!engine->AllowsCopyingText())
         Out("\t\tCopyingTextAllowed=\"no\"\n");
     if (engine->IsImageCollection())
-        Out("\t\tImageCollection=\"yes\"\n");
+        Out("\t\tImageFileDPI=\"%g\"\n", engine->GetFileDPI());
     if (engine->PreferredLayout())
         Out("\t\tPreferredLayout=\"%d\"\n", engine->PreferredLayout());
     Out("\t/>\n");
@@ -277,7 +277,7 @@ void DumpThumbnail(BaseEngine *engine)
         return;
     }
 
-    float zoom = min(128 / (float)rect.dx, 128 / (float)rect.dy) - 0.001f;
+    float zoom = std::min(128 / (float)rect.dx, 128 / (float)rect.dy) - 0.001f;
     RectI thumb = RectD(0, 0, rect.dx * zoom, rect.dy * zoom).Round();
     rect = engine->Transform(thumb.Convert<double>(), 1, zoom, 0, true);
     RenderedBitmap *bmp = engine->RenderBitmap(1, zoom, 0, &rect);
@@ -311,10 +311,58 @@ void DumpData(BaseEngine *engine, bool fullDump)
     Out("</EngineDump>\n");
 }
 
-void RenderDocument(BaseEngine *engine, const WCHAR *renderPath, bool silent=false)
+#define ErrOut(msg, ...) fwprintf(stderr, TEXT(msg) TEXT("\n"), __VA_ARGS__)
+
+bool CheckRenderPath(const WCHAR *path)
 {
+    CrashIf(!path);
+    bool hasArg = false;
+    const WCHAR *p = path - 1;
+    while ((p = str::FindChar(p + 1, '%')) != NULL) {
+        p++;
+        if (*p == '%')
+            continue;
+        if (*p == '0' && '1' <= *(p + 1) && *(p + 1) <= '9')
+            p += 2;
+        if (hasArg || *p != 'd') {
+            ErrOut("Error: Render path may contain '%%d' only once, other '%%' signs must be doubled!");
+            return false;
+        }
+        hasArg = true;
+    }
+    return true;
+}
+
+bool RenderDocument(BaseEngine *engine, const WCHAR *renderPath, float zoom=1.f, bool silent=false)
+{
+    if (!CheckRenderPath(renderPath))
+        return false;
+
+    if (str::EndsWithI(renderPath, L".txt")) {
+        str::Str<WCHAR> text(1024);
+        for (int pageNo = 1; pageNo <= engine->PageCount(); pageNo++)
+            text.AppendAndFree(engine->ExtractPageText(pageNo, L"\r\n", NULL, Target_Export));
+        if (silent)
+            return true;
+        ScopedMem<WCHAR> txtFilePath(str::Format(renderPath, 0));
+        ScopedMem<char> textUTF8(str::conv::ToUtf8(text.Get()));
+        ScopedMem<char> textUTF8BOM(str::Join(UTF8_BOM, textUTF8));
+        return file::WriteAll(txtFilePath, textUTF8BOM, str::Len(textUTF8BOM));
+    }
+
+    if (str::EndsWithI(renderPath, L".pdf")) {
+        if (silent)
+            return false;
+        ScopedMem<WCHAR> pdfFilePath(str::Format(renderPath, 0));
+        return engine->SaveFileAsPDF(pdfFilePath, true) || PdfCreator::RenderToFile(pdfFilePath, engine);
+    }
+
+    bool success = true;
     for (int pageNo = 1; pageNo <= engine->PageCount(); pageNo++) {
-        RenderedBitmap *bmp = engine->RenderBitmap(pageNo, 1.0, 0);
+        RenderedBitmap *bmp = engine->RenderBitmap(pageNo, zoom, 0);
+        success &= bmp != NULL;
+        if (!bmp && !silent)
+            ErrOut("Error: Failed to render page %d for %s!", pageNo, engine->FileName());
         if (!bmp || silent) {
             delete bmp;
             continue;
@@ -339,19 +387,19 @@ void RenderDocument(BaseEngine *engine, const WCHAR *renderPath, bool silent=fal
         }
         delete bmp;
     }
+
+    return success;
 }
 
 class PasswordHolder : public PasswordUI {
     const WCHAR *password;
 public:
-    PasswordHolder(const WCHAR *password) : password(password) { }
+    explicit PasswordHolder(const WCHAR *password) : password(password) { }
     virtual WCHAR * GetPassword(const WCHAR *fileName, unsigned char *fileDigest,
                                 unsigned char decryptionKeyOut[32], bool *saveKey) {
         return str::Dup(password);
     }
 };
-
-#define ErrOut(msg, ...) fwprintf(stderr, TEXT(msg), __VA_ARGS__)
 
 int main(int argc, char **argv)
 {
@@ -362,39 +410,37 @@ int main(int argc, char **argv)
     ParseCmdLine(GetCommandLine(), argList);
     if (argList.Count() < 2) {
 Usage:
-        ErrOut("%s <filename> [-pwd <password>][-full][-alt][-render <path-%%d.tga>]\n",
+        ErrOut("%s [-pwd <password>][-quick][-render <path-%%d.tga>] <filename>",
             path::GetBaseName(argList.At(0)));
         return 2;
     }
 
     ScopedMem<WCHAR> filePath;
-    WIN32_FIND_DATA fdata;
-    HANDLE hfind = FindFirstFile(argList.At(1), &fdata);
-    if (INVALID_HANDLE_VALUE != hfind) {
-        ScopedMem<WCHAR> dir(path::GetDir(argList.At(1)));
-        filePath.Set(path::Join(dir, fdata.cFileName));
-        FindClose(hfind);
-    }
-    else {
-        // embedded documents are referred to by an invalid path
-        // containing more information after a colon (e.g. "C:\file.pdf:3:0")
-        filePath.Set(str::Dup(argList.At(1)));
-    }
-
-    bool fullDump = false;
     WCHAR *password = NULL;
+    bool fullDump = true;
     WCHAR *renderPath = NULL;
+    float renderZoom = 1.f;
     bool useAlternateHandlers = false;
     bool loadOnly = false, silent = false;
+#ifdef DEBUG
     int breakAlloc = 0;
+#endif
 
-    for (size_t i = 2; i < argList.Count(); i++) {
-        if (str::Eq(argList.At(i), L"-full"))
-            fullDump = true;
-        else if (str::Eq(argList.At(i), L"-pwd") && i + 1 < argList.Count())
+    for (size_t i = 1; i < argList.Count(); i++) {
+        if (str::Eq(argList.At(i), L"-pwd") && i + 1 < argList.Count() && !password)
             password = argList.At(++i);
-        else if (str::Eq(argList.At(i), L"-render") && i + 1 < argList.Count())
+        else if (str::Eq(argList.At(i), L"-quick"))
+            fullDump = false;
+        else if (str::Eq(argList.At(i), L"-render") && i + 1 < argList.Count() && !renderPath) {
+            // optional zoom argument (e.g. -render 50% file.pdf)
+            float zoom;
+            if (i + 2 < argList.Count() && str::Parse(argList.At(i + 1), L"%f%%%$", &zoom) && zoom > 0.f) {
+                renderZoom = zoom / 100.f;
+                i++;
+            }
             renderPath = argList.At(++i);
+        }
+        // -alt is for debugging alternate rendering methods
         else if (str::Eq(argList.At(i), L"-alt"))
             useAlternateHandlers = true;
         // -loadonly and -silent are only meant for profiling
@@ -402,13 +448,20 @@ Usage:
             loadOnly = true;
         else if (str::Eq(argList.At(i), L"-silent"))
             silent = true;
+        // -full is for backward compatibility
+        else if (str::Eq(argList.At(i), L"-full"))
+            fullDump = true;
 #ifdef DEBUG
         else if (str::Eq(argList.At(i), L"-breakalloc") && i + 1 < argList.Count())
             breakAlloc = _wtoi(argList.At(++i));
 #endif
+        else if (!filePath)
+            filePath.Set(str::Dup(argList.At(i)));
         else
             goto Usage;
     }
+    if (!filePath)
+        goto Usage;
 
 #ifdef DEBUG
     if (breakAlloc) {
@@ -423,16 +476,27 @@ Usage:
         freopen_s(&nul, "NUL", "w", stderr);
     }
 
-    // optionally use GDI+ rendering for PDF/XPS and the original ChmEngine for CHM
+    // optionally use GDI+ rendering for PDF/XPS
     DebugGdiPlusDevice(useAlternateHandlers);
-    bool useChm2Engine = !useAlternateHandlers;
 
     ScopedGdiPlus gdiPlus;
-    DocType engineType;
+    ScopedMiniMui miniMui;
+
+    WIN32_FIND_DATA fdata;
+    HANDLE hfind = FindFirstFile(filePath, &fdata);
+    // embedded documents are referred to by an invalid path
+    // containing more information after a colon (e.g. "C:\file.pdf:3:0")
+    if (INVALID_HANDLE_VALUE != hfind) {
+        ScopedMem<WCHAR> dir(path::GetDir(filePath));
+        filePath.Set(path::Join(dir, fdata.cFileName));
+        FindClose(hfind);
+    }
+
+    EngineType engineType;
     PasswordHolder pwdUI(password);
-    BaseEngine *engine = EngineManager::CreateEngine(filePath, &pwdUI, &engineType, useChm2Engine);
+    BaseEngine *engine = EngineManager::CreateEngine(filePath, &pwdUI, &engineType);
     if (!engine) {
-        ErrOut("Error: Couldn't create an engine for %s!\n", path::GetBaseName(filePath));
+        ErrOut("Error: Couldn't create an engine for %s!", path::GetBaseName(filePath));
         return 1;
     }
     Vec<PageAnnotation> *userAnnots = LoadFileModifications(engine->FileName());
@@ -441,7 +505,7 @@ Usage:
     if (!loadOnly)
         DumpData(engine, fullDump);
     if (renderPath)
-        RenderDocument(engine, renderPath, silent);
+        RenderDocument(engine, renderPath, renderZoom, silent);
     delete engine;
 
 #ifdef DEBUG

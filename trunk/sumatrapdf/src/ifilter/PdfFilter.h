@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef PdfFilter_h
@@ -10,6 +10,11 @@
 #ifdef BUILD_TEX_IFILTER
 #define SZ_TEX_FILTER_CLSID   L"{AF57F784-ED93-4f2c-8C1D-CCDCB6E27CA6}"
 #define SZ_TEX_FILTER_HANDLER L"{3FAB27F8-08EC-4b9e-9EEE-181A6E846B8D}"
+#endif
+
+#ifdef BUILD_EPUB_IFILTER
+#define SZ_EPUB_FILTER_CLSID   L"{FE4C7847-4260-43e3-A449-08ED76009F94}"
+#define SZ_EPUB_FILTER_HANDLER L"{FF68D1A0-DA54-4fbf-A406-06CFDB764CA9}"
 #endif
 
 #endif

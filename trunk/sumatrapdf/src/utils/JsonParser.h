@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef JsonParser_h
@@ -23,6 +23,7 @@ class ValueVisitor {
 public:
     // return false to stop parsing
     virtual bool Visit(const char *path, const char *value, DataType type) = 0;
+    virtual ~ValueVisitor() { }
 };
 
 // data must be UTF-8 encoded and NULL-terminated

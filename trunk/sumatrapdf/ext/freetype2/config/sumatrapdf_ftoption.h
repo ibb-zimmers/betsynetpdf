@@ -5,7 +5,7 @@
 #error "This header must be included before the default configuration header!"
 #endif
 
-#include <freetype/config/ftconfig.h>
+#include <config/ftconfig.h>
 
 FT_BEGIN_HEADER
 
@@ -19,7 +19,7 @@ FT_BEGIN_HEADER
 #undef T1_CONFIG_OPTION_NO_AFM
 #undef T1_CONFIG_OPTION_NO_MM_SUPPORT
 
-#undef FT_CONFIG_OPTION_OLD_INTERNALS
+#define CFF_CONFIG_OPTION_OLD_ENGINE
 
 #ifdef _DEBUG
 #define FT_DEBUG_LEVEL_ERROR

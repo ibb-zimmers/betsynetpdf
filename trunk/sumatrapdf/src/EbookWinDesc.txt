@@ -29,7 +29,7 @@ Style [
 Style [
     name: styleStatus
     parent: buttonDefault
-    bg_col: light gray
+    bg_col: sepia
     col: black
     font_size: 8
     font_weight: regular
@@ -72,15 +72,27 @@ ScrollBar [
 ]
 
 EbookPage [
-    name: page
+    name: page1
     style: stylePage
+]
+
+EbookPage [
+    name: page2
+    style: stylePage
+]
+
+PagesLayout [
+    name: pagesLayout
+    page1: page1
+    page2: page2
+    spaceDx: 12
 ]
 
 HorizontalLayout [
     name: top
     children [
         prevButton self 1 bottom
-        page 1 1 top
+        pagesLayout 1 1 top
         nextButton self 1 center
     ]
 ]

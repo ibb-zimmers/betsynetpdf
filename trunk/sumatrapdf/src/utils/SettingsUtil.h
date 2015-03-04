@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef SettingsUtil_h
@@ -32,6 +32,7 @@ enum SettingType {
     Type_Bool, Type_Color, Type_Float, Type_Int, Type_String, Type_Utf8String,
     Type_ColorArray, Type_FloatArray, Type_IntArray,
     Type_Comment,
+    Type_Prerelease, // same as Type_Struct but won't be written out in release builds
 };
 
 struct FieldInfo {
@@ -51,11 +52,5 @@ struct StructInfo {
 char *SerializeStruct(const StructInfo *info, const void *strct, const char *prevData=NULL, size_t *sizeOut=NULL);
 void *DeserializeStruct(const StructInfo *info, const char *data, void *strct=NULL);
 void FreeStruct(const StructInfo *info, void *strct);
-
-// Benc doesn't need compact serialization, so allow to use Type_Compact for custom deserialization
-class BencDict;
-typedef bool (* CompactCallback)(BencDict *dict, const FieldInfo *field, const char *fieldName, uint8_t *fieldPtr);
-
-void *DeserializeStructBenc(const StructInfo *info, const char *data, void *strct=NULL, CompactCallback cb=NULL);
 
 #endif

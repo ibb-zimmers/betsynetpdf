@@ -1,120 +1,138 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef EbookController_h
 #define EbookController_h
 
+#include "Controller.h"
 #include "Doc.h"
 #include "Sigslot.h"
-#include "SumatraWindow.h"
 
+struct  DrawInstr;
 struct  EbookControls;
-class   HtmlPage;
+struct  EbookFormattingData;
+struct  FrameRateWnd;
+
+class   EbookController;
 class   EbookFormattingThread;
-class   EbookFormattingTask;
+class   HtmlFormatter;
 class   HtmlFormatterArgs;
+class   HtmlPage;
+
 namespace mui { class Control; }
 using namespace mui;
 
-// data used on the ui thread side when handling UiMsg::MobiLayout
-// it's in its own struct for clarity
-class FormattingTemp {
-public:
-    // if we're doing layout that starts from the beginning, this is 0
-    // otherwise it's the reparse point of the page we were showing when
-    // we started the layout
-    int             reparseIdx;
-    Vec<HtmlPage *> pagesFromPage;
-    Vec<HtmlPage *> pagesFromBeginning;
-
-    void            DeletePages();
-};
-
-class EbookController : public sigslot::has_slots
+class EbookController : public Controller, public sigslot::has_slots
 {
+public:
+    EbookController(EbookControls *ctrls, ControllerCallback *cb);
+    virtual ~EbookController();
+
+    virtual const WCHAR *FilePath() const { return doc.GetFilePath(); }
+    virtual const WCHAR *DefaultFileExt() const { return doc.GetDefaultFileExt(); }
+    virtual int PageCount() const { return GetMaxPageCount(); }
+    virtual WCHAR *GetProperty(DocumentProperty prop) { return doc.GetProperty(prop); }
+
+    virtual int CurrentPageNo() const { return currPageNo; }
+    virtual void GoToPage(int pageNo, bool addNavPoint);
+    virtual bool CanNavigate(int dir) const;
+    virtual void Navigate(int dir);
+
+    virtual void SetDisplayMode(DisplayMode mode, bool keepContinuous=false);
+    virtual DisplayMode GetDisplayMode() const { return IsDoublePage() ? DM_FACING : DM_SINGLE_PAGE; }
+    virtual void SetPresentationMode(bool enable) { /* not supported */ }
+    virtual void SetZoomVirtual(float zoom, PointI *fixPt=NULL) { /* not supported */ }
+    virtual float GetZoomVirtual(bool absolute=false) const { return 100; }
+    virtual float GetNextZoomStep(float towards) const { return 100; }
+    virtual void SetViewPortSize(SizeI size);
+
+    virtual bool HasTocTree() const { return doc.HasToc(); }
+    virtual DocTocItem *GetTocTree();
+    virtual void ScrollToLink(PageDestination *dest);
+    virtual PageDestination *GetNamedDest(const WCHAR *name);
+
+    virtual void UpdateDisplayState(DisplayState *ds);
+    virtual void CreateThumbnail(SizeI size, ThumbnailCallback *tnCb);
+
+    virtual bool GoToNextPage();
+    virtual bool GoToPrevPage(bool toBottom=false);
+
+    virtual EbookController *AsEbook() { return this; }
+
+public:
+    // the following is specific to EbookController
+
+    DocType GetDocType() const { return doc.Type(); }
+    LRESULT HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam, bool& wasHandled);
+    void EnableMessageHandling(bool enable) { handleMsgs = enable; }
+    void UpdateDocumentColors();
+    void RequestRepaint();
+    void HandlePagesFromEbookLayout(EbookFormattingData *ebookLayout);
+    void TriggerLayout();
+    void SetDoc(Doc newDoc, int startReparseIdxArg=-1, DisplayMode displayMode=DM_AUTOMATIC);
+    int  ResolvePageAnchor(const WCHAR *id);
+    void CopyNavHistory(EbookController& orig);
+    int  CurrentTocPageNo() const;
+
+    // call SetDoc before using this EbookController
+    static EbookController *Create(HWND hwnd, ControllerCallback *cb, FrameRateWnd *);
+
+protected:
+
     EbookControls * ctrls;
 
     Doc             doc;
-
-    // only set while we load the file on a background thread, used in UpdateStatus()
-    WCHAR *         fileBeingLoaded;
 
     // TODO: this should be recycled along with pages so that its
     // memory use doesn't grow without bounds
     PoolAllocator   textAllocator;
 
-    // we're in one of 3 states:
-    // 1. showing pages as laid out from the beginning
-    // 2. showing pages as laid out starting from another page
-    //    (caused by resizing a window while displaying that page)
-    // 3. like 2. but layout process is still in progress and we're waiting
-    //    for more pages
-    Vec<HtmlPage*>* pagesFromBeginning;
-    Vec<HtmlPage*>* pagesFromPage;
+    Vec<HtmlPage*> *    pages;
 
-    // currPageNo is in range 1..$numberOfPages. It's always a page number
-    // as if the pages were formatted from the begginging. We don't always
-    // know this (when we're showing a page from pagesFromPage and we
-    // haven't yet formatted enough pages from beginning to determine which
-    // of those pages contains top of the shown page), in which case it's 0
-    int            currPageNo;
+    // pages being sent from background formatting thread
+    Vec<HtmlPage*> *    incomingPages;
 
-    // page that we're currently showing. It can come from pagesFromBeginning,
-    // pagesFromPage or from formattingTemp during layout or it can be a page that
-    // we took from previous pagesFromBeginning/pagesFromPage when we started
-    // new layout process
-    HtmlPage *      pageShown;
-    // if true, we need to delete pageShown if we no longer need it
-    bool            deletePageShown;
+    // currPageNo is in range 1..$numberOfPages. 
+    int             currPageNo;
+    // reparseIdx of the current page (the first one if we're showing 2)
+    int             currPageReparseIdx;
 
     // size of the page for which pages were generated
     SizeI           pageSize;
 
-    EbookFormattingThread *formattingThread;
-    LONG            formattingThreadNo;
-    FormattingTemp  formattingTemp;
+    EbookFormattingThread * formattingThread;
+    int                     formattingThreadNo;
 
-    // when loading a new mobiDoc, this indicates the page we should
-    // show after loading. -1 indicates no action needed
-    int               startReparseIdx;
+    // whether HandleMessage passes messages on to ctrls->mainWnd
+    bool            handleMsgs;
 
-    Vec<HtmlPage*> *GetPagesFromBeginning();
-    HtmlPage*   PreserveTempPageShown();
+    // parallel lists mapping anchor IDs to reparseIdxs
+    WStrVec *   pageAnchorIds;
+    Vec<int> *  pageAnchorIdxs;
+
+    Vec<int>    navHistory;
+    size_t      navHistoryIx;
+
+    Vec<HtmlPage*> *GetPages();
     void        UpdateStatus();
-    void        DeletePages(Vec<HtmlPage*>** pages);
-    void        DeletePageShown();
-    void        ShowPage(HtmlPage *pd, bool deleteWhenDone);
-    void        UpdateCurrPageNoForPage(HtmlPage *pd);
-    void        TriggerBookFormatting();
     bool        FormattingInProgress() const { return formattingThread != NULL; }
-    bool        GoOnePageForward(Vec<HtmlPage*> *pages);
-    void        GoOnePageForward();
     void        StopFormattingThread();
     void        CloseCurrentDocument();
+    int         GetMaxPageCount() const;
+    bool        IsDoublePage() const;
+    void        ExtractPageAnchors();
+    void        AddNavPoint();
+    void        OnClickedLink(int pageNo, DrawInstr *link);
 
     // event handlers
     void        ClickedNext(Control *c, int x, int y);
     void        ClickedPrev(Control *c, int x, int y);
     void        ClickedProgress(Control *c, int x, int y);
     void        SizeChangedPage(Control *c, int dx, int dy);
-
-public:
-    EbookController(EbookControls *ctrls);
-    virtual ~EbookController();
-
-    void SetDoc(Doc newDoc, int startReparseIdxArg = -1);
-    void HandleMobiLayoutDone(EbookFormattingTask *mobiLayout);
-    void OnLayoutTimer();
-    void AdvancePage(int dist);
-    int  GetCurrentPageNo() const { return currPageNo; }
-    size_t GetMaxPageCount();
-    void GoToPage(int newPageNo);
-    void GoToLastPage();
-    Doc  GetDoc() const { return doc; }
-    int  CurrPageReparseIdx() const;
+    void        ClickedPage1(Control *c, int x, int y);
+    void        ClickedPage2(Control *c, int x, int y);
 };
 
-void LoadEbookAsync(const WCHAR *fileName, const SumatraWindow &win);
-HtmlFormatterArgs *CreateFormatterArgsDoc2(Doc doc, int dx, int dy, PoolAllocator *textAllocator);
+HtmlFormatterArgs *CreateFormatterArgsDoc(Doc doc, int dx, int dy, Allocator *textAllocator=NULL);
 
 #endif

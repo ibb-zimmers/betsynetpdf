@@ -1,86 +1,122 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 // as little of mui as necessary to make ../EngineDump.cpp compile
 
 #include "BaseUtil.h"
 #include "MiniMui.h"
+#include "WinUtil.h"
+
+using namespace Gdiplus;
 
 namespace mui {
 
-class FontCache {
-    struct Entry {
-        WCHAR *     name;
-        float       size;
-        FontStyle   style;
-        Font *      font;
-
-        Entry(WCHAR *name=NULL, float size=0.0f, FontStyle style=FontStyleRegular, Font *font=NULL) :
-            name(name), size(size), style(style), font(font) { }
-        bool operator==(const Entry& other) const {
-            return size == other.size && style == other.style && str::Eq(name, other.name);
-        }
-    };
-
-    ScopedGdiPlus scope;
-    Vec<Entry> cache;
-
-public:
-    FontCache() { }
-    ~FontCache() {
-        for (Entry *e = cache.IterStart(); e; e = cache.IterNext()) {
-            free(e->name);
-            ::delete e->font;
-        }
+HFONT CachedFont::GetHFont()
+{
+    if (!hFont) {
+        LOGFONTW lf;
+        // TODO: Graphics is probably only used for metrics,
+        // so this might not be 100% correct (e.g. 2 monitors with different DPIs?)
+        // but previous code wasn't much better
+        Graphics *gfx = AllocGraphicsForMeasureText();
+        Status status = font->GetLogFontW(gfx, &lf);
+        FreeGraphicsForMeasureText(gfx);
+        CrashIf(status != Ok);
+        hFont = CreateFontIndirectW(&lf);
+        CrashIf(!hFont);
     }
+    return hFont;
+}
 
-    Font *GetFont(const WCHAR *name, float size, FontStyle style) {
-        int idx = cache.Find(Entry((WCHAR *)name, size, style));
-        if (idx != -1)
-            return cache.At(idx).font;
+class CachedFontItem : public CachedFont {
+public:
+    CachedFontItem *_next;
 
-        Font *font = ::new Font(name, size, style);
-        if (!font) {
-            // fall back to the default font, if a desired font can't be created
-            font = ::new Font(L"Times New Roman", size, style);
-            if (!font) {
-                return cache.Count() > 0 ? cache.At(0).font : NULL;
-            }
-        }
-        cache.Append(Entry(str::Dup(name), size, style, font));
-        return font;
+    CachedFontItem(const WCHAR *name, float sizePt, FontStyle style, Font *font) : _next(NULL) {
+        this->name = str::Dup(name); this->sizePt = sizePt; this->style = style; this->font = font;
+    }
+    ~CachedFontItem() {
+        free(name);
+        ::delete font;
+        DeleteObject(hFont);
+        delete _next;
     }
 };
 
-static FontCache gFontCache;
+static CachedFontItem *gFontCache = NULL;
 
-Font *GetCachedFont(const WCHAR *name, float size, FontStyle style)
+CachedFont *GetCachedFont(const WCHAR *name, float size, FontStyle style)
 {
-    return gFontCache.GetFont(name, size, style);
+    CachedFontItem **item = &gFontCache;
+    for (; *item; item = &(*item)->_next) {
+        if ((*item)->SameAs(name, size, style)) {
+            return *item;
+        }
+    }
+
+    Font *font = ::new Font(name, size, style);
+    CrashIf(!font);
+    if (!font) {
+        // fall back to the default font, if a desired font can't be created
+        font = ::new Font(L"Times New Roman", size, style);
+        if (!font) {
+            return gFontCache;
+        }
+    }
+
+    return (*item = new CachedFontItem(name, size, style, font));
+}
+
+// set consistent mode for our graphics objects so that we get
+// the same results when measuring text
+void InitGraphicsMode(Graphics *g)
+{
+    g->SetCompositingQuality(CompositingQualityHighQuality);
+    g->SetSmoothingMode(SmoothingModeAntiAlias);
+    //g.SetSmoothingMode(SmoothingModeHighQuality);
+    g->SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+    g->SetPageUnit(UnitPixel);
 }
 
 class GlobalGraphicsHack {
-    ScopedGdiPlus scope;
     Bitmap bmp;
 public:
     Graphics gfx;
 
     GlobalGraphicsHack() : bmp(1, 1, PixelFormat32bppARGB), gfx(&bmp) {
-        // cf. EbookEngine::RenderPage
-        gfx.SetCompositingQuality(CompositingQualityHighQuality);
-        gfx.SetSmoothingMode(SmoothingModeAntiAlias);
-        gfx.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
-        gfx.SetPageUnit(UnitPixel);
+        InitGraphicsMode(&gfx);
     }
 };
 
-static GlobalGraphicsHack gGH;
+static GlobalGraphicsHack *gGraphicsHack = NULL;
 
 Graphics *AllocGraphicsForMeasureText()
 {
-    return &gGH.gfx;
+    if (!gGraphicsHack) {
+        gGraphicsHack = new GlobalGraphicsHack();
+    }
+    return &gGraphicsHack->gfx;
 }
 
-void FreeGraphicsForMeasureText(Graphics *g) { }
+void FreeGraphicsForMeasureText(Graphics *g) { /* deallocation happens in mui::Destroy */ }
+
+// allow for calls to mui::Initialize and mui::Destroy to be nested
+static LONG gMiniMuiRefCount = 0;
+
+void Initialize()
+{
+    InterlockedIncrement(&gMiniMuiRefCount);
+}
+
+void Destroy()
+{
+    if (InterlockedDecrement(&gMiniMuiRefCount) != 0)
+        return;
+
+    delete gFontCache;
+    gFontCache = NULL;
+    delete gGraphicsHack;
+    gGraphicsHack = NULL;
+}
 
 }

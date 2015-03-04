@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -12,7 +12,7 @@ IFACEMETHODIMP PreviewBase::GetThumbnail(UINT cx, HBITMAP *phbmp, WTS_ALPHATYPE 
         return E_FAIL;
 
     RectD page = engine->Transform(engine->PageMediabox(1), 1, 1.0, 0);
-    float zoom = min(cx / (float)page.dx, cx / (float)page.dy) - 0.001f;
+    float zoom = std::min(cx / (float)page.dx, cx / (float)page.dy) - 0.001f;
     RectI thumb = RectD(0, 0, page.dx * zoom, page.dy * zoom).Round();
 
     BITMAPINFO bmi = { 0 };
@@ -168,7 +168,7 @@ static LRESULT OnPaint(HWND hwnd)
         RectD page = preview->renderer->GetPageRect(pageNo);
         if (!page.IsEmpty()) {
             rect.Inflate(-PREVIEW_MARGIN, -PREVIEW_MARGIN);
-            float zoom = (float)min(rect.dx / page.dx, rect.dy / page.dy) - 0.001f;
+            float zoom = (float)std::min(rect.dx / page.dx, rect.dy / page.dy) - 0.001f;
             RectI onScreen = RectD(rect.x, rect.y, page.dx * zoom, page.dy * zoom).Round();
             onScreen.Offset((rect.dx - onScreen.dx) / 2, (rect.dy - onScreen.dy) / 2);
 
@@ -311,34 +311,100 @@ BaseEngine *CPdfPreview::LoadEngine(IStream *stream)
 }
 
 #ifdef BUILD_XPS_PREVIEW
+#include "PdfEngine.h"
+
 BaseEngine *CXpsPreview::LoadEngine(IStream *stream)
 {
     return XpsEngine::CreateFromStream(stream);
 }
 #endif
 
-#if defined(BUILD_CBZ_PREVIEW) || defined(BUILD_TGA_PREVIEW)
+#ifdef BUILD_DJVU_PREVIEW
+#include "DjVuEngine.h"
+
+BaseEngine *CDjVuPreview::LoadEngine(IStream *stream)
+{
+    return DjVuEngine::CreateFromStream(stream);
+}
+#endif
+
+#ifdef BUILD_EPUB_PREVIEW
+#include "EbookEngine.h"
+#include "MiniMui.h"
+
+CEpubPreview::CEpubPreview(long *plRefCount) : PreviewBase(plRefCount, SZ_EPUB_PREVIEW_CLSID)
+{
+    m_gdiScope = new ScopedGdiPlus();
+    mui::Initialize();
+}
+
+CEpubPreview::~CEpubPreview()
+{
+    mui::Destroy();
+}
+
+BaseEngine *CEpubPreview::LoadEngine(IStream *stream)
+{
+    return EpubEngine::CreateFromStream(stream);
+}
+#endif
+
+#ifdef BUILD_FB2_PREVIEW
+#include "EbookEngine.h"
+#include "MiniMui.h"
+
+CFb2Preview::CFb2Preview(long *plRefCount) : PreviewBase(plRefCount, SZ_FB2_PREVIEW_CLSID)
+{
+    m_gdiScope = new ScopedGdiPlus();
+    mui::Initialize();
+}
+
+CFb2Preview::~CFb2Preview()
+{
+    mui::Destroy();
+}
+
+BaseEngine *CFb2Preview::LoadEngine(IStream *stream)
+{
+    return Fb2Engine::CreateFromStream(stream);
+}
+#endif
+
+#ifdef BUILD_MOBI_PREVIEW
+#include "EbookEngine.h"
+#include "MiniMui.h"
+
+CMobiPreview::CMobiPreview(long *plRefCount) : PreviewBase(plRefCount, SZ_MOBI_PREVIEW_CLSID)
+{
+    m_gdiScope = new ScopedGdiPlus();
+    mui::Initialize();
+}
+
+CMobiPreview::~CMobiPreview()
+{
+    mui::Destroy();
+}
+
+BaseEngine *CMobiPreview::LoadEngine(IStream *stream)
+{
+    return MobiEngine::CreateFromStream(stream);
+}
+#endif
+
+#if defined(BUILD_CBZ_PREVIEW) || defined(BUILD_CBR_PREVIEW) || defined(BUILD_CB7_PREVIEW) || defined(BUILD_CBT_PREVIEW)
 #include "ImagesEngine.h"
 
-#ifdef BUILD_CBZ_PREVIEW
-BaseEngine *CCbzPreview::LoadEngine(IStream *stream)
+BaseEngine *CCbxPreview::LoadEngine(IStream *stream)
 {
     return CbxEngine::CreateFromStream(stream);
 }
 #endif
 
 #ifdef BUILD_TGA_PREVIEW
+#include "ImagesEngine.h"
+
 BaseEngine *CTgaPreview::LoadEngine(IStream *stream)
 {
     return ImageEngine::CreateFromStream(stream);
 }
-#endif
-
-// allow to build PdfPreview.dll without UnRAR
-#include "../ext/unrar/dll.hpp"
-HANDLE PASCAL   RAROpenArchiveEx(struct RAROpenArchiveDataEx *) { return NULL; }
-int    PASCAL   RARReadHeaderEx(HANDLE, struct RARHeaderDataEx *) { return -1; }
-void   PASCAL   RARSetCallback(HANDLE, UNRARCALLBACK, LPARAM) { }
-int    PASCAL   RARProcessFile(HANDLE, int, char *, char *) { return -1; }
-int    PASCAL   RARCloseArchive(HANDLE) { return -1; }
 #endif

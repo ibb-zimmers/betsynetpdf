@@ -1,28 +1,39 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef DirIter_h
 #define DirIter_h
 
+/* How to use:
+
+DirIter di(dir, recursive);
+for (const WCHAR *filePath = di.First(); filePath; filePath = di.Next()) {
+    // process filePath
+}
+
+*/
 class DirIter
 {
-    bool            recursive;
+    bool                recursive;
 
-    WStrVec         dirsToVisit;
-    ScopedMem<WCHAR>currDir;
-    ScopedMem<WCHAR>currPath;
-    HANDLE          currFindHandle;
-    WIN32_FIND_DATA currFindData;
-    bool            foundNext;
+    WStrVec             dirsToVisit;
+    ScopedMem<WCHAR>    startDir;
+    ScopedMem<WCHAR>    currDir;
+    ScopedMem<WCHAR>    currPath;
+    HANDLE              currFindHandle;
+    WIN32_FIND_DATA     currFindData;
+    bool                foundNext;
 
     bool StartDirIter(const WCHAR *dir);
     bool TryNextDir();
 
 public:
-    DirIter() : foundNext(false), currFindHandle(NULL), recursive(false) { }
+    DirIter(const WCHAR *dir, bool recursive=false) : foundNext(false), currFindHandle(NULL), recursive(recursive) {
+        startDir.Set(str::Dup(dir));
+    }
     ~DirIter() { FindClose(currFindHandle); }
 
-    bool Start(const WCHAR *dir, bool recursive=false);
+    const WCHAR *First();
     const WCHAR *Next();
 };
 

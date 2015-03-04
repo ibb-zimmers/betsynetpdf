@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 /*
@@ -18,6 +18,12 @@ Mixing %-style and {0}-style formatting is not supported.
 
 TODO: once this is working and apptranslator.org has ability to rename translations, we should
 change at least those translations that involve 2 or more substitutions.
+
+TODO: an alternative would be to encode the argument list in the name of the function, like:
+Fmt_iis(char *fmt, int arg1, int arg2, char *str) and write all Fmt_* permutations we use in
+the code. The downside is we would need to write all those wrappers. The upside would be
+smaller code (I imagine building Arg instance does take a few instructions at each Fmt
+call site.
 */
 
 namespace str {
@@ -34,6 +40,9 @@ public:
 
     Arg();
     Arg(int);
+    // Note: downside of declaring char * and WCHAR * constructor as explicit
+    // means that we need to explicitly construct Arg() with literal strings
+    // because const char[N] is not the same type as const char *
     explicit Arg(const char*);
     explicit Arg(const WCHAR*);
 

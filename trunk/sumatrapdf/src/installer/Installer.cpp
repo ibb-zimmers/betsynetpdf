@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 /*
@@ -42,7 +42,6 @@ using namespace Gdiplus;
 #define DRAW_TEXT_SHADOW 1
 #define DRAW_MSG_TEXT_SHADOW 0
 
-HINSTANCE       ghinst;
 HWND            gHwndFrame = NULL;
 HWND            gHwndButtonExit = NULL;
 HWND            gHwndButtonInstUninst = NULL;
@@ -71,8 +70,11 @@ Color            COLOR_MSG_FAILED(gCol1);
 // list of supported file extensions for which SumatraPDF.exe will
 // be registered as a candidate for the Open With dialog's suggestions
 WCHAR *gSupportedExts[] = {
-    L".pdf", L".xps", L".oxps", L".cbz", L".cbr", L".djvu",
-    L".chm", L".mobi", L".epub", NULL
+    L".pdf", L".xps", L".oxps",
+    L".cbz", L".cbr", L".cb7", L".cbt",
+    L".djvu", L".chm",
+    L".mobi", L".epub", L".fb2", L".fb2z",
+    NULL
 };
 
 // The following list is used to verify that all the required files have been
@@ -85,7 +87,7 @@ PayloadInfo gPayloadData[] = {
     { "SumatraPDF.exe",         true    },
     { "sumatrapdfprefs.dat",    false   },
     { "DroidSansFallback.ttf",  true    },
-    { "npPdfViewer.dll",        true    },
+    { "npPdfViewer.dll",        false   },
     { "PdfFilter.dll",          true    },
     { "PdfPreview.dll",         true    },
     { "uninstall.exe",          true    },
@@ -98,10 +100,11 @@ GlobalData gGlobalData = {
     NULL,  /* WCHAR *installDir */
 #ifndef BUILD_UNINSTALLER
     false, /* bool registerAsDefault */
-    false, /* bool installBrowserPlugin */
     false, /* bool installPdfFilter */
     false, /* bool installPdfPreviewer */
+    true,  /* bool keepBrowserPlugin */
     false, /* bool extractFiles */
+    false, /* bool autoUpdate */
 #endif
 
     NULL,  /* WCHAR *firstError */
@@ -178,7 +181,9 @@ int KillProcess(const WCHAR *processPath, BOOL waitUntilTerminated)
 WCHAR *GetOwnPath()
 {
     static WCHAR exePath[MAX_PATH];
+    exePath[0] = '\0';
     GetModuleFileName(NULL, exePath, dimof(exePath));
+    exePath[dimof(exePath) - 1] = '\0';
     return exePath;
 }
 
@@ -186,9 +191,6 @@ static WCHAR *GetInstallationDir()
 {
     ScopedMem<WCHAR> dir(ReadRegStr(HKEY_CURRENT_USER, REG_PATH_UNINST, INSTALL_LOCATION));
     if (!dir) dir.Set(ReadRegStr(HKEY_LOCAL_MACHINE, REG_PATH_UNINST, INSTALL_LOCATION));
-    // fall back to the legacy key if the official one isn't present yet
-    if (!dir) dir.Set(ReadRegStr(HKEY_CURRENT_USER, REG_PATH_SOFTWARE, INSTALL_DIR));
-    if (!dir) dir.Set(ReadRegStr(HKEY_LOCAL_MACHINE, REG_PATH_SOFTWARE, INSTALL_DIR));
     if (dir) {
         if (str::EndsWithI(dir, L".exe")) {
             dir.Set(path::GetDir(dir));
@@ -225,6 +227,14 @@ static WCHAR *GetBrowserPluginPath()
     return path::Join(gGlobalData.installDir, L"npPdfViewer.dll");
 }
 
+WCHAR *GetInstalledBrowserPluginPath()
+{
+    WCHAR *path = ReadRegStr(HKEY_LOCAL_MACHINE, REG_PATH_PLUGIN, PLUGIN_PATH);
+    if (!path)
+        path = ReadRegStr(HKEY_CURRENT_USER, REG_PATH_PLUGIN, PLUGIN_PATH);
+    return path;
+}
+
 static WCHAR *GetPdfFilterPath()
 {
     return path::Join(gGlobalData.installDir, L"PdfFilter.dll");
@@ -254,7 +264,7 @@ void KillSumatra()
 static HFONT CreateDefaultGuiFont()
 {
     HDC hdc = GetDC(NULL);
-    HFONT font = GetSimpleFont(hdc, L"MS Shell Dlg", 14);
+    HFONT font = CreateSimpleFont(hdc, L"MS Shell Dlg", 14);
     ReleaseDC(NULL, hdc);
     return font;
 }
@@ -283,7 +293,7 @@ bool CreateProcessHelper(const WCHAR *exe, const WCHAR *args)
 }
 
 // cf. http://support.microsoft.com/default.aspx?scid=kb;en-us;207132
-bool RegisterServerDLL(const WCHAR *dllPath, bool unregister=false)
+static bool RegisterServerDLL(const WCHAR *dllPath, bool install, const WCHAR *args=NULL)
 {
     if (FAILED(OleInitialize(NULL)))
         return false;
@@ -300,11 +310,21 @@ bool RegisterServerDLL(const WCHAR *dllPath, bool unregister=false)
     bool ok = false;
     HMODULE lib = LoadLibrary(dllPath);
     if (lib) {
-        typedef HRESULT (WINAPI *DllInitProc)(VOID);
-        const char *func = unregister ? "DllUnregisterServer" : "DllRegisterServer";
-        DllInitProc CallDLL = (DllInitProc)GetProcAddress(lib, func);
-        if (CallDLL)
-            ok = SUCCEEDED(CallDLL());
+        typedef HRESULT (WINAPI *DllInstallProc)(BOOL, LPCWSTR);
+        typedef HRESULT (WINAPI *DllRegUnregProc)(VOID);
+        if (args) {
+            DllInstallProc DllInstall = (DllInstallProc)GetProcAddress(lib, "DllInstall");
+            if (DllInstall)
+                ok = SUCCEEDED(DllInstall(install, args));
+            else
+                args = NULL;
+        }
+        if (!args) {
+            const char *func = install ? "DllRegisterServer" : "DllUnregisterServer";
+            DllRegUnregProc DllRegUnreg = (DllRegUnregProc)GetProcAddress(lib, func);
+            if (DllRegUnreg)
+                ok = SUCCEEDED(DllRegUnreg());
+        }
         FreeLibrary(lib);
     }
 
@@ -343,7 +363,6 @@ static bool IsUsingInstallation(DWORD procId)
 // (i.e. have libmupdf.dll or npPdfViewer.dll loaded)
 static void ProcessesUsingInstallation(WStrVec& names)
 {
-    FreeVecMembers(names);
     ScopedHandle snap(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
     if (INVALID_HANDLE_VALUE == snap)
         return;
@@ -402,6 +421,7 @@ static void SetCloseProcessMsg()
 
 bool CheckInstallUninstallPossible(bool silent)
 {
+    gProcessesToClose.Reset();
     ProcessesUsingInstallation(gProcessesToClose);
 
     bool possible = gProcessesToClose.Count() == 0;
@@ -417,45 +437,46 @@ bool CheckInstallUninstallPossible(bool silent)
     return possible;
 }
 
-void InstallBrowserPlugin()
-{
-    ScopedMem<WCHAR> dllPath(GetBrowserPluginPath());
-    if (!RegisterServerDLL(dllPath))
-        NotifyFailed(_TR("Couldn't install browser plugin"));
-}
-
 void UninstallBrowserPlugin()
 {
     ScopedMem<WCHAR> dllPath(GetBrowserPluginPath());
-    if (!RegisterServerDLL(dllPath, true))
+    if (!file::Exists(dllPath)) {
+        // uninstall the detected plugin, even if it isn't in the target installation path
+        dllPath.Set(GetInstalledBrowserPluginPath());
+        if (!file::Exists(dllPath))
+            return;
+    }
+    if (!RegisterServerDLL(dllPath, false))
         NotifyFailed(_TR("Couldn't uninstall browser plugin"));
 }
 
 void InstallPdfFilter()
 {
     ScopedMem<WCHAR> dllPath(GetPdfFilterPath());
-    if (!RegisterServerDLL(dllPath))
+    if (!RegisterServerDLL(dllPath, true))
         NotifyFailed(_TR("Couldn't install PDF search filter"));
 }
 
 void UninstallPdfFilter()
 {
     ScopedMem<WCHAR> dllPath(GetPdfFilterPath());
-    if (!RegisterServerDLL(dllPath, true))
+    if (!RegisterServerDLL(dllPath, false))
         NotifyFailed(_TR("Couldn't uninstall PDF search filter"));
 }
 
 void InstallPdfPreviewer()
 {
     ScopedMem<WCHAR> dllPath(GetPdfPreviewerPath());
-    if (!RegisterServerDLL(dllPath))
+    // TODO: RegisterServerDLL(dllPath, true, L"exts:pdf,...");
+    if (!RegisterServerDLL(dllPath, true))
         NotifyFailed(_TR("Couldn't install PDF previewer"));
 }
 
 void UninstallPdfPreviewer()
 {
     ScopedMem<WCHAR> dllPath(GetPdfPreviewerPath());
-    if (!RegisterServerDLL(dllPath, true))
+    // TODO: RegisterServerDLL(dllPath, false, L"exts:pdf,...");
+    if (!RegisterServerDLL(dllPath, false))
         NotifyFailed(_TR("Couldn't uninstall PDF previewer"));
 }
 
@@ -471,7 +492,7 @@ HWND CreateDefaultButton(HWND hwndParent, const WCHAR *label, int width, int id)
     HWND button = CreateWindow(WC_BUTTON, label,
                         BS_DEFPUSHBUTTON | WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                         rc.x, rc.y, rc.dx, rc.dy, hwndParent,
-                        (HMENU)id, ghinst, NULL);
+                        (HMENU)id, GetModuleHandle(NULL), NULL);
     SetWindowFont(button, gFontDefault, TRUE);
 
     return button;
@@ -641,6 +662,8 @@ static REAL DrawMessage(Graphics &g, const WCHAR *msg, REAL y, REAL dx, Color co
     bbox.X += (dx - bbox.Width) / 2.f;
     StringFormat sft;
     sft.SetAlignment(StringAlignmentCenter);
+    if (trans::IsCurrLangRtl())
+        sft.SetFormatFlags(StringFormatFlagsDirectionRightToLeft);
 #if DRAW_MSG_TEXT_SHADOW
     {
         bbox.X--; bbox.Y++;
@@ -811,22 +834,22 @@ static LRESULT CALLBACK WndProcFrame(HWND hwnd, UINT message, WPARAM wParam, LPA
     return 0;
 }
 
-static BOOL RegisterWinClass(HINSTANCE hInstance)
+static bool RegisterWinClass()
 {
     WNDCLASSEX  wcex;
 
-    FillWndClassEx(wcex, hInstance, INSTALLER_FRAME_CLASS_NAME, WndProcFrame);
-    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SUMATRAPDF));
+    FillWndClassEx(wcex, INSTALLER_FRAME_CLASS_NAME, WndProcFrame);
+    wcex.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_SUMATRAPDF));
 
     ATOM atom = RegisterClassEx(&wcex);
+    CrashIf(atom == NULL);
     return atom != NULL;
 }
 
-static BOOL InstanceInit(HINSTANCE hInstance, int nCmdShow)
+static BOOL InstanceInit(int nCmdShow)
 {
-    ghinst = hInstance;
     gFontDefault = CreateDefaultGuiFont();
-    win::GetHwndDpi(NULL, &gUiDPIFactor);
+    win::GetHwndDpi(HWND_DESKTOP, &gUiDPIFactor);
     trans::SetCurrentLangByCode(trans::DetectUserLang());
 
     CreateMainWindow();
@@ -846,7 +869,7 @@ static int RunApp()
 {
     MSG msg;
     FrameTimeoutCalculator ftc(60);
-    Timer t(true);
+    Timer t;
     for (;;) {
         const DWORD timeout = ftc.GetTimeoutInMilliseconds();
         DWORD res = WAIT_TIMEOUT;
@@ -905,12 +928,14 @@ static void ParseCommandLine(WCHAR *cmdLine)
             str::TransChars(opts, L" ;", L",,");
             WStrVec optlist;
             optlist.Split(opts, L",", true);
-            if (optlist.Contains(L"plugin"))
-                gGlobalData.installBrowserPlugin = true;
             if (optlist.Contains(L"pdffilter"))
                 gGlobalData.installPdfFilter = true;
             if (optlist.Contains(L"pdfpreviewer"))
                 gGlobalData.installPdfPreviewer = true;
+            // uninstall the deprecated browser plugin if it's not
+            // explicitly listed (only applies if the /opt flag is used)
+            if (!optlist.Contains(L"plugin"))
+                gGlobalData.keepBrowserPlugin = false;
         }
         else if (is_arg("x")) {
             gGlobalData.justExtractFiles = true;
@@ -918,6 +943,9 @@ static void ParseCommandLine(WCHAR *cmdLine)
             gGlobalData.silent = true;
             if (!gGlobalData.installDir)
                 str::ReplacePtr(&gGlobalData.installDir, L".");
+        }
+        else if (is_arg("autoupdate")) {
+            gGlobalData.autoUpdate = true;
         }
 #endif
         else if (is_arg("h") || is_arg("help") || is_arg("?"))
@@ -940,12 +968,13 @@ void GetStressTestInfo(str::Str<char>* s) { }
 
 void GetProgramInfo(str::Str<char>& s)
 {
-    s.AppendFmt("Ver: %s", QM(CURR_VERSION));
+    s.AppendFmt("Ver: %s", CURR_VERSION_STRA);
 #ifdef SVN_PRE_RELEASE_VER
-    s.AppendFmt(".%s pre-release", QM(SVN_PRE_RELEASE_VER));
+    s.AppendFmt(" pre-release");
 #endif
 #ifdef DEBUG
-    s.Append(" dbg");
+    if (!str::EndsWith(s.Get(), " (dbg)"))
+        s.Append(" (dbg)");
 #endif
     s.Append("\r\n");
 }
@@ -971,7 +1000,8 @@ static void InstallInstallerCrashHandler()
 }
 #endif
 
-int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int APIENTRY WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
+                     LPSTR /* lpCmdLine*/, int nCmdShow)
 {
     int ret = 1;
 
@@ -1004,8 +1034,6 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         UninstallerThread(NULL);
 #else
         // make sure not to uninstall the plugins during silent installation
-        if (!gGlobalData.installBrowserPlugin)
-            gGlobalData.installBrowserPlugin = IsBrowserPluginInstalled();
         if (!gGlobalData.installPdfFilter)
             gGlobalData.installPdfFilter = IsPdfFilterInstalled();
         if (!gGlobalData.installPdfPreviewer)
@@ -1016,10 +1044,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         goto Exit;
     }
 
-    if (!RegisterWinClass(hInstance))
+    if (!RegisterWinClass())
         goto Exit;
 
-    if (!InstanceInit(hInstance, nCmdShow))
+    if (!InstanceInit(nCmdShow))
         goto Exit;
 
     ret = RunApp();

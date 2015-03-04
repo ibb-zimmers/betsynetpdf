@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 // note: include BaseUtil.h instead of including directly
@@ -53,6 +53,10 @@ bool EndsWith(const WCHAR *txt, const WCHAR *end);
 bool EndsWithI(const char *txt, const char *end);
 bool EndsWithI(const WCHAR *txt, const WCHAR *end);
 
+static inline bool EqNIx(const char *s, size_t len, const char *s2) {
+    return str::Len(s2) == len && str::StartsWithI(s, s2);
+}
+
 char *  DupN(const char *s, size_t lenCch);
 WCHAR * DupN(const WCHAR *s, size_t lenCch);
 
@@ -70,11 +74,23 @@ inline const char * FindChar(const char *str, const char c) {
 inline const WCHAR * FindChar(const WCHAR *str, const WCHAR c) {
     return wcschr(str, c);
 }
+inline char * FindChar(char *str, const char c) {
+    return strchr(str, c);
+}
+inline WCHAR * FindChar(WCHAR *str, const WCHAR c) {
+    return wcschr(str, c);
+}
 
 inline const char * FindCharLast(const char *str, const char c) {
     return strrchr(str, c);
 }
 inline const WCHAR * FindCharLast(const WCHAR *str, const WCHAR c) {
+    return wcsrchr(str, c);
+}
+inline char * FindCharLast(char *str, const char c) {
+    return strrchr(str, c);
+}
+inline WCHAR * FindCharLast(WCHAR *str, const WCHAR c) {
     return wcsrchr(str, c);
 }
 
@@ -85,6 +101,9 @@ inline const WCHAR * Find(const WCHAR *str, const WCHAR *find) {
     return wcsstr(str, find);
 }
 
+const char * FindI(const char *str, const char *find);
+const WCHAR * FindI(const WCHAR *str, const WCHAR *find);
+
 bool    BufFmtV(char *buf, size_t bufCchSize, const char *fmt, va_list args);
 char *  FmtV(const char *fmt, va_list args);
 char *  Format(const char *fmt, ...);
@@ -94,8 +113,16 @@ WCHAR * Format(const WCHAR *fmt, ...);
 
 inline bool IsWs(char c) { return ' ' == c || '\t' <= c && c <= '\r'; }
 inline bool IsWs(WCHAR c) { return iswspace(c); }
-inline bool IsDigit(char c) { return '0' <= c && c <= '9'; }
-inline bool IsDigit(WCHAR c) { return '0' <= c && c <= '9'; }
+
+// Note: I tried an optimization: return (unsigned)(c - '0') < 10;
+// but it seems to mis-compile in release builds
+inline bool IsDigit(char c) {
+    return '0' <= c && c <= '9';
+}
+
+inline bool IsDigit(WCHAR c) {
+    return '0' <= c && c <= '9';
+}
 
 size_t  TrimWS(WCHAR *s, TrimOpt opt=TrimBoth);
 void    TrimWsEnd(char *s, char *&e);
@@ -105,6 +132,7 @@ size_t  TransChars(WCHAR *str, const WCHAR *oldChars, const WCHAR *newChars);
 char *  Replace(const char *s, const char *toReplace, const char *replaceWith);
 WCHAR * Replace(const WCHAR *s, const WCHAR *toReplace, const WCHAR *replaceWith);
 
+size_t  NormalizeWS(char *str);
 size_t  NormalizeWS(WCHAR *str);
 size_t  NormalizeNewlinesInPlace(char *s, char *e);
 size_t  NormalizeNewlinesInPlace(char *s);
@@ -132,11 +160,6 @@ const WCHAR *   Parse(const WCHAR *str, const WCHAR *format, ...);
 size_t Utf8ToWcharBuf(const char *s, size_t sLen, WCHAR *bufOut, size_t cchBufOutSize);
 size_t WcharToUtf8Buf(const WCHAR *s, char *bufOut, size_t cbBufOutSize);
 
-void UrlDecodeInPlace(char *url);
-void UrlDecodeInPlace(WCHAR *url);
-// TODO: a better name
-WCHAR *ToPlainUrl(const WCHAR *url);
-
 namespace conv {
 
 inline WCHAR *  FromCodePage(const char *src, UINT cp) { return ToWideChar(src, cp); }
@@ -156,6 +179,16 @@ size_t FromCodePageBuf(WCHAR *buf, int cchBufSize, const char *s, UINT cp);
 } // namespace str::conv
 
 }  // namespace str
+
+namespace url {
+
+bool IsAbsolute(const WCHAR *url);
+void DecodeInPlace(char *urlUtf8);
+void DecodeInPlace(WCHAR *url);
+WCHAR *GetFullPath(const WCHAR *url);
+WCHAR *GetFileName(const WCHAR *url);
+
+} // namespace url
 
 namespace seqstrings {
 void         SkipStr(char *& s);

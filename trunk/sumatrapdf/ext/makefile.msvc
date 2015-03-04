@@ -6,18 +6,20 @@
 
 OE = $(O)\ext-x86
 OBZ= $(O)\bzip2-x86
-OR = $(O)\unrar-x86
 ODV= $(O)\djvu-x86
 OC = $(O)\chmlib-x86
 OLZ= $(O)\lzma-x86
+OWP= $(O)\webp-x86
+OUN= $(O)\unarr-x86
 
 !if "$(PLATFORM)"=="X64"
 OE = $(O)\ext-x64
 OBZ= $(O)\bzip2-x64
-OR = $(O)\unrar-x64
 ODV= $(O)\djvu-x64
 OC = $(O)\chmlib-x64
 OLZ= $(O)\lzma-x64
+OWP= $(O)\webp-x64
+OUN= $(O)\unarr-x64
 !endif
 
 SYNCTEX_CFLAGS = $(CFLAGS) /TC /I$(EXTDIR)/synctex /I$(ZLIB_DIR) /wd4244 /wd4702 /wd4706 /wd4996
@@ -26,15 +28,6 @@ SYNCTEX_CFLAGS = $(SYNCTEX_CFLAGS) /wd4267
 !endif
 
 BZIP2_CFLAGS = $(CFLAGSOPT) /TC /D "BZ_NO_STDIO" /D "BZ_DEBUG=0" /wd4244 /wd4701
-
-MINIZIP_CFLAGS = $(CFLAGS) /TC /D "HAVE_BZIP2" /I$(ZLIB_DIR) /I$(EXTDIR)/bzip2
-MINIZIP_CFLAGS = $(MINIZIP_CFLAGS) /D "UNICODE" /D "_UNICODE" /D "INC_CUSTOM_ALLOC=\"unzalloc.h\"" /D "NOCRYPT"
-MINIZIP_CFLAGS = $(MINIZIP_CFLAGS) /wd4131 /wd4245
-
-UNRAR_CFLAGS = $(CFLAGSOPT) /D "UNRAR" /D "RARDLL" /D "SILENT"
-UNRAR_CFLAGS = $(UNRAR_CFLAGS) /wd4201 /wd4244 /wd4310 /wd4389 /wd4701 /wd4709 /wd4996
-# a hack to enable C++ exception handling for UnRAR (without triggering a warning)
-UNRAR_CFLAGS = $(UNRAR_CFLAGS:/EHs-c-=/EHsc)
 
 DJVU_CFLAGS = $(CFLAGSOPT) /D "NEED_JPEG_DECODER" /I$(JPEG_TURBO_DIR)
 DJVU_CFLAGS = $(DJVU_CFLAGS) /wd4189 /wd4244 /wd4512 /wd4611 /wd4701 /wd4702 /wd4703 /wd4706 /wd4996
@@ -47,12 +40,21 @@ DJVU_CFLAGS = $(DJVU_CFLAGS:/EHs-c-=/EHsc)
 DJVU_CFLAGS = $(DJVU_CFLAGS) /wd4267
 !endif
 
-CHMLIB_CFLAGS = $(CFLAGS) /TC /D "CHM_MT"
-CHMLIB_CFLAGS = $(CHMLIB_CFLAGS) /wd4018 /wd4057 /wd4189 /wd4244 /wd4295 /wd4701 /wd4706 /wd4996
+CHMLIB_CFLAGS = $(CFLAGS) /TC /wd4018 /wd4057 /wd4189 /wd4244 /wd4295 /wd4701 /wd4706 /wd4996
 # ChmLib also needs PPC_BSTR defined for UNICODE builds
 CHMLIB_CFLAGS = $(CHMLIB_CFLAGS) /D "UNICODE" /D "_UNICODE" /D "PPC_BSTR"
+!if "$(PLATFORM)"=="X64"
+CHMLIB_CFLAGS = $(CHMLIB_CFLAGS) /wd4267
+!endif
 
-LZMA_CFLAGS = $(CFLAGSOPT) /TC /I$(EXTDIR)/lzma/C
+LZMA_CFLAGS = $(CFLAGSOPT) /TC /I$(EXTDIR)/lzma/C /D "_7ZIP_PPMD_SUPPPORT"
+
+WEBP_CFLAGS = $(CFLAGSOPT) /TC /I$(EXTDIR)/libwebp /wd4057 /wd4204 /wd4244
+
+UNARR_CFLAGS = $(CFLAGS) /TC /I$(EXTDIR)/unarr /wd4996
+UNARR_CFLAGS = $(UNARR_CFLAGS) /D "HAVE_ZLIB" /I$(ZLIB_DIR)
+UNARR_CFLAGS = $(UNARR_CFLAGS) /D "HAVE_BZIP2" /I$(EXTDIR)/bzip2
+UNARR_CFLAGS = $(UNARR_CFLAGS) /D "HAVE_LZMA" /D "HAVE_7Z" /I$(EXTDIR)/lzma/C
 
 SYNCTEX_OBJS = \
 	$(OE)\synctex_parser.obj $(OE)\synctex_parser_utils.obj
@@ -62,24 +64,6 @@ BZIP2_OBJS = \
 
 #	$(OBZ)\blocksort.obj $(OBZ)\bzlib.obj $(OBZ)\compress.obj $(OBZ)\crctable.obj \
 #	$(OBZ)\decompress.obj $(OBZ)\huffman.obj $(OBZ)\randtable.obj $(OBZ)\bz_internal_error.obj
-
-MINIZIP_OBJS = \
-	$(OZ)\unzip.obj $(OZ)\unzalloc.obj $(OZ)\ioapi.obj $(OZ)\iowin32.obj \
-	$(OZ)\iowin32s.obj $(OZ)\zip.obj
-
-UNRAR_OBJS = \
-	$(OR)\archive.obj $(OR)\arcread.obj $(OR)\cmddata.obj \
-	$(OR)\consio.obj $(OR)\crc.obj $(OR)\crypt.obj $(OR)\encname.obj \
-	$(OR)\errhnd.obj $(OR)\extinfo.obj $(OR)\extract.obj $(OR)\filcreat.obj \
-	$(OR)\file.obj $(OR)\filefn.obj $(OR)\filestr.obj $(OR)\find.obj $(OR)\getbits.obj \
-	$(OR)\global.obj $(OR)\isnt.obj  $(OR)\list.obj $(OR)\match.obj \
-	$(OR)\pathfn.obj $(OR)\options.obj $(OR)\rarvm.obj \
-	$(OR)\rawread.obj $(OR)\rdwrfn.obj $(OR)\recvol.obj \
-	$(OR)\rijndael.obj $(OR)\rs.obj $(OR)\savepos.obj \
-	$(OR)\scantree.obj $(OR)\sha1.obj $(OR)\smallfn.obj $(OR)\strfn.obj \
-	$(OR)\strlist.obj $(OR)\system.obj $(OR)\timefn.obj \
-	$(OR)\ulinks.obj $(OR)\unicode.obj $(OR)\unpack.obj \
-	$(OR)\volume.obj $(OR)\dll.obj $(OR)\secpassword.obj
 
 # Note: in theory using compiling all djvu files as one should generate smaller
 # code, but it does just the opposite. Why?
@@ -117,24 +101,46 @@ CHMLIB_OBJS = \
 	$(OC)\chm_lib.obj $(OC)\lzx.obj
 
 LZMA_OBJS = \
-	$(OLZ)\LzmaDec.obj $(OLZ)\Bra86.obj
+	$(OLZ)\LzmaDec.obj $(OLZ)\Bra86.obj \
+	$(OLZ)\LzmaEnc.obj $(OLZ)\LzFind.obj $(OLZ)\LzFindMt.obj $(OLZ)\Threads.obj
+
+_7Z_OBJS = \
+	$(OLZ)\7zBuf.obj $(OLZ)\7zDec.obj $(OLZ)\7zIn.obj $(OLZ)\7zStream.obj \
+	$(OLZ)\Bcj2.obj $(OLZ)\Bra.obj $(OLZ)\Lzma2Dec.obj
+
+WEBP_OBJS = \
+	$(OWP)\alpha.obj $(OWP)\buffer.obj $(OWP)\frame.obj $(OWP)\idec.obj \
+	$(OWP)\io.obj $(OWP)\quant.obj $(OWP)\tree.obj \
+	$(OWP)\vp8.obj $(OWP)\vp8l.obj $(OWP)\webp.obj \
+	$(OWP)\alpha_processing.obj $(OWP)\cpu.obj $(OWP)\dec.obj $(OWP)\dec_sse2.obj \
+	$(OWP)\lossless.obj $(OWP)\lossless_sse2.obj $(OWP)\upsampling.obj \
+	$(OWP)\upsampling_sse2.obj $(OWP)\yuv.obj $(OWP)\yuv_sse2.obj \
+	$(OWP)\dec_clip_tables.obj \
+	$(OWP)\bit_reader.obj $(OWP)\color_cache.obj $(OWP)\filters.obj \
+	$(OWP)\huffman.obj $(OWP)\quant_levels_dec.obj $(OWP)\rescaler.obj \
+	$(OWP)\thread.obj $(OWP)\utils.obj $(OWP)\random.obj
+	
+
+UNARR_OBJS = \
+	$(OUN)\conv.obj $(OUN)\crc32.obj $(OUN)\stream.obj $(OUN)\unarr.obj \
+	$(OUN)\CpuArch.obj $(OUN)\Ppmd7.obj $(OUN)\Ppmd7Dec.obj \
+	$(OUN)\Ppmd8.obj $(OUN)\Ppmd8Dec.obj \
+	$(OUN)\filter-rar.obj $(OUN)\parse-rar.obj $(OUN)\rar.obj \
+	$(OUN)\rarvm.obj $(OUN)\uncompress-rar.obj $(OUN)\huffman-rar.obj \
+	$(OUN)\parse-zip.obj $(OUN)\uncompress-zip.obj $(OUN)\zip.obj \
+	$(OUN)\_7z.obj $(OUN)\tar.obj $(OUN)\parse-tar.obj
 
 $(OE): force
 	@if not exist $(OE) mkdir $(OE)
 	@if not exist $(OBZ) mkdir $(OBZ)
-	@if not exist $(OR) mkdir $(OR)
 	@if not exist $(ODV) mkdir $(ODV)
 	@if not exist $(OC) mkdir $(OC)
 	@if not exist $(OLZ) mkdir $(OLZ)
+	@if not exist $(OWP) mkdir $(OWP)
+	@if not exist $(OUN) mkdir $(OUN)
 
 {$(EXTDIR)\bzip2}.c{$(OBZ)}.obj::
 	$(CC) $(BZIP2_CFLAGS) /Fo$(OBZ)\ /Fd$(O)\vc80.pdb $<
-
-{$(EXTDIR)\unrar}.cpp{$(OR)}.obj::
-	$(CC) $(UNRAR_CFLAGS) /Fo$(OR)\ /Fd$(O)\vc80.pdb $<
-
-{$(ZLIB_DIR)\minizip}.c{$(OZ)}.obj::
-	$(CC) $(MINIZIP_CFLAGS) /Fo$(OZ)\ /Fd$(O)\vc80.pdb $<
 
 {$(EXTDIR)\synctex}.c{$(OE)}.obj::
 	$(CC) $(SYNCTEX_CFLAGS) /Fo$(OE)\ /Fd$(O)\vc80.pdb $<
@@ -147,3 +153,40 @@ $(OE): force
 
 {$(EXTDIR)\lzma\C}.c{$(OLZ)}.obj::
 	$(CC) $(LZMA_CFLAGS) /Fo$(OLZ)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\libwebp\dec}.c{$(OWP)}.obj::
+	$(CC) $(WEBP_CFLAGS) /Fo$(OWP)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\libwebp\dsp}.c{$(OWP)}.obj::
+	$(CC) $(WEBP_CFLAGS) /Fo$(OWP)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\libwebp\utils}.c{$(OWP)}.obj::
+	$(CC) $(WEBP_CFLAGS) /Fo$(OWP)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\unarr\common}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\unarr\ppmd}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\unarr\rar}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\unarr\tar}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\unarr\zip}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+{$(EXTDIR)\unarr\_7z}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+# executable(s) for testing the above libraries
+
+unarr_test: $(O) $(OE) $(O)\unarr.exe
+
+{$(EXTDIR)\unarr}.c{$(OUN)}.obj::
+	$(CC) $(UNARR_CFLAGS) /Fo$(OUN)\ /Fd$(O)\vc80.pdb $<
+
+$(O)\unarr.exe: $(UNARR_OBJS) $(OUN)\main.obj $(ZLIB_OBJS) $(BZIP2_OBJS) $(LZMA_OBJS) $(_7Z_OBJS)
+	$(LD) $(LDFLAGS) $** $(LIBS) /PDB:$*.pdb /OUT:$@ /SUBSYSTEM:CONSOLE

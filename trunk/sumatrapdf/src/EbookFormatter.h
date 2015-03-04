@@ -1,14 +1,10 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef EbookFormatter_h
 #define EbookFormatter_h
 
 #include "HtmlFormatter.h"
-#include "Doc.h"
-
-HtmlFormatterArgs *CreateFormatterArgsDoc(Doc doc, int dx, int dy, PoolAllocator *textAllocator);
-HtmlFormatter *CreateFormatter(Doc doc, HtmlFormatterArgs* args);
 
 /* formatting extensions for Mobi */
 
@@ -51,8 +47,6 @@ public:
 
 /* formatting extensions for FictionBook */
 
-#define FB2_TOC_ENTRY_MARK "ToC!Entry!"
-
 class Fb2Doc;
 
 class Fb2Formatter : public HtmlFormatter {
@@ -69,18 +63,6 @@ class Fb2Formatter : public HtmlFormatter {
 
 public:
     Fb2Formatter(HtmlFormatterArgs *args, Fb2Doc *doc);
-};
-
-/* formatting extensions for PalmDOC */
-
-class PalmDoc;
-
-class PdbFormatter : public HtmlFormatter {
-    PalmDoc *palmDoc;
-
-public:
-    PdbFormatter(HtmlFormatterArgs *args, PalmDoc *doc) :
-        HtmlFormatter(args), palmDoc(doc) { }
 };
 
 /* formatting extensions for standalone HTML */
@@ -106,7 +88,7 @@ protected:
     virtual void HandleTagPagebreak(HtmlToken *t) { ForceNewPage(); }
 
 public:
-    TxtFormatter(HtmlFormatterArgs *args) : HtmlFormatter(args) { }
+    explicit TxtFormatter(HtmlFormatterArgs *args) : HtmlFormatter(args) { }
 };
 
 #endif

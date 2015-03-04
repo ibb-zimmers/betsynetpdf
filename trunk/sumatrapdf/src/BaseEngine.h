@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef BaseEngine_h
@@ -35,9 +35,10 @@ class RenderedBitmap {
 protected:
     HBITMAP hbmp;
     SizeI size;
+    ScopedHandle hMap;
 
 public:
-    RenderedBitmap(HBITMAP hbmp, SizeI size) : hbmp(hbmp), size(size) { }
+    RenderedBitmap(HBITMAP hbmp, SizeI size, HANDLE hMap=NULL) : hbmp(hbmp), size(size), hMap(hMap) { }
     ~RenderedBitmap() { DeleteObject(hbmp); }
 
     RenderedBitmap *Clone() const {
@@ -71,7 +72,8 @@ public:
 // interface to be implemented for saving embedded documents that a link points to
 class LinkSaverUI {
 public:
-    virtual bool SaveEmbedded(unsigned char *data, size_t cbCount) = 0;
+    virtual bool SaveEmbedded(const unsigned char *data, size_t cbCount) = 0;
+    virtual ~LinkSaverUI() { }
 };
 
 // a link destination
@@ -104,7 +106,8 @@ struct PageAnnotation {
         uint8_t r, g, b, a;
         Color() : r(0), g(0), b(0), a(0) { }
         Color(uint8_t r, uint8_t g, uint8_t b, uint8_t a=255) : r(r), g(g), b(b), a(a) { }
-        Color(COLORREF c, uint8_t a=255) : r(GetRValue(c)), g(GetGValue(c)), b(GetBValue(c)), a(a) { }
+        explicit Color(COLORREF c, uint8_t a=255) : 
+            r(GetRValueSafe(c)), g(GetGValueSafe(c)), b(GetBValueSafe(c)), a(a) { }
         bool operator==(const Color& other) const {
             return other.r == r && other.g == g && other.b == b && other.a == a;
         }
@@ -162,7 +165,8 @@ public:
     // if GetLink() returns a destination to a page, the two should match
     int pageNo;
     // arbitrary number allowing to distinguish this DocTocItem
-    // from any other of the same ToC tree
+    // from any other of the same ToC tree (must be constant
+    // between runs so that it can be persisted in FileState::tocState)
     int id;
 
     // first child item
@@ -170,8 +174,8 @@ public:
     // next sibling
     DocTocItem *next;
 
-    DocTocItem(WCHAR *title, int pageNo=0) :
-        title(title), open(true), pageNo(pageNo), id(0), child(NULL), next(NULL), last(NULL) { }
+    explicit DocTocItem(WCHAR *title, int pageNo=0) :
+        title(title), open(false), pageNo(pageNo), id(0), child(NULL), next(NULL), last(NULL) { }
 
     virtual ~DocTocItem() {
         delete child;
@@ -184,14 +188,22 @@ public:
         free(title);
     }
 
-    void AddSibling(DocTocItem *sibling)
-    {
+    void AddSibling(DocTocItem *sibling) {
         DocTocItem *item;
         for (item = last ? last : this; item->next; item = item->next);
         last = item->next = sibling;
     }
 
-    // returns the destination this ToC item points to
+    void OpenSingleNode() {
+        // only open (root level) ToC nodes if there's at most two
+        if (!next || !next->next) {
+            open = true;
+            if (next)
+                next->open = true;
+        }
+    }
+
+    // returns the destination this ToC item points to or NULL
     // (the result is owned by the DocTocItem and MUST NOT be deleted)
     virtual PageDestination *GetLink() = 0;
 };
@@ -244,10 +256,14 @@ public:
     // caller needs to free() the result
     virtual unsigned char *GetFileData(size_t *cbCount) = 0;
     // saves a copy of the current file under a different name (overwriting an existing file)
-    virtual bool SaveFileAs(const WCHAR *copyFileName) = 0;
+    // (includeUserAnnots only has an effect if SupportsAnnotation(true) returns true)
+    virtual bool SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots=false) = 0;
+    // converts the current file to a PDF file and saves it (overwriting an existing file),
+    // (includeUserAnnots should always have an effect)
+    virtual bool SaveFileAsPDF(const WCHAR *pdfFileName, bool includeUserAnnots=false) { return false; }
     // extracts all text found in the given page (and optionally also the
     // coordinates of the individual glyphs)
-    // caller needs to free() the result
+    // caller needs to free() the result and *coords_out (if coords_out is non-NULL)
     virtual WCHAR * ExtractPageText(int pageNo, WCHAR *lineSep, RectI **coords_out=NULL,
                                     RenderTarget target=Target_View) = 0;
     // pages where clipping doesn't help are rendered in larger tiles

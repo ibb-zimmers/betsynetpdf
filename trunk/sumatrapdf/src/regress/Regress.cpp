@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 /*
@@ -15,15 +15,16 @@ To write new regression test:
 - call Regress${NN} function from RunTests()
 */
 
-#include "BaseUtil.h"
+#include "Mui.h"
+using namespace mui;
+
 #include "DbgHelpDyn.h"
 #include "DirIter.h"
 #include "Doc.h"
 #include "EbookFormatter.h"
+#include "EbookDoc.h"
 #include "FileUtil.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
-#include "Mui.h"
 #include "WinUtil.h"
 
 static WCHAR *gTestFilesDir;

@@ -1,8 +1,12 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
 #include "FileUtil.h"
+
+// cf. http://blogs.msdn.com/b/oldnewthing/archive/2004/10/25/247180.aspx
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
+#define CURRENT_HMODULE ((HMODULE)&__ImageBase)
 
 namespace path {
 
@@ -114,9 +118,26 @@ WCHAR *Normalize(const WCHAR *path)
     cch = GetLongPathName(fullpath, NULL, 0);
     if (!cch)
         return fullpath.StealData();
-    WCHAR *normpath = AllocArray<WCHAR>(cch);
+    ScopedMem<WCHAR> normpath(AllocArray<WCHAR>(cch));
     GetLongPathName(fullpath, normpath, cch);
-    return normpath;
+    if (cch <= MAX_PATH)
+        return normpath.StealData();
+    // handle overlong paths: first, try to shorten the path
+    cch = GetShortPathName(fullpath, NULL, 0);
+    if (cch && cch <= MAX_PATH) {
+        ScopedMem<WCHAR> shortpath(AllocArray<WCHAR>(cch));
+        GetShortPathName(fullpath, shortpath, cch);
+        if (str::Len(path::GetBaseName(normpath)) + path::GetBaseName(shortpath) - shortpath < MAX_PATH) {
+            // keep the long filename if possible
+            *(WCHAR *)path::GetBaseName(shortpath) = '\0';
+            return str::Join(shortpath, path::GetBaseName(normpath));
+        }
+        return shortpath.StealData();
+    }
+    // else mark the path as overlong
+    if (str::StartsWith(normpath.Get(), L"\\\\?\\"))
+        return normpath.StealData();
+    return str::Join(L"\\\\?\\", normpath);
 }
 
 // Normalizes the file path and the converts it into a short form that
@@ -248,9 +269,30 @@ WCHAR *GetTempPath(const WCHAR *filePrefix)
     return str::Dup(path);
 }
 
+// returns a path to the application module's directory
+// with either the given fileName or the module's name
+// (module is the EXE or DLL in which path::GetAppPath resides)
+WCHAR *GetAppPath(const WCHAR *fileName)
+{
+    WCHAR modulePath[MAX_PATH];
+    modulePath[0] = '\0';
+    GetModuleFileName(CURRENT_HMODULE, modulePath, dimof(modulePath));
+    modulePath[dimof(modulePath) - 1] = '\0';
+    if (!fileName)
+        return str::Dup(modulePath);
+    ScopedMem<WCHAR> moduleDir(path::GetDir(modulePath));
+    return path::Join(moduleDir, fileName);
+}
+
 }
 
 namespace file {
+
+HANDLE OpenReadOnly(const WCHAR *filePath)
+{
+    return CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ, NULL,
+                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+}
 
 bool Exists(const WCHAR *filePath)
 {
@@ -273,8 +315,7 @@ int64 GetSize(const WCHAR *filePath)
     CrashIf(!filePath);
     if (!filePath) return -1;
 
-    ScopedHandle h(CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ, NULL,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
+    ScopedHandle h(OpenReadOnly(filePath));
     if (h == INVALID_HANDLE_VALUE)
         return -1;
 
@@ -294,7 +335,7 @@ char *ReadAll(const WCHAR *filePath, size_t *fileSizeOut, Allocator *allocator)
         return NULL;
     size_t size = (size_t)size64;
 #ifdef _WIN64
-    CrashIf(size != size64);
+    CrashIf(size != (size_t)size64);
 #else
     if (size != size64)
         return NULL;
@@ -310,7 +351,7 @@ char *ReadAll(const WCHAR *filePath, size_t *fileSizeOut, Allocator *allocator)
     if (!data)
         return NULL;
 
-    if (!ReadAll(filePath, data, size)) {
+    if (!ReadN(filePath, data, size)) {
         Allocator::Free(allocator, data);
         return NULL;
     }
@@ -330,16 +371,16 @@ char *ReadAllUtf(const char *filePath, size_t *fileSizeOut, Allocator *allocator
     return ReadAll(buf, fileSizeOut, allocator);
 }
 
-bool ReadAll(const WCHAR *filePath, char *buffer, size_t bufferLen)
+// buf must be at least toRead in size (note: it won't be zero-terminated)
+bool ReadN(const WCHAR *filePath, char *buf, size_t toRead)
 {
-    ScopedHandle h(CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ, NULL,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
+    ScopedHandle h(OpenReadOnly(filePath));
     if (h == INVALID_HANDLE_VALUE)
         return false;
 
-    DWORD sizeRead;
-    BOOL ok = ReadFile(h, buffer, (DWORD)bufferLen, &sizeRead, NULL);
-    return ok && sizeRead == bufferLen;
+    DWORD nRead;
+    BOOL ok = ReadFile(h, buf, (DWORD)toRead, &nRead, NULL);
+    return ok && nRead == toRead;
 }
 
 bool WriteAll(const WCHAR *filePath, const void *data, size_t dataLen)
@@ -372,8 +413,7 @@ bool Delete(const WCHAR *filePath)
 FILETIME GetModificationTime(const WCHAR *filePath)
 {
     FILETIME lastMod = { 0 };
-    ScopedHandle h(CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ, NULL,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
+    ScopedHandle h(OpenReadOnly(filePath));
     if (h != INVALID_HANDLE_VALUE)
         GetFileTime(h, NULL, NULL, &lastMod);
     return lastMod;
@@ -388,16 +428,22 @@ bool SetModificationTime(const WCHAR *filePath, FILETIME lastMod)
     return SetFileTime(h, NULL, NULL, &lastMod);
 }
 
-bool StartsWith(const WCHAR *filePath, const char *magicNumber, size_t len)
+// return true if a file starts with string s of size len
+bool StartsWithN(const WCHAR *filePath, const char *s, size_t len)
 {
-    if (len == (size_t)-1)
-        len = str::Len(magicNumber);
-    ScopedMem<char> header(AllocArray<char>(len));
-    if (!header)
+    ScopedMem<char> buf(AllocArray<char>(len));
+    if (!buf)
         return false;
 
-    ReadAll(filePath, header, len);
-    return memeq(header, magicNumber, len);
+    if (!ReadN(filePath, buf, len))
+        return false;
+    return memeq(buf, s, len);
+}
+
+// return true if a file starts with null-terminated string s
+bool StartsWith(const WCHAR *filePath, const char *s)
+{
+    return file::StartsWithN(filePath, s, str::Len(s));
 }
 
 int GetZoneIdentifier(const WCHAR *filePath)

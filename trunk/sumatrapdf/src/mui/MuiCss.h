@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Mui_h
@@ -148,6 +148,7 @@ struct ColorData {
     };
 
     bool operator==(const ColorData& other) const;
+    bool IsTransparent() const { return type == ColorSolid && solid.color == 0; }
 };
 
 struct Padding {

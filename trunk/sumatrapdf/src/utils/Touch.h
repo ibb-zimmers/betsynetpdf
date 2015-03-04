@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #ifndef Touch_h
@@ -18,7 +18,7 @@ typedef unsigned __int64 QWORD, *LPQWORD;
 // Define the Gesture structures here because they
 // are not available in all versions of Windows
 // These defines can be found in WinUser.h
-#ifndef HGESTUREINFO  // needs WINVER >= 0x0601
+#ifndef GF_BEGIN  // needs WINVER >= 0x0601
 
 DECLARE_HANDLE(HGESTUREINFO);
 

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 // hack to prevent libdjvu from being built as an export/import library
@@ -6,52 +6,19 @@
 #define MINILISPAPI /**/
 
 #include "BaseUtil.h"
+#include "BaseEngine.h"
 #include "DjVuEngine.h"
 #include <ddjvuapi.h>
 #include <miniexp.h>
 
 #include "ByteReader.h"
 #include "FileUtil.h"
+#include "WinUtil.h"
 
 // TODO: libdjvu leaks memory - among others
 //       DjVuPort::corpse_lock, DjVuPort::corpse_head, pcaster,
 //       DataPool::OpenFiles::global_ptr, FCPools::global_ptr
 //       cf. http://sourceforge.net/projects/djvu/forums/forum/103286/topic/3553602
-
-class RenderedDjVuPixmap : public RenderedBitmap {
-public:
-    RenderedDjVuPixmap(const char *data, SizeI size, bool grayscale);
-};
-
-RenderedDjVuPixmap::RenderedDjVuPixmap(const char *data, SizeI size, bool grayscale) :
-    RenderedBitmap(NULL, size)
-{
-    int bpc = grayscale ? 1 : 3;
-    int stride = ((size.dx * bpc + 3) / 4) * 4;
-    int colors = grayscale ? 256 : 0;
-
-    BITMAPINFO *bmi = (BITMAPINFO *)calloc(1, sizeof(BITMAPINFOHEADER) + colors * sizeof(RGBQUAD));
-    if (!bmi)
-        return;
-    for (int i = 0; i < colors; i++) {
-        bmi->bmiColors[i].rgbRed = bmi->bmiColors[i].rgbGreen = bmi->bmiColors[i].rgbBlue = (BYTE)i;
-    }
-
-    bmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi->bmiHeader.biWidth = size.dx;
-    bmi->bmiHeader.biHeight = -size.dy;
-    bmi->bmiHeader.biPlanes = 1;
-    bmi->bmiHeader.biCompression = BI_RGB;
-    bmi->bmiHeader.biBitCount = (WORD)(bpc * 8);
-    bmi->bmiHeader.biSizeImage = size.dy * stride;
-    bmi->bmiHeader.biClrUsed = colors;
-
-    HDC hDC = GetDC(NULL);
-    hbmp = CreateDIBitmap(hDC, &bmi->bmiHeader, CBM_INIT, data, bmi, DIB_RGB_COLORS);
-    ReleaseDC(NULL, hDC);
-
-    free(bmi);
-}
 
 class DjVuDestination : public PageDestination {
     // the link format can be any of
@@ -66,7 +33,7 @@ class DjVuDestination : public PageDestination {
     }
 
 public:
-    DjVuDestination(const char *link) : link(str::Dup(link)) { }
+    explicit DjVuDestination(const char *link) : link(str::Dup(link)) { }
 
     virtual PageDestType GetDestType() const {
         if (IsPageLink(link))
@@ -179,12 +146,16 @@ public:
     }
 
     void SpinMessageLoop(bool wait=true) {
+        const ddjvu_message_t *msg;
 #if THREADMODEL!=NOTHREADS
         if (wait)
             ddjvu_message_wait(ctx);
 #endif
-        while (ddjvu_message_peek(ctx))
+        while ((msg = ddjvu_message_peek(ctx)) != NULL) {
+            if (DDJVU_NEWSTREAM == msg->m_any.tag && msg->m_newstream.streamid != 0)
+                ddjvu_stream_close(msg->m_any.document, msg->m_newstream.streamid, /* stop */ FALSE);
             ddjvu_message_pop(ctx);
+        }
     }
 
     ddjvu_document_t *OpenFile(const WCHAR *fileName) {
@@ -194,17 +165,26 @@ public:
         //       http://code.google.com/p/sumatrapdf/issues/detail?id=1434
         return ddjvu_document_create_by_filename_utf8(ctx, fileNameUtf8, /* cache */ FALSE);
     }
+
+    ddjvu_document_t *OpenStream(IStream *stream) {
+        ScopedCritSec scope(&lock);
+        size_t datalen;
+        ScopedMem<char> data((char *)GetDataFromStream(stream, &datalen));
+        if (!data || datalen > ULONG_MAX)
+            return NULL;
+        return ddjvu_document_create_by_data(ctx, data, (ULONG)datalen);
+    }
 };
 
 static DjVuContext gDjVuContext;
 
-class DjVuEngineImpl : public DjVuEngine {
-    friend DjVuEngine;
-
+class DjVuEngineImpl : public BaseEngine {
 public:
     DjVuEngineImpl();
     virtual ~DjVuEngineImpl();
-    virtual DjVuEngine *Clone() {
+    virtual BaseEngine *Clone() {
+        if (stream)
+            return CreateFromStream(stream);
         return fileName ? CreateFromFile(fileName) : NULL;
     }
 
@@ -227,7 +207,7 @@ public:
     virtual RectD Transform(RectD rect, int pageNo, float zoom, int rotation, bool inverse=false);
 
     virtual unsigned char *GetFileData(size_t *cbCount);
-    virtual bool SaveFileAs(const WCHAR *copyFileName);
+    virtual bool SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots=false);
     virtual WCHAR * ExtractPageText(int pageNo, WCHAR *lineSep, RectI **coords_out=NULL,
                                     RenderTarget target=Target_View);
     virtual bool HasClipOptimizations(int pageNo) { return false; }
@@ -252,8 +232,16 @@ public:
     virtual bool HasTocTree() const { return outline != miniexp_nil; }
     virtual DocTocItem *GetTocTree();
 
+    virtual bool HasPageLabels() const { return hasPageLabels; }
+    virtual WCHAR *GetPageLabel(int pageNo) const;
+    virtual int GetPageByLabel(const WCHAR *label) const;
+
+    static BaseEngine *CreateFromFile(const WCHAR *fileName);
+    static BaseEngine *CreateFromStream(IStream *stream);
+
 protected:
     WCHAR *fileName;
+    IStream *stream;
 
     int pageCount;
     RectD *mediaboxes;
@@ -262,20 +250,25 @@ protected:
     miniexp_t outline;
     miniexp_t *annos;
     Vec<PageAnnotation> userAnnots;
+    bool hasPageLabels;
 
     Vec<ddjvu_fileinfo_t> fileInfo;
 
+    RenderedBitmap *CreateRenderedBitmap(const char *bmpData, SizeI size, bool grayscale) const;
     void AddUserAnnots(RenderedBitmap *bmp, int pageNo, float zoom, int rotation, RectI screen);
     bool ExtractPageText(miniexp_t item, const WCHAR *lineSep,
                          str::Str<WCHAR>& extracted, Vec<RectI>& coords);
     char *ResolveNamedDest(const char *name);
-    DjVuTocItem *BuildTocTree(miniexp_t entry, int& idCounter, bool topLevel);
+    DjVuTocItem *BuildTocTree(miniexp_t entry, int& idCounter);
     bool Load(const WCHAR *fileName);
+    bool Load(IStream *stream);
+    bool FinishLoading();
     bool LoadMediaboxes();
 };
 
-DjVuEngineImpl::DjVuEngineImpl() : fileName(NULL), pageCount(0), mediaboxes(NULL),
-    doc(NULL), outline(miniexp_nil), annos(NULL)
+DjVuEngineImpl::DjVuEngineImpl() : fileName(NULL), stream(NULL),
+    pageCount(0), mediaboxes(NULL), doc(NULL),
+    outline(miniexp_nil), annos(NULL), hasPageLabels(false)
 {
 }
 
@@ -283,19 +276,22 @@ DjVuEngineImpl::~DjVuEngineImpl()
 {
     ScopedCritSec scope(&gDjVuContext.lock);
 
-    delete[] mediaboxes;
+    free(mediaboxes);
     free(fileName);
 
     if (annos) {
-        for (int i = 0; i < pageCount; i++)
+        for (int i = 0; i < pageCount; i++) {
             if (annos[i])
                 ddjvu_miniexp_release(doc, annos[i]);
+        }
         free(annos);
     }
     if (outline != miniexp_nil)
         ddjvu_miniexp_release(doc, outline);
     if (doc)
         ddjvu_document_release(doc);
+    if (stream)
+        stream->Release();
 }
 
 // Most functions of the ddjvu API such as ddjvu_document_get_pageinfo
@@ -333,8 +329,9 @@ STATIC_ASSERT(sizeof(DjVuInfoChunk) == 10, djvuInfoChunkSize);
 
 bool DjVuEngineImpl::LoadMediaboxes()
 {
-    ScopedHandle h(CreateFile(fileName, GENERIC_READ, FILE_SHARE_READ, NULL,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
+    if (!fileName)
+        return false;
+    ScopedHandle h(file::OpenReadOnly(fileName));
     if (h == INVALID_HANDLE_VALUE)
         return false;
     char buffer[16];
@@ -363,7 +360,7 @@ bool DjVuEngineImpl::LoadMediaboxes()
             mediaboxes[pages].dx = GetFileDPI() * info.width / dpi;
             mediaboxes[pages].dy = GetFileDPI() * info.height / dpi;
             if ((info.flags & 4))
-                Swap(mediaboxes[pages].dx, mediaboxes[pages].dy);
+                std::swap(mediaboxes[pages].dx, mediaboxes[pages].dy);
             pages++;
         }
         offset += 8 + partLen + (partLen & 1);
@@ -379,6 +376,22 @@ bool DjVuEngineImpl::Load(const WCHAR *fileName)
 
     this->fileName = str::Dup(fileName);
     doc = gDjVuContext.OpenFile(fileName);
+
+    return FinishLoading();
+}
+
+bool DjVuEngineImpl::Load(IStream *stream)
+{
+    if (!gDjVuContext.Initialize())
+        return false;
+
+    doc = gDjVuContext.OpenStream(stream);
+
+    return FinishLoading();
+}
+
+bool DjVuEngineImpl::FinishLoading()
+{
     if (!doc)
         return false;
 
@@ -393,7 +406,7 @@ bool DjVuEngineImpl::Load(const WCHAR *fileName)
     if (0 == pageCount)
         return false;
 
-    mediaboxes = new RectD[pageCount];
+    mediaboxes = AllocArray<RectD>(pageCount);
     bool ok = LoadMediaboxes();
     if (!ok) {
         // fall back to the slower but safer way to extract page mediaboxes
@@ -425,8 +438,10 @@ bool DjVuEngineImpl::Load(const WCHAR *fileName)
         ddjvu_fileinfo_s info;
         while ((status = ddjvu_document_get_fileinfo(doc, i, &info)) < DDJVU_JOB_OK)
             gDjVuContext.SpinMessageLoop();
-        if (DDJVU_JOB_OK == status && info.type == 'P')
+        if (DDJVU_JOB_OK == status && info.type == 'P' && info.pageno >= 0) {
             fileInfo.Append(info);
+            hasPageLabels = hasPageLabels || !str::Eq(info.title, info.id);
+        }
     }
 
     return true;
@@ -436,9 +451,9 @@ bool DjVuEngineImpl::Load(const WCHAR *fileName)
 static Gdiplus::Color Unblend(PageAnnotation::Color c, BYTE alpha)
 {
     alpha = (BYTE)(alpha * c.a / 255.f);
-    BYTE R = (BYTE)floorf(max(c.r - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
-    BYTE G = (BYTE)floorf(max(c.g - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
-    BYTE B = (BYTE)floorf(max(c.b - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
+    BYTE R = (BYTE)floorf(std::max(c.r - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
+    BYTE G = (BYTE)floorf(std::max(c.g - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
+    BYTE B = (BYTE)floorf(std::max(c.b - (255 - alpha), 0) * 255.0f / alpha + 0.5f);
     return Gdiplus::Color(alpha, R, G, B);
 }
 
@@ -449,13 +464,14 @@ static inline Gdiplus::Color FromColor(PageAnnotation::Color c)
 
 void DjVuEngineImpl::AddUserAnnots(RenderedBitmap *bmp, int pageNo, float zoom, int rotation, RectI screen)
 {
+    using namespace Gdiplus;
+
     if (!bmp || userAnnots.Count() == 0)
         return;
 
     HDC hdc = CreateCompatibleDC(NULL);
-    HGDIOBJ prevBmp = SelectObject(hdc, bmp->GetBitmap());
     {
-        using namespace Gdiplus;
+        ScopedHdcSelect bmpScope(hdc, bmp->GetBitmap());
         Graphics g(hdc);
         g.SetCompositingQuality(CompositingQualityHighQuality);
         g.SetPageUnit(UnitPixel);
@@ -505,8 +521,41 @@ void DjVuEngineImpl::AddUserAnnots(RenderedBitmap *bmp, int pageNo, float zoom, 
             }
         }
     }
-    SelectObject(hdc, prevBmp);
     DeleteDC(hdc);
+}
+
+RenderedBitmap *DjVuEngineImpl::CreateRenderedBitmap(const char *bmpData, SizeI size, bool grayscale) const
+{
+    int stride = ((size.dx * (grayscale ? 1 : 3) + 3) / 4) * 4;
+
+    BITMAPINFO *bmi = (BITMAPINFO *)calloc(1, sizeof(BITMAPINFOHEADER) + (grayscale ? 256 * sizeof(RGBQUAD) : 0));
+    if (!bmi)
+        return NULL;
+
+    if (grayscale) {
+        for (int i = 0; i < 256; i++) {
+            bmi->bmiColors[i].rgbRed = bmi->bmiColors[i].rgbGreen = bmi->bmiColors[i].rgbBlue = (BYTE)i;
+        }
+    }
+
+    bmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi->bmiHeader.biWidth = size.dx;
+    bmi->bmiHeader.biHeight = -size.dy;
+    bmi->bmiHeader.biPlanes = 1;
+    bmi->bmiHeader.biCompression = BI_RGB;
+    bmi->bmiHeader.biBitCount = grayscale ? 8 : 24;
+    bmi->bmiHeader.biSizeImage = size.dy * stride;
+    bmi->bmiHeader.biClrUsed = grayscale ? 256 : 0;
+
+    void *data = NULL;
+    HANDLE hMap = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, bmi->bmiHeader.biSizeImage, NULL);
+    HBITMAP hbmp = CreateDIBSection(NULL, bmi, DIB_RGB_COLORS, &data, hMap, 0);
+    if (hbmp)
+        memcpy(data, bmpData, bmi->bmiHeader.biSizeImage);
+
+    free(bmi);
+
+    return new RenderedBitmap(hbmp, size, hMap);
 }
 
 RenderedBitmap *DjVuEngineImpl::RenderBitmap(int pageNo, float zoom, int rotation, RectD *pageRect, RenderTarget target, AbortCookie **cookie_out)
@@ -546,10 +595,13 @@ RenderedBitmap *DjVuEngineImpl::RenderBitmap(int pageNo, float zoom, int rotatio
         //       in debug builds when passing in DDJVU_RENDER_COLOR
         ddjvu_render_mode_t mode = DDJVU_RENDER_MASKONLY;
 #endif
-        if (ddjvu_page_render(page, mode, &prect, &rrect, fmt, stride, bmpData.Get())) {
-            bmp = new RenderedDjVuPixmap(bmpData, screen.Size(), isBitonal);
-            AddUserAnnots(bmp, pageNo, zoom, rotation, screen);
+        if (!ddjvu_page_render(page, mode, &prect, &rrect, fmt, stride, bmpData.Get())) {
+            // nothing was rendered, leave the page blank (same as WinDjView)
+            memset(bmpData, 0xFF, stride * screen.dy);
+            isBitonal = true;
         }
+        bmp = CreateRenderedBitmap(bmpData, screen.Size(), isBitonal);
+        AddUserAnnots(bmp, pageNo, zoom, rotation, screen);
     }
 
     ddjvu_format_release(fmt);
@@ -572,7 +624,7 @@ bool DjVuEngineImpl::RenderPage(HDC hDC, RectI screenRect, int pageNo, float zoo
     // render in 1 MB bands, as otherwise GDI can run out of memory
     RectD rect = pageRect ? *pageRect : mediabox;
     int bandDy = (int)((1 << 20) / (rect.dy * zoom));
-    PointI pt = Transform(rect, pageNo, zoom, rotation).TL().Convert<int>();
+    PointI pt = Transform(rect, pageNo, zoom, rotation).TL().ToInt();
 
     for (int y = 0; y * bandDy < rect.dy; y++) {
         RectD pageBand(rect.x, y * bandDy, rect.dx, bandDy);
@@ -615,7 +667,7 @@ RectD DjVuEngineImpl::PageContentBox(int pageNo, RenderTarget target)
     // render the page in 8-bit grayscale up to 250x250 px in size
     ddjvu_format_t *fmt = ddjvu_format_create(DDJVU_FORMAT_GREY8, 0, NULL);
     ddjvu_format_set_row_order(fmt, /* top_to_bottom */ TRUE);
-    double zoom = min(min(250.0 / pageRc.dx, 250.0 / pageRc.dy), 1.0);
+    double zoom = std::min(std::min(250.0 / pageRc.dx, 250.0 / pageRc.dy), 1.0);
     RectI full = RectD(0, 0, pageRc.dx * zoom, pageRc.dy * zoom).Round();
     ddjvu_rect_t prect = { full.x, full.y, full.dx, full.dy }, rrect = prect;
 
@@ -667,7 +719,7 @@ PointD DjVuEngineImpl::Transform(PointD pt, int pageNo, float zoom, int rotation
         // transform the page size to get a correct frame of reference
         page.dx *= zoom; page.dy *= zoom;
         if (rotation % 180 != 0)
-            Swap(page.dx, page.dy);
+            std::swap(page.dx, page.dy);
         // invert rotation and zoom
         rotation = -rotation;
         zoom = 1.0f / zoom;
@@ -698,11 +750,26 @@ RectD DjVuEngineImpl::Transform(RectD rect, int pageNo, float zoom, int rotation
 
 unsigned char *DjVuEngineImpl::GetFileData(size_t *cbCount)
 {
+    if (stream) {
+        ScopedMem<void> data(GetDataFromStream(stream, cbCount));
+        if (data)
+            return (unsigned char *)data.StealData();
+    }
+    if (!fileName)
+        return NULL;
     return (unsigned char *)file::ReadAll(fileName, cbCount);
 }
 
-bool DjVuEngineImpl::SaveFileAs(const WCHAR *copyFileName)
+bool DjVuEngineImpl::SaveFileAs(const WCHAR *copyFileName, bool includeUserAnnots)
 {
+    if (stream) {
+        size_t len;
+        ScopedMem<void> data(GetDataFromStream(stream, &len));
+        if (data && file::WriteAll(copyFileName, data, len))
+            return true;
+    }
+    if (!fileName)
+        return false;
     return CopyFile(fileName, copyFileName, FALSE);
 }
 
@@ -804,6 +871,7 @@ WCHAR *DjVuEngineImpl::ExtractPageText(int pageNo, WCHAR *lineSep, RectI **coord
                 coords.At(i).y = page.dy - coords.At(i).y - coords.At(i).dy;
             }
         }
+        CrashIf(coords.Count() != extracted.Count());
         *coords_out = coords.StealData();
     }
 
@@ -888,7 +956,7 @@ Vec<PageElement *> *DjVuEngineImpl::GetElements(int pageNo)
         ScopedMem<char> link(ResolveNamedDest(urlUtf8));
         els->Append(new DjVuLink(pageNo, rect, link ? link : urlUtf8, commentUtf8));
     }
-    free(links);
+    ddjvu_free(links);
 
     return els;
 }
@@ -922,9 +990,10 @@ char *DjVuEngineImpl::ResolveNamedDest(const char *name)
 {
     if (!str::StartsWith(name, "#"))
         return NULL;
-    for (size_t i = 0; i < fileInfo.Count(); i++)
-        if (fileInfo.At(i).pageno >= 0 && str::EqI(name + 1, fileInfo.At(i).id))
+    for (size_t i = 0; i < fileInfo.Count(); i++) {
+        if (str::EqI(name + 1, fileInfo.At(i).id))
             return str::Format("#%d", fileInfo.At(i).pageno + 1);
+    }
     return NULL;
 }
 
@@ -940,7 +1009,7 @@ PageDestination *DjVuEngineImpl::GetNamedDest(const WCHAR *name)
     return NULL;
 }
 
-DjVuTocItem *DjVuEngineImpl::BuildTocTree(miniexp_t entry, int& idCounter, bool topLevel)
+DjVuTocItem *DjVuEngineImpl::BuildTocTree(miniexp_t entry, int& idCounter)
 {
     DjVuTocItem *node = NULL;
 
@@ -961,13 +1030,12 @@ DjVuTocItem *DjVuEngineImpl::BuildTocTree(miniexp_t entry, int& idCounter, bool 
             tocItem = new DjVuTocItem(name, linkNo);
         else {
             // ignore generic (name-less) entries
-            delete BuildTocTree(miniexp_cddr(item), idCounter, false);
+            delete BuildTocTree(miniexp_cddr(item), idCounter);
             continue;
         }
 
         tocItem->id = ++idCounter;
-        tocItem->child = BuildTocTree(miniexp_cddr(item), idCounter, false);
-        tocItem->open = topLevel;
+        tocItem->child = BuildTocTree(miniexp_cddr(item), idCounter);
 
         if (!node)
             node = tocItem;
@@ -985,18 +1053,34 @@ DocTocItem *DjVuEngineImpl::GetTocTree()
 
     ScopedCritSec scope(&gDjVuContext.lock);
     int idCounter = 0;
-    return BuildTocTree(outline, idCounter, true);
+    DjVuTocItem *root = BuildTocTree(outline, idCounter);
+    if (root)
+        root->OpenSingleNode();
+    return root;
 }
 
-bool DjVuEngine::IsSupportedFile(const WCHAR *fileName, bool sniff)
+WCHAR *DjVuEngineImpl::GetPageLabel(int pageNo) const
 {
-    if (sniff)
-        return file::StartsWith(fileName, "AT&T");
-
-    return str::EndsWithI(fileName, L".djvu");
+    for (size_t i = 0; i < fileInfo.Count(); i++) {
+        ddjvu_fileinfo_t& info = fileInfo.At(i);
+        if (pageNo - 1 == info.pageno && !str::Eq(info.title, info.id))
+            return str::conv::FromUtf8(info.title);
+    }
+    return BaseEngine::GetPageLabel(pageNo);
 }
 
-DjVuEngine *DjVuEngine::CreateFromFile(const WCHAR *fileName)
+int DjVuEngineImpl::GetPageByLabel(const WCHAR *label) const
+{
+    ScopedMem<char> labelUtf8(str::conv::ToUtf8(label));
+    for (size_t i = 0; i < fileInfo.Count(); i++) {
+        ddjvu_fileinfo_t& info = fileInfo.At(i);
+        if (str::EqI(info.title, labelUtf8) && !str::Eq(info.title, info.id))
+            return info.pageno + 1;
+    }
+    return BaseEngine::GetPageByLabel(label);
+}
+
+BaseEngine *DjVuEngineImpl::CreateFromFile(const WCHAR *fileName)
 {
     DjVuEngineImpl *engine = new DjVuEngineImpl();
     if (!engine->Load(fileName)) {
@@ -1004,4 +1088,36 @@ DjVuEngine *DjVuEngine::CreateFromFile(const WCHAR *fileName)
         return NULL;
     }
     return engine;
+}
+
+BaseEngine *DjVuEngineImpl::CreateFromStream(IStream *stream)
+{
+    DjVuEngineImpl *engine = new DjVuEngineImpl();
+    if (!engine->Load(stream)) {
+        delete engine;
+        return NULL;
+    }
+    return engine;
+}
+
+namespace DjVuEngine {
+
+bool IsSupportedFile(const WCHAR *fileName, bool sniff)
+{
+    if (sniff)
+        return file::StartsWith(fileName, "AT&T");
+
+    return str::EndsWithI(fileName, L".djvu");
+}
+
+BaseEngine *CreateFromFile(const WCHAR *fileName)
+{
+    return DjVuEngineImpl::CreateFromFile(fileName);
+}
+
+BaseEngine *CreateFromStream(IStream *stream)
+{
+    return DjVuEngineImpl::CreateFromStream(stream);
+}
+
 }

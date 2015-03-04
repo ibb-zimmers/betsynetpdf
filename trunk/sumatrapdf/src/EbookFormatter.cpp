@@ -1,41 +1,15 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
-#include "BaseUtil.h"
-#include "EbookFormatter.h"
+#include "Mui.h"
+using namespace mui;
 
+#include "EbookFormatter.h"
 #include "EbookDoc.h"
-using namespace Gdiplus;
 #include "GdiPlusUtil.h"
+#include "HtmlParserLookup.h"
 #include "HtmlPullParser.h"
 #include "MobiDoc.h"
-
-HtmlFormatterArgs *CreateFormatterArgsDoc(Doc doc, int dx, int dy, PoolAllocator *textAllocator)
-{
-    HtmlFormatterArgs *args = new HtmlFormatterArgs();
-    args->htmlStr = doc.GetHtmlData(args->htmlStrLen);
-    CrashIf(!args->htmlStr);
-    args->SetFontName(L"Georgia");
-    args->fontSize = 12.5f;
-    args->pageDx = (REAL)dx;
-    args->pageDy = (REAL)dy;
-    args->textAllocator = textAllocator;
-    return args;
-}
-
-HtmlFormatter *CreateFormatter(Doc doc, HtmlFormatterArgs* args)
-{
-    if (doc.AsEpub())
-        return new EpubFormatter(args, doc.AsEpub());
-    if (doc.AsFb2())
-        return new Fb2Formatter(args, doc.AsFb2());
-    if (doc.AsMobi())
-        return new MobiFormatter(args, doc.AsMobi());
-    if (doc.AsMobiTest())
-        return new MobiFormatter(args, NULL);
-    CrashIf(true);
-    return NULL;
-}
 
 /* Mobi-specific formatting methods */
 
@@ -108,24 +82,22 @@ void MobiFormatter::HandleSpacing_Mobi(HtmlToken *t)
 // where recindex is the record number of pdb record
 // that holds the image (within image record array, not a
 // global record)
-// TODO: handle alt attribute (?)
 void MobiFormatter::HandleTagImg(HtmlToken *t)
 {
     // we allow formatting raw html which can't require doc
     if (!doc)
         return;
-
+    bool needAlt = true;
     AttrInfo *attr = t->GetAttrByName("recindex");
-    if (!attr)
-        return;
-    int n = 0;
-    if (!str::Parse(attr->val, attr->valLen, "%d", &n))
-        return;
-    ImageData *img = doc->GetImage(n);
-    if (!img)
-        return;
-
-    EmitImage(img);
+    if (attr) {
+        int n;
+        if (str::Parse(attr->val, attr->valLen, "%d", &n)) {
+            ImageData *img = doc->GetImage(n);
+            needAlt = !img || !EmitImage(img);
+        }
+    }
+    if (needAlt && (attr = t->GetAttrByName("alt")) != NULL)
+        HandleText(attr->val, attr->valLen);
 }
 
 void MobiFormatter::HandleHtmlTag(HtmlToken *t)
@@ -159,13 +131,16 @@ void EpubFormatter::HandleTagImg(HtmlToken *t)
     CrashIf(!epubDoc);
     if (t->IsEndTag())
         return;
+    bool needAlt = true;
     AttrInfo *attr = t->GetAttrByName("src");
-    if (!attr)
-        return;
-    ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
-    ImageData *img = epubDoc->GetImageData(src, pagePath);
-    if (img)
-        EmitImage(img);
+    if (attr) {
+        ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+        url::DecodeInPlace(src);
+        ImageData *img = epubDoc->GetImageData(src, pagePath);
+        needAlt = !img || !EmitImage(img);
+    }
+    if (needAlt && (attr = t->GetAttrByName("alt")) != NULL)
+        HandleText(attr->val, attr->valLen);
 }
 
 void EpubFormatter::HandleTagPagebreak(HtmlToken *t)
@@ -199,6 +174,7 @@ void EpubFormatter::HandleTagLink(HtmlToken *t)
 
     size_t len;
     ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+    url::DecodeInPlace(src);
     ScopedMem<char> data(epubDoc->GetFileData(src, pagePath, &len));
     if (data)
         ParseStyleSheet(data, len);
@@ -209,12 +185,13 @@ void EpubFormatter::HandleTagSvgImage(HtmlToken *t)
     CrashIf(!epubDoc);
     if (t->IsEndTag())
         return;
-    if (!tagNesting.Contains(Tag_Svg))
+    if (!tagNesting.Contains(Tag_Svg) && Tag_Svg_Image != t->tag)
         return;
     AttrInfo *attr = t->GetAttrByNameNS("href", "http://www.w3.org/1999/xlink");
     if (!attr)
         return;
     ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+    url::DecodeInPlace(src);
     ImageData *img = epubDoc->GetImageData(src, pagePath);
     if (img)
         EmitImage(img);
@@ -233,7 +210,7 @@ void EpubFormatter::HandleHtmlTag(HtmlToken *t)
         hiddenDepth = tagNesting.Count() + 1;
     if (hiddenDepth > 0)
         UpdateTagNesting(t);
-    else if (Tag_Image == t->tag)
+    else if (Tag_Image == t->tag || Tag_Svg_Image == t->tag)
         HandleTagSvgImage(t);
     else
         HtmlFormatter::HandleHtmlTag(t);
@@ -270,11 +247,13 @@ void Fb2Formatter::HandleTagImg(HtmlToken *t)
     CrashIf(!fb2Doc);
     if (t->IsEndTag())
         return;
+    ImageData *img = NULL;
     AttrInfo *attr = t->GetAttrByNameNS("href", "http://www.w3.org/1999/xlink");
-    if (!attr)
-        return;
-    ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
-    ImageData *img = fb2Doc->GetImageData(src);
+    if (attr) {
+        ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+        url::DecodeInPlace(src);
+        img = fb2Doc->GetImageData(src);
+    }
     if (img)
         EmitImage(img);
 }
@@ -311,7 +290,7 @@ void Fb2Formatter::HandleHtmlTag(HtmlToken *t)
         HandleAnchorAttr(t);
     }
     else if (Tag_P == t->tag) {
-        if (!htmlParser->tagNesting.Contains(Tag_Title))
+        if (!tagNesting.Contains(Tag_Title))
             HtmlFormatter::HandleHtmlTag(t);
     }
     else if (Tag_Image == t->tag) {
@@ -345,13 +324,16 @@ void HtmlFileFormatter::HandleTagImg(HtmlToken *t)
     CrashIf(!htmlDoc);
     if (t->IsEndTag())
         return;
+    bool needAlt = true;
     AttrInfo *attr = t->GetAttrByName("src");
-    if (!attr)
-        return;
-    ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
-    ImageData *img = htmlDoc->GetImageData(src);
-    if (img)
-        EmitImage(img);
+    if (attr) {
+        ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+        url::DecodeInPlace(src);
+        ImageData *img = htmlDoc->GetImageData(src);
+        needAlt = !img || !EmitImage(img);
+    }
+    if (needAlt && (attr = t->GetAttrByName("alt")) != NULL)
+        HandleText(attr->val, attr->valLen);
 }
 
 void HtmlFileFormatter::HandleTagLink(HtmlToken *t)
@@ -371,6 +353,7 @@ void HtmlFileFormatter::HandleTagLink(HtmlToken *t)
 
     size_t len;
     ScopedMem<char> src(str::DupN(attr->val, attr->valLen));
+    url::DecodeInPlace(src);
     ScopedMem<char> data(htmlDoc->GetFileData(src, &len));
     if (data)
         ParseStyleSheet(data, len);

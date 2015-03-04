@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 // note: include BaseUtil.h instead of including directly
@@ -12,7 +12,7 @@ Vec<char> and Vec<WCHAR> a C-compatible string. Although it's
 not useful for other types, the code is simpler if we always do it
 (rather than have it an optional behavior).
 */
-template <typename T, size_t BUF_SIZE=16>
+template <typename T>
 class Vec {
 protected:
     static const size_t PADDING = 1;
@@ -21,15 +21,15 @@ protected:
     size_t      cap;
     size_t      capacityHint;
     T *         els;
-    T           buf[BUF_SIZE];
+    T           buf[16];
     Allocator * allocator;
 
     // state of the IterStart()/IterNext() iterator
     T *         iterCurr;
 
-    void EnsureCap(size_t needed) {
+    bool EnsureCapTry(size_t needed) {
         if (cap >= needed)
-            return;
+            return true;
 
         size_t newCap = cap * 2;
         if (needed > newCap)
@@ -38,23 +38,37 @@ protected:
             newCap = capacityHint;
 
         size_t newElCount = newCap + PADDING;
-        CrashAlwaysIf(newElCount >= SIZE_MAX / sizeof(T));
-        CrashAlwaysIf(newElCount > INT_MAX); // limitation of Vec::Find
+        if (newElCount >= SIZE_MAX / sizeof(T))
+            return false;
+        if (newElCount > INT_MAX) // limitation of Vec::Find
+            return false;
 
         size_t allocSize = newElCount * sizeof(T);
         size_t newPadding = allocSize - len * sizeof(T);
+        T *newEls;
         if (buf == els)
-            els = (T *)Allocator::Dup(allocator, buf, len * sizeof(T), newPadding);
+            newEls = (T *)Allocator::Dup(allocator, buf, len * sizeof(T), newPadding);
         else
-            els = (T *)Allocator::Realloc(allocator, els, allocSize);
-        CrashAlwaysIf(!els);
+            newEls = (T *)Allocator::Realloc(allocator, els, allocSize);
+        if (!newEls)
+            return false;
+        els = newEls;
         memset(els + len, 0, newPadding);
         cap = newCap;
+        return true;
     }
 
-    T* MakeSpaceAt(size_t idx, size_t count) {
-        size_t newLen = max(len, idx) + count;
-        EnsureCap(newLen);
+    void EnsureCapCrash(size_t needed) {
+        bool ok = EnsureCapTry(needed);
+        CrashAlwaysIf(!ok);
+    }
+
+    T* MakeSpaceAt(size_t idx, size_t count, bool allowFailure=false) {
+        size_t newLen = std::max(len, idx) + count;
+        if (!allowFailure)
+            EnsureCapCrash(newLen);
+        else if (!EnsureCapTry(newLen))
+            return NULL;
         T* res = &(els[idx]);
         if (len > idx) {
             T* src = els + idx;
@@ -72,7 +86,7 @@ protected:
 
 public:
     // allocator is not owned by Vec and must outlive it
-    Vec(size_t capHint=0, Allocator *allocator=NULL) :
+    explicit Vec(size_t capHint=0, Allocator *allocator=NULL) :
         capacityHint(capHint), allocator(allocator), iterCurr(NULL)
     {
         els = buf;
@@ -88,14 +102,14 @@ public:
     Vec(const Vec& orig) : capacityHint(0), allocator(NULL), iterCurr(NULL) {
         els = buf;
         Reset();
-        EnsureCap(orig.cap);
+        EnsureCapCrash(orig.cap);
         // use memcpy, as Vec only supports POD types
         memcpy(els, orig.els, sizeof(T) * (len = orig.len));
     }
 
     Vec& operator=(const Vec& that) {
         if (this != &that) {
-            EnsureCap(that.cap);
+            EnsureCapCrash(that.cap);
             // use memcpy, as Vec only supports POD types
             memcpy(els, that.els, sizeof(T) * (len = that.len));
             memset(els + len, 0, sizeof(T) * (cap - len));
@@ -110,7 +124,7 @@ public:
 
     void Reset() {
         len = 0;
-        cap = BUF_SIZE - PADDING;
+        cap = dimof(buf) - PADDING;
         FreeEls();
         els = buf;
         memset(buf, 0, sizeof(buf));
@@ -149,6 +163,16 @@ public:
             return;
         T* dst = MakeSpaceAt(len, count);
         memcpy(dst, src, count * sizeof(T));
+    }
+
+    // returns false on allocation failure instead of crashing
+    bool AppendChecked(const T* src, size_t count) {
+        if (0 == count)
+            return true;
+        T* dst = MakeSpaceAt(len, count, true);
+        if (dst)
+            memcpy(dst, src, count * sizeof(T));
+        return dst != NULL;
     }
 
     // appends count blank (i.e. zeroed-out) elements at the end
@@ -190,6 +214,13 @@ public:
         CrashIf(0 == len);
         T el = At(len - 1);
         RemoveAtFast(len - 1);
+        return el;
+    }
+
+    T PopAt(size_t idx) {
+        CrashIf(idx >= len);
+        T el = At(idx);
+        RemoveAt(idx);
         return el;
     }
 
@@ -242,7 +273,7 @@ public:
 
     void Reverse() {
         for (size_t i = 0; i < len / 2; i++) {
-            Swap(els[i], els[len - i - 1]);
+            std::swap(els[i], els[len - i - 1]);
         }
     }
 
@@ -295,18 +326,18 @@ namespace str {
 template <typename T>
 class Str : public Vec<T> {
 public:
-    Str(size_t capHint=0, Allocator *allocator=NULL) : Vec(capHint, allocator) { }
+    explicit Str(size_t capHint=0, Allocator *allocator=NULL) : Vec<T>(capHint, allocator) { }
 
     void Append(T c)
     {
-        InsertAt(len, c);
+        Vec<T>::InsertAt(Vec<T>::len, c);
     }
 
     void Append(const T* src, size_t size=-1)
     {
         if ((size_t)-1 == size)
             size = Len(src);
-        Vec::Append(src, size);
+        Vec<T>::Append(src, size);
     }
 
     void AppendFmt(const T* fmt, ...)
@@ -329,23 +360,23 @@ public:
     bool Replace(const T *toReplace, const T *replaceWith)
     {
         // fast path: nothing to replace
-        if (!str::Find(els, toReplace))
+        if (!str::Find(Vec<T>::els, toReplace))
             return false;
-        char *newStr = str::Replace(els, toReplace, replaceWith);
-        Reset();
+        char *newStr = str::Replace(Vec<T>::els, toReplace, replaceWith);
+        Vec<T>::Reset();
         AppendAndFree(newStr);
         return true;
     }
 
     void Set(const T* s)
     {
-        Reset();
+        Vec<T>::Reset();
         Append(s);
     }
 
     T *Get() const
     {
-        return els;
+        return Vec<T>::els;
     }
 };
 
@@ -377,6 +408,11 @@ public:
             }
         }
         return *this;
+    }
+
+    void Reset() {
+        // FreeVecMembers calls Vec::Reset()
+        FreeVecMembers(*this);
     }
 
     WCHAR *Join(const WCHAR *joint=NULL) {
@@ -452,7 +488,7 @@ class WStrList {
         WCHAR *string;
         uint32_t hash;
 
-        Item(WCHAR *string=NULL, uint32_t hash=0) : string(string), hash(hash) { }
+        explicit Item(WCHAR *string=NULL, uint32_t hash=0) : string(string), hash(hash) { }
     };
 
     Vec<Item> items;
@@ -467,14 +503,14 @@ class WStrList {
         size_t len = str::Len(str);
         ScopedMem<char> data(AllocArray<char>(len));
         WCHAR c;
-        for (char *dst = data; (c = *str++) != NULL; dst++) {
+        for (char *dst = data; (c = *str++) != 0; dst++) {
             *dst = (c & 0xFF80) ? 0x80 : 'A' <= c && c <= 'Z' ? (char)(c + 'a' - 'A') : (char)c;
         }
         return MurmurHash2(data, len);
     }
 
 public:
-    WStrList(size_t capHint=0, Allocator *allocator=NULL) :
+    explicit WStrList(size_t capHint=0, Allocator *allocator=NULL) :
         items(capHint, allocator), count(0), allocator(allocator) { }
 
     ~WStrList() {
@@ -485,6 +521,10 @@ public:
 
     const WCHAR *At(size_t idx) const {
         return items.At(idx).string;
+    }
+
+    const WCHAR *Last() const {
+        return items.Last().string;
     }
 
     size_t Count() const {

@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -14,12 +14,6 @@ Not really meant for general use.
 name/val pointers inside Element/Attr structs refer to
 memory inside HtmlParser::s, so they don't need to be freed.
 */
-
-struct HtmlAttr {
-    char *name;
-    char *val;
-    HtmlAttr *next;
-};
 
 bool HtmlElement::NameIs(const char *name) const
 {
@@ -332,7 +326,3 @@ FindNext:
     }
     return NULL;
 }
-
-#ifdef DEBUG
-#include "TrivialHtmlParser_ut.cpp"
-#endif

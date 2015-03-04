@@ -1,11 +1,11 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "Notifications.h"
 
 #include "SumatraPDF.h"
-#include "WindowInfo.h"
+#include "WinCursors.h"
 #include "WinUtil.h"
 
 #define NOTIFICATION_WND_CLASS_NAME L"SUMATRA_PDF_NOTIFICATION_WINDOW"
@@ -23,7 +23,7 @@ void NotificationWnd::CreatePopup(HWND parent, const WCHAR *message)
 
     self = CreateWindowEx(WS_EX_TOPMOST, NOTIFICATION_WND_CLASS_NAME, message, WS_CHILD | SS_CENTER,
                           TL_MARGIN, TL_MARGIN, 0, 0,
-                          parent, (HMENU)0, ghinst, NULL);
+                          parent, (HMENU)0, GetModuleHandle(NULL), NULL);
     SetWindowLongPtr(self, GWLP_USERDATA, (LONG_PTR)this);
     ToggleWindowStyle(self, WS_EX_LAYOUTRTL | WS_EX_NOINHERITLAYOUT, IsUIRightToLeft(), GWL_EXSTYLE);
     UpdateWindowPosition(message, true);
@@ -42,7 +42,7 @@ void NotificationWnd::UpdateWindowPosition(const WCHAR *message, bool init)
 
     RectI rectMsg = RectI::FromRECT(rc);
     if (hasCancel) {
-        rectMsg.dy = max(rectMsg.dy, 16);
+        rectMsg.dy = std::max(rectMsg.dy, 16);
         rectMsg.dx += 20;
     }
     rectMsg.Inflate(PADDING, PADDING);
@@ -52,7 +52,7 @@ void NotificationWnd::UpdateWindowPosition(const WCHAR *message, bool init)
         SetWindowPos(self, NULL, 0, 0, rectMsg.dx, rectMsg.dy, SWP_NOMOVE | SWP_NOZORDER);
     } else if (init) {
         RectI rect = WindowRect(self);
-        rect.dx = max(progressWidth + 2 * PADDING, rectMsg.dx);
+        rect.dx = std::max(progressWidth + 2 * PADDING, rectMsg.dx);
         rect.dy = rectMsg.dy + PROGRESS_HEIGHT + PADDING / 2;
         SetWindowPos(self, NULL, 0, 0, rect.dx, rect.dy, SWP_NOMOVE | SWP_NOZORDER);
     } else if (rectMsg.dx > progressWidth + 2 * PADDING) {
@@ -172,10 +172,10 @@ LRESULT CALLBACK NotificationWnd::WndProc(HWND hwnd, UINT message, WPARAM wParam
         return 0;
     }
     if (WM_SETCURSOR == message && wnd->hasCancel) {
-        POINT pt;
+        PointI pt;
         if (GetCursorPosInHwnd(hwnd, pt) &&
-            GetCancelRect(hwnd).Contains(PointI(pt.x, pt.y))) {
-            SetCursor(LoadCursor(NULL, IDC_HAND));
+            GetCancelRect(hwnd).Contains(pt)) {
+            SetCursor(IDC_HAND);
             return TRUE;
         }
     }
@@ -226,10 +226,8 @@ void Notifications::Remove(NotificationWnd *wnd)
 
 void Notifications::Add(NotificationWnd *wnd, int groupId)
 {
-    // use groupId to classify notifications and make a notification
-    // replace any other notification of the same class
     if (groupId != 0)
-        RemoveAllInGroup(groupId);
+        RemoveForGroup(groupId);
     wnd->groupId = groupId;
 
     if (wnds.Count() > 0)
@@ -237,8 +235,9 @@ void Notifications::Add(NotificationWnd *wnd, int groupId)
     wnds.Append(wnd);
 }
 
-NotificationWnd *Notifications::GetFirstInGroup(int groupId)
+NotificationWnd *Notifications::GetForGroup(int groupId)
 {
+    CrashIf(!groupId);
     for (size_t i = 0; i < wnds.Count(); i++) {
         if (wnds.At(i)->groupId == groupId)
             return wnds.At(i);
@@ -246,19 +245,20 @@ NotificationWnd *Notifications::GetFirstInGroup(int groupId)
     return NULL;
 }
 
+void Notifications::RemoveForGroup(int groupId)
+{
+    CrashIf(!groupId);
+    for (size_t i = wnds.Count(); i > 0; i--) {
+        if (wnds.At(i - 1)->groupId == groupId)
+            RemoveNotification(wnds.At(i - 1));
+    }
+}
+
 void Notifications::RemoveNotification(NotificationWnd *wnd)
 {
     if (Contains(wnd)) {
         Remove(wnd);
         delete wnd;
-    }
-}
-
-void Notifications::RemoveAllInGroup(int groupId)
-{
-    for (size_t i = wnds.Count(); i > 0; i--) {
-        if (wnds.At(i - 1)->groupId == groupId)
-            RemoveNotification(wnds.At(i - 1));
     }
 }
 
@@ -280,16 +280,10 @@ void Notifications::Relayout()
     }
 }
 
-void ShowNotification(WindowInfo *win, const WCHAR *message, bool autoDismiss, bool highlight, NotificationGroup groupId)
+void RegisterNotificationsWndClass()
 {
-    NotificationWnd *wnd = new NotificationWnd(win->hwndCanvas, message, autoDismiss ? 3000 : 0, highlight, win->notifications);
-    win->notifications->Add(wnd, groupId);
-}
-
-void RegisterNotificationsWndClass(HINSTANCE inst)
-{
-    WNDCLASSEX  wcex;
-    FillWndClassEx(wcex, inst, NOTIFICATION_WND_CLASS_NAME, NotificationWnd::WndProc);
+    WNDCLASSEX wcex;
+    FillWndClassEx(wcex, NOTIFICATION_WND_CLASS_NAME, NotificationWnd::WndProc);
     wcex.hCursor = LoadCursor(NULL, IDC_APPSTARTING);
     RegisterClassEx(&wcex);
 }

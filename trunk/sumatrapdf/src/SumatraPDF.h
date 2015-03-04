@@ -1,19 +1,21 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef SumatraPDF_h
 #define SumatraPDF_h
 
-#include "FileHistory.h"
-#include "Favorites.h"
-#include "SumatraWindow.h"
-#include "Translations.h"
-#include "DisplayModel.h"
-#include "ParseCommandLine.h"
+#include "DisplayState.h"
+
+///////////////////////////////////////////////////////////////////////////////
+// BetsyNetPDF
+///////////////////////////////////////////////////////////////////////////////
 #include <string>
 #include <vector>
 using namespace Gdiplus;
 #include "GdiPlusUtil.h"
+///////////////////////////////////////////////////////////////////////////////
+// END BetsyNetPDF
+///////////////////////////////////////////////////////////////////////////////
 
 #define FRAME_CLASS_NAME        L"SUMATRA_PDF_FRAME"
 #define SUMATRA_WINDOW_TITLE    L"SumatraPDF"
@@ -72,77 +74,61 @@ enum MenuToolbarFlags {
 // for backward compatibility use a value that older versions will render as yellow
 #define ABOUT_BG_COLOR_DEFAULT  (RGB(0xff, 0xf2, 0) - 0x80000000)
 
-class WindowInfo;
-class EbookWindow;
 class Favorites;
+class FileHistory;
+class WindowInfo;
+struct LabelWithCloseWnd;
+struct TabData;
 
 // all defined in SumatraPDF.cpp
-extern HINSTANCE                ghinst;
 extern bool                     gDebugShowLinks;
+extern bool                     gShowFrameRate;
 extern bool                     gUseGdiRenderer;
-extern HCURSOR                  gCursorHand;
-extern HCURSOR                  gCursorArrow;
-extern HCURSOR                  gCursorIBeam;
-extern HFONT                    gDefaultGuiFont;
 extern WCHAR *                  gPluginURL;
 extern Vec<WindowInfo*>         gWindows;
-extern Vec<EbookWindow*>        gEbookWindows;
 extern Favorites                gFavorites;
 extern FileHistory              gFileHistory;
 extern WNDPROC                  DefWndProcCloseButton;
 
 #define gPluginMode             (gPluginURL != NULL)
 
-LRESULT CALLBACK WndProcCloseButton(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 bool  HasPermission(int permission);
 bool  IsUIRightToLeft();
 bool  LaunchBrowser(const WCHAR *url);
 bool  OpenFileExternally(const WCHAR *path);
 void  AssociateExeWithPdfExtension();
+void  CloseTab(WindowInfo *win, bool quitIfLast=false);
 void  CloseWindow(WindowInfo *win, bool quitIfLast, bool forceClose=false);
 void  SetSidebarVisibility(WindowInfo *win, bool tocVisible, bool favVisible);
 void  RememberFavTreeExpansionState(WindowInfo *win);
-void  LayoutTreeContainer(HWND hwndContainer, int id);
+void  LayoutTreeContainer(LabelWithCloseWnd *l, HWND hwndTree);
 void  AdvanceFocus(WindowInfo* win);
 bool  WindowInfoStillValid(WindowInfo *win);
 void  SetCurrentLanguageAndRefreshUi(const char *langCode);
 void  ShowOrHideToolbarGlobally();
+void  ShowOrHideToolbarForWindow(WindowInfo *win);
 void  UpdateDocumentColors();
-void  UpdateCurrentFileDisplayStateForWin(const SumatraWindow& win);
+void  UpdateCurrentFileDisplayStateForWin(WindowInfo *win);
+void  UpdateTabFileDisplayStateForWin(WindowInfo *win, TabData *td);
 bool  FrameOnKeydown(WindowInfo* win, WPARAM key, LPARAM lparam, bool inTextfield=false);
 void  SwitchToDisplayMode(WindowInfo *win, DisplayMode displayMode, bool keepContinuous=false);
 void  ReloadDocument(WindowInfo *win, bool autorefresh=false);
 bool  CanSendAsEmailAttachment(WindowInfo *win=NULL);
-bool  DoCachePageRendering(WindowInfo *win, int pageNo);
-void  OnMenuOptions(HWND hwnd);
-void  OnMenuAdvancedOptions();
-void  OnMenuExit();
-void  AutoUpdateCheckAsync(HWND hwnd, bool autoCheck);
-void  OnMenuChangeLanguage(HWND hwnd);
-void  OnDropFiles(HDROP hDrop, bool dragFinish=true);
-void  OnMenuOpen(const SumatraWindow& win);
-size_t TotalWindowsCount();
-void  CloseDocumentInWindow(WindowInfo *win);
-void  CloseDocumentAndDeleteWindowInfo(WindowInfo *win);
-void  OnMenuAbout();
-void  QuitIfNoMoreWindows();
-bool  ShouldSaveThumbnail(DisplayState& ds);
-void  SaveThumbnailForFile(const WCHAR *filePath, RenderedBitmap *bmp);
 
 COLORREF GetLogoBgColor();
 COLORREF GetAboutBgColor();
 COLORREF GetNoDocBgColor();
 
-WindowInfo* FindWindowInfoByFile(const WCHAR *file);
 WindowInfo* FindWindowInfoByHwnd(HWND hwnd);
-WindowInfo* FindWindowInfoBySyncFile(const WCHAR *file);
+// note: background tabs are only searched if focusTab is true
+WindowInfo* FindWindowInfoByFile(const WCHAR *file, bool focusTab);
+WindowInfo* FindWindowInfoBySyncFile(const WCHAR *file, bool focusTab);
 
-// TODO: this is hopefully temporary
 // LoadDocument carries a lot of state, this holds them in
 // one place
 struct LoadArgs
 {
-    LoadArgs(const WCHAR *fileName, WindowInfo *win=NULL) :
+    explicit LoadArgs(const WCHAR *fileName, WindowInfo *win=NULL) :
         fileName(fileName), win(win), showWin(true), forceReuse(false),
         isNewWindow(false), allowFailure(true), placeWindow(true) { }
 
@@ -157,8 +143,10 @@ struct LoadArgs
 };
 
 WindowInfo* LoadDocument(LoadArgs& args);
-void        LoadDocument2(const WCHAR *fileName, const SumatraWindow& win);
 WindowInfo *CreateAndShowWindowInfo();
+
+UINT MbRtlReadingMaybe();
+void MessageBoxWarning(HWND hwnd, const WCHAR *msg, const WCHAR *title = NULL);
 
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF
@@ -276,7 +264,7 @@ typedef void (__stdcall *OnSelectionChangedDelegate)();
 typedef void (__stdcall *OnDeleteDelegate)();
 typedef void (__stdcall *OnMouseOverObject)(char* id);
 // x,y coords on page
-typedef void (__stdcall *OnMouseClickDelegate)(double x, double y);
+typedef void (__stdcall *OnMouseClickDelegate)(double x, double y, char* key);
 typedef void (__stdcall *OnObjectMovedDelegate)(double deltaX, double deltaY, bool moveLabel);
 typedef void (__stdcall *OnDistanceMeasuredDelegate)(double distance);
 typedef void (__stdcall *OnLineDrawnDelegate)(double p1x, double p1y, double p2x, double p2y);
@@ -291,6 +279,11 @@ public:
 	bool hitLabelForDragging, selectionChanging, mouseOverEnabled, measureMode, lineMode, useExternContextMenu, preventOverlayObjectSelection, showOverlapping, hideLabels, transparantOverlayObjects;
 	std::string hwnd;
 	std::string file;
+	double fixAngle;
+	OnMouseClickDelegate notifyMouseClick;
+	PointD* lineStart;
+	PointD* lineEnd;
+	Point* curLineEnd;
 	//Region objectsRegion, labelsRegion;
 
 	BetsyNetPDFUnmanagedApi();
@@ -331,18 +324,14 @@ public:
 
 	void CheckOnRequestContextMenu(WindowInfo* win, int x, int y);
 
-	static void GetFakedCmd(CommandLineInfo& i, std::string file, std::string hwnd, bool directPrinting, bool defaultPrinter, std::string printerName);
+	static std::string GetFakedCmd(std::string file, std::string hwnd, bool directPrinting, bool defaultPrinter, std::string printerName);
 
 private:
 	PointD dragStart;
 	PointD lastDragLoc;
-	PointD* lineStart;
-	PointD* lineEnd;
-	Point* curLineEnd;
 	bool moveLabel;
 	OnSelectionChangedDelegate notifySelectionChanged;
 	OnDeleteDelegate notifyDelete;
-	OnMouseClickDelegate notifyMouseClick;
 	OnObjectMovedDelegate notifyObjectMoved;
 	OnMouseOverObject notifyMouseOverObject;
 	OnDistanceMeasuredDelegate notifyDistanceMeasured;
@@ -378,11 +367,15 @@ extern "C" {
 	extern UNMANAGED_API void __stdcall CallSetMouseOverEnabled(WindowInfo* win, bool enabled);
 	extern UNMANAGED_API void __stdcall CallSetMeasureModeEnabled(WindowInfo* win, bool enabled);
 	extern UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, bool enabled);
+	extern UNMANAGED_API void __stdcall CallSetFixedAngle(WindowInfo* win, double angle);
 	extern UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetPreventOverlayObjectSelection(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetShowOverlapping(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetHideLabels(WindowInfo* win, bool value);
 	extern UNMANAGED_API void __stdcall CallSetTransparantOverlayObjects(WindowInfo* win, bool value);
+	extern UNMANAGED_API void __stdcall CallSetLineStart(WindowInfo* win, double x, double y);
+	extern UNMANAGED_API PointF* __stdcall CallGetLineStart(WindowInfo* win);
+	extern UNMANAGED_API bool __stdcall CallIsLineStart(WindowInfo* win);
 	extern UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords);
 	extern UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords);
 

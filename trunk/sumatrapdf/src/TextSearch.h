@@ -1,10 +1,9 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef TextSearch_h
 #define TextSearch_h
 
-#include <windows.h>
 #include "TextSelection.h"
 
 enum TextSearchDirection {
@@ -17,6 +16,7 @@ class ProgressUpdateUI
 public:
     virtual void UpdateProgress(int current, int total) = 0;
     virtual bool WasCanceled() = 0;
+    virtual ~ProgressUpdateUI() { }
 };
 
 class TextSearch : public TextSelection

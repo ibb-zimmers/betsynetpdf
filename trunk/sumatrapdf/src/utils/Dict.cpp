@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 /* This is a dictionary with intentionally unorthodox design.
@@ -36,6 +36,7 @@ class HasherComparator {
 public:
     virtual size_t Hash(uintptr_t key) = 0;
     virtual bool Equal(uintptr_t k1, uintptr_t k2) = 0;
+    virtual ~HasherComparator() { }
 };
 
 class StrKeyHasherComparator : public HasherComparator {

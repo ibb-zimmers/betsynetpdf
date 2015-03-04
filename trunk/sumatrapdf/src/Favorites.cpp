@@ -1,18 +1,20 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "Favorites.h"
 
 #include "AppPrefs.h"
-using namespace Gdiplus;
+#include "Controller.h"
 #include "GdiPlusUtil.h"
 #include "FileHistory.h"
 #include "FileUtil.h"
+#include "LabelWithCloseWnd.h"
 #include "Menu.h"
 #include "resource.h"
 #include "SumatraDialogs.h"
 #include "SumatraPDF.h"
+#include "Tabs.h"
 #include "Translations.h"
 #include "UITask.h"
 #include "WindowInfo.h"
@@ -302,8 +304,8 @@ void RebuildFavMenu(WindowInfo *win, HMENU menu)
         win::menu::SetEnabled(menu, IDM_FAV_DEL, false);
         AppendFavMenus(menu, NULL);
     } else {
-        ScopedMem<WCHAR> label(win->dm->engine->GetPageLabel(win->currPageNo));
-        bool isBookmarked = gFavorites.IsPageInFavorites(win->dm->FilePath(), win->currPageNo);
+        ScopedMem<WCHAR> label(win->ctrl->GetPageLabel(win->currPageNo));
+        bool isBookmarked = gFavorites.IsPageInFavorites(win->ctrl->FilePath(), win->currPageNo);
         if (isBookmarked) {
             win::menu::SetEnabled(menu, IDM_FAV_ADD, false);
             ScopedMem<WCHAR> s(str::Format(_TR("Remove page %s from favorites"), label));
@@ -313,7 +315,7 @@ void RebuildFavMenu(WindowInfo *win, HMENU menu)
             ScopedMem<WCHAR> s(str::Format(_TR("Add page %s to favorites"), label));
             win::menu::SetText(menu, IDM_FAV_ADD, s);
         }
-        AppendFavMenus(menu, win->dm->FilePath());
+        AppendFavMenus(menu, win->ctrl->FilePath());
     }
     win::menu::SetEnabled(menu, IDM_FAV_TOGGLE, HasFavorites());
 }
@@ -333,21 +335,18 @@ class GoToFavoriteTask : public UITask
     int pageNo;
     WindowInfo *win;
 public:
-    GoToFavoriteTask(WindowInfo *win, int pageNo = -1) :
+    explicit GoToFavoriteTask(WindowInfo *win, int pageNo = -1) :
         win(win), pageNo(pageNo) {}
 
     virtual void Execute() {
         if (!WindowInfoStillValid(win))
             return;
-        SetForegroundWindow(win->hwndFrame);
-        if (win->IsDocLoaded()) {
-            if (-1 != pageNo)
-                win->dm->GoToPage(pageNo, 0, true);
-            // we might have been invoked by clicking on a tree view
-            // switch focus so that keyboard navigation works, which enables
-            // a fluid experience
-            SetFocus(win->hwndFrame);
-        }
+        if (win->IsDocLoaded() && win->ctrl->ValidPageNo(pageNo))
+            win->ctrl->GoToPage(pageNo, true);
+        // we might have been invoked by clicking on a tree view
+        // switch focus so that keyboard navigation works, which enables
+        // a fluid experience
+        win->Focus();
     }
 };
 
@@ -359,7 +358,7 @@ static void GoToFavorite(WindowInfo *win, DisplayState *f, Favorite *fn)
     assert(f && fn);
     if (!f || !fn) return;
 
-    WindowInfo *existingWin = FindWindowInfoByFile(f->filePath);
+    WindowInfo *existingWin = FindWindowInfoByFile(f->filePath, true);
     if (existingWin) {
         uitask::Post(new GoToFavoriteTask(existingWin, fn->pageNo));
         return;
@@ -534,15 +533,15 @@ void AddFavorite(WindowInfo *win)
 {
     int pageNo = win->currPageNo;
     ScopedMem<WCHAR> name;
-    if (win->dm->HasTocTree()) {
+    if (win->ctrl->HasTocTree()) {
         // use the current ToC heading as default name
-        DocTocItem *root = win->dm->engine->GetTocTree();
+        DocTocItem *root = win->ctrl->GetTocTree();
         DocTocItem *item = TocItemForPageNo(root, pageNo);
         if (item)
             name.Set(str::Dup(item->title));
         delete root;
     }
-    ScopedMem<WCHAR> pageLabel(win->dm->engine->GetPageLabel(pageNo));
+    ScopedMem<WCHAR> pageLabel(win->ctrl->GetPageLabel(pageNo));
 
     bool shouldAdd = Dialog_AddFavorite(win->hwndFrame, pageLabel, name);
     if (!shouldAdd)
@@ -611,7 +610,10 @@ static LRESULT OnFavTreeNotify(WindowInfo *win, LPNMTREEVIEW pnmtv)
         case TVN_KEYDOWN: {
             TV_KEYDOWN *ptvkd = (TV_KEYDOWN *)pnmtv;
             if (VK_TAB == ptvkd->wVKey) {
-                AdvanceFocus(win);
+                if (win->tabsVisible && IsCtrlPressed())
+                    TabsOnCtrlTab(win, IsShiftPressed());
+                else
+                    AdvanceFocus(win);
                 return 1;
             }
             break;
@@ -743,19 +745,11 @@ static LRESULT CALLBACK WndProcFavBox(HWND hwnd, UINT message, WPARAM wParam, LP
     switch (message) {
 
         case WM_SIZE:
-            LayoutTreeContainer(hwnd, IDC_FAV_BOX);
-            break;
-
-        case WM_DRAWITEM:
-            if (IDC_FAV_CLOSE == wParam) {
-                DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
-                DrawCloseButton(dis);
-                return TRUE;
-            }
+            LayoutTreeContainer(win->favLabelWithClose, win->hwndFavTree);
             break;
 
         case WM_COMMAND:
-            if (LOWORD(wParam) == IDC_FAV_CLOSE && HIWORD(wParam) == STN_CLICKED)
+            if (LOWORD(wParam) == IDC_FAV_LABEL_WITH_CLOSE)
                 ToggleFavorites(win);
             break;
 
@@ -783,26 +777,19 @@ void CreateFavorites(WindowInfo *win)
 {
     win->hwndFavBox = CreateWindow(WC_STATIC, L"", WS_CHILD|WS_CLIPCHILDREN,
                                    0, 0, gGlobalPrefs->sidebarDx, 0,
-                                   win->hwndFrame, (HMENU)0, ghinst, NULL);
-    HWND title = CreateWindow(WC_STATIC, L"", WS_VISIBLE | WS_CHILD,
-                              0, 0, 0, 0, win->hwndFavBox, (HMENU)IDC_FAV_TITLE, ghinst, NULL);
-    SetWindowFont(title, gDefaultGuiFont, FALSE);
-    win::SetText(title, _TR("Favorites"));
-
-    HWND hwndClose = CreateWindow(WC_STATIC, L"",
-                                  SS_OWNERDRAW | SS_NOTIFY | WS_CHILD | WS_VISIBLE,
-                                  0, 0, 16, 16, win->hwndFavBox, (HMENU)IDC_FAV_CLOSE, ghinst, NULL);
+                                   win->hwndFrame, (HMENU)0, GetModuleHandle(NULL), NULL);
+    LabelWithCloseWnd *l =  CreateLabelWithCloseWnd(win->hwndFavBox, IDC_FAV_LABEL_WITH_CLOSE);
+    win->favLabelWithClose = l;
+    int padXY = (int)(2 * win->uiDPIFactor);
+    SetPaddingXY(l, padXY, padXY);
+    SetFont(l, GetDefaultGuiFont());
+    // label is set in UpdateSidebarTitles()
 
     win->hwndFavTree = CreateWindowEx(WS_EX_STATICEDGE, WC_TREEVIEW, L"Fav",
                                       TVS_HASBUTTONS|TVS_HASLINES|TVS_LINESATROOT|TVS_SHOWSELALWAYS|
                                       TVS_TRACKSELECT|TVS_DISABLEDRAGDROP|TVS_NOHSCROLL|TVS_INFOTIP|
                                       WS_TABSTOP|WS_VISIBLE|WS_CHILD,
-                                      0, 0, 0, 0, win->hwndFavBox, (HMENU)IDC_FAV_TREE, ghinst, NULL);
-
-    // Note: those must be consecutive numbers and in title/close/tree order
-    STATIC_ASSERT(IDC_FAV_BOX + 1 == IDC_FAV_TITLE &&
-            IDC_FAV_BOX + 2 == IDC_FAV_CLOSE &&
-            IDC_FAV_BOX + 3 == IDC_FAV_TREE, consecutive_fav_ids);
+                                      0, 0, 0, 0, win->hwndFavBox, (HMENU)IDC_FAV_TREE, GetModuleHandle(NULL), NULL);
 
     TreeView_SetUnicodeFormat(win->hwndFavTree, true);
 
@@ -813,8 +800,4 @@ void CreateFavorites(WindowInfo *win)
     if (NULL == DefWndProcFavBox)
         DefWndProcFavBox = (WNDPROC)GetWindowLongPtr(win->hwndFavBox, GWLP_WNDPROC);
     SetWindowLongPtr(win->hwndFavBox, GWLP_WNDPROC, (LONG_PTR)WndProcFavBox);
-
-    if (NULL == DefWndProcCloseButton)
-        DefWndProcCloseButton = (WNDPROC)GetWindowLongPtr(hwndClose, GWLP_WNDPROC);
-    SetWindowLongPtr(hwndClose, GWLP_WNDPROC, (LONG_PTR)WndProcCloseButton);
 }

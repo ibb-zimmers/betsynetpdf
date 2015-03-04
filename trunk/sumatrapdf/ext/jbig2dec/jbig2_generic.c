@@ -71,6 +71,9 @@ jbig2_decode_generic_template0(Jbig2Ctx *ctx,
   printf("P4\n%d %d\n", GBW, GBH);
 #endif
 
+  if (GBW <= 0)
+    return 0;
+
   for (y = 0; y < GBH; y++)
     {
       uint32_t CONTEXT;
@@ -189,6 +192,9 @@ jbig2_decode_generic_template1(Jbig2Ctx *ctx,
   printf("P4\n%d %d\n", GBW, GBH);
 #endif
 
+  if (GBW <= 0)
+    return 0;
+
   for (y = 0; y < GBH; y++)
     {
       uint32_t CONTEXT;
@@ -258,6 +264,9 @@ jbig2_decode_generic_template2(Jbig2Ctx *ctx,
 #ifdef OUTPUT_PBM
   printf("P4\n%d %d\n", GBW, GBH);
 #endif
+
+  if (GBW <= 0)
+    return 0;
 
   for (y = 0; y < GBH; y++)
     {
@@ -329,6 +338,9 @@ jbig2_decode_generic_template2a(Jbig2Ctx *ctx,
   printf("P4\n%d %d\n", GBW, GBH);
 #endif
 
+  if (GBW <= 0)
+    return 0;
+
   for (y = 0; y < GBH; y++)
     {
       uint32_t CONTEXT;
@@ -399,6 +411,9 @@ jbig2_decode_generic_template3(Jbig2Ctx *ctx,
 #ifdef OUTPUT_PBM
   printf("P4\n%d %d\n", GBW, GBH);
 #endif
+
+  if (GBW <= 0)
+    return 0;
 
   for (y = 0; y < GBH; y++)
     {
@@ -745,6 +760,12 @@ jbig2_decode_generic_region(Jbig2Ctx *ctx,
 {
   const int8_t *gbat = params->gbat;
 
+  if (image->stride * image->height > (1 << 24) && segment->data_length < image->stride * image->height / 256) {
+    return jbig2_error(ctx, JBIG2_SEVERITY_FATAL, segment->number,
+                       "region is far larger than data provided (%d << %d), aborting to prevent DOS",
+                       segment->data_length, image->stride * image->height);
+  }
+
   if (!params->MMR && params->TPGDON) 
      return jbig2_decode_generic_region_TPGDON(ctx, segment, params, 
 		as, image, GB_stats);
@@ -894,8 +915,12 @@ jbig2_immediate_generic_region(Jbig2Ctx *ctx, Jbig2Segment *segment,
 					 as, image, GB_stats);
     }
 
-  jbig2_page_add_result(ctx, &ctx->pages[ctx->current_page],
-			image, rsi.x, rsi.y, rsi.op);
+  if (code >= 0)
+    jbig2_page_add_result(ctx, &ctx->pages[ctx->current_page],
+			  image, rsi.x, rsi.y, rsi.op);
+  else
+    jbig2_error(ctx, JBIG2_SEVERITY_FATAL, segment->number,
+		"error while decoding immediate_generic_region");
 
 cleanup:
   jbig2_free(ctx->allocator, as);

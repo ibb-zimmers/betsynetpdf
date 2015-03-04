@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: Simplified BSD (see COPYING.BSD) */
 
 #include "BaseUtil.h"
@@ -26,7 +26,7 @@ public:
     bool canceled;
     ValueVisitor *visitor;
 
-    ParseArgs(ValueVisitor *visitor) : canceled(false), visitor(visitor) { }
+    explicit ParseArgs(ValueVisitor *visitor) : canceled(false), visitor(visitor) { }
 };
 
 static const char *ParseValue(ParseArgs& args, const char *data);

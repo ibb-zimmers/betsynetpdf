@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #ifndef TextSelection_h
@@ -17,11 +17,14 @@ class PageTextCache {
     RectI    ** coords;
     WCHAR    ** text;
     int       * lens;
+#ifdef DEBUG
+    size_t      debug_size;
+#endif
 
     CRITICAL_SECTION access;
 
 public:
-    PageTextCache(BaseEngine *engine);
+    explicit PageTextCache(BaseEngine *engine);
     ~PageTextCache();
 
     bool HasData(int pageNo);

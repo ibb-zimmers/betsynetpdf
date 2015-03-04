@@ -1,4 +1,4 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
@@ -10,6 +10,9 @@ PageTextCache::PageTextCache(BaseEngine *engine) : engine(engine)
     coords = AllocArray<RectI *>(count);
     text = AllocArray<WCHAR *>(count);
     lens = AllocArray<int>(count);
+#ifdef DEBUG
+    debug_size = count * (sizeof(RectI *) + sizeof(WCHAR *) + sizeof(int));
+#endif
 
     InitializeCriticalSection(&access);
 }
@@ -19,7 +22,7 @@ PageTextCache::~PageTextCache()
     EnterCriticalSection(&access);
 
     for (int i = 0; i < engine->PageCount(); i++) {
-        delete[] coords[i];
+        free(coords[i]);
         free(text[i]);
     }
 
@@ -50,6 +53,9 @@ const WCHAR *PageTextCache::GetData(int pageNo, int *lenOut, RectI **coordsOut)
         else {
             lens[pageNo - 1] = (int)str::Len(text[pageNo - 1]);
         }
+#ifdef DEBUG
+        debug_size += (lens[pageNo - 1] + 1) * (sizeof(WCHAR) + sizeof(RectI));
+#endif
     }
 
     if (lenOut)
@@ -93,7 +99,7 @@ int TextSelection::FindClosestGlyph(int pageNo, double x, double y)
     PointD pt = PointD(x, y);
 
     unsigned int maxDist = UINT_MAX;
-    PointI pti = pt.Convert<int>();
+    PointI pti = pt.ToInt();
     bool overGlyph = false;
     int result = -1;
 
@@ -184,7 +190,7 @@ bool TextSelection::IsOverGlyph(int pageNo, double x, double y)
     textCache->GetData(pageNo, &textLen, &coords);
 
     int glyphIx = FindClosestGlyph(pageNo, x, y);
-    PointI pt = PointD(x, y).Convert<int>();
+    PointI pt = PointD(x, y).ToInt();
     // when over the right half of a glyph, FindClosestGlyph returns the
     // index of the next glyph, in which case glyphIx must be decremented
     if (glyphIx == textLen || !coords[glyphIx].Contains(pt))
@@ -219,11 +225,11 @@ void TextSelection::SelectUpTo(int pageNo, int glyphIx)
     }
 
     result.len = 0;
-    int fromPage = min(startPage, endPage), toPage = max(startPage, endPage);
+    int fromPage = std::min(startPage, endPage), toPage = std::max(startPage, endPage);
     int fromGlyph = (fromPage == endPage ? endGlyph : startGlyph);
     int toGlyph = (fromPage == endPage ? startGlyph : endGlyph);
     if (fromPage == toPage && fromGlyph > toGlyph)
-        Swap(fromGlyph, toGlyph);
+        std::swap(fromGlyph, toGlyph);
 
     for (int page = fromPage; page <= toPage; page++) {
         int textLen;
@@ -281,10 +287,10 @@ WCHAR *TextSelection::ExtractText(WCHAR *lineSep)
 
 void TextSelection::GetGlyphRange(int *fromPage, int *fromGlyph, int *toPage, int *toGlyph) const
 {
-    *fromPage = min(startPage, endPage);
-    *toPage = max(startPage, endPage);
+    *fromPage = std::min(startPage, endPage);
+    *toPage = std::max(startPage, endPage);
     *fromGlyph = (*fromPage == endPage ? endGlyph : startGlyph);
     *toGlyph = (*fromPage == endPage ? startGlyph : endGlyph);
     if (*fromPage == *toPage && *fromGlyph > *toGlyph)
-        Swap(*fromGlyph, *toGlyph);
+        std::swap(*fromGlyph, *toGlyph);
 }

@@ -1,12 +1,15 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "Print.h"
 
 #include "AppPrefs.h"
-#include "AppTools.h"
-#include "Doc.h"
+#include "AppUtil.h"
+#include "ChmModel.h"
+#include "Controller.h"
+#include "DisplayModel.h"
+#include "EngineManager.h"
 #include "FileUtil.h"
 #include "Notifications.h"
 #include "Selection.h"
@@ -32,7 +35,7 @@ struct PrintData {
               int rotation=0, Vec<SelectionOnPage> *sel=NULL) :
         engine(NULL), advData(advData), rotation(rotation)
     {
-		printOnPlotter = false;
+		this->printOnPlotter = false;
         if (engine)
             this->engine = engine->Clone();
 
@@ -87,12 +90,12 @@ public:
 class ScopeHDC {
     HDC hdc;
 public:
-    ScopeHDC(HDC hdc) : hdc(hdc) { }
+    explicit ScopeHDC(HDC hdc) : hdc(hdc) { }
     ~ScopeHDC() { DeleteDC(hdc); }
     operator HDC() const { return hdc; }
 };
 
-static RectD BoundSelectionOnPage(Vec<SelectionOnPage>& sel, int pageNo)
+static RectD BoundSelectionOnPage(const Vec<SelectionOnPage>& sel, int pageNo)
 {
     RectD bounds;
     for (size_t i = 0; i < sel.Count(); i++) {
@@ -102,7 +105,7 @@ static RectD BoundSelectionOnPage(Vec<SelectionOnPage>& sel, int pageNo)
     return bounds;
 }
 
-static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, AbortCookieManager *abortCookie=NULL)
+static bool PrintToDevice(const PrintData& pd, ProgressUpdateUI *progressUI=NULL, AbortCookieManager *abortCookie=NULL)
 {
     AssertCrash(pd.engine);
     if (!pd.engine)
@@ -117,7 +120,7 @@ static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, Abor
     DOCINFO di = { 0 };
     di.cbSize = sizeof (DOCINFO);
     if (gPluginMode) {
-        fileName.Set(ExtractFilenameFromURL(gPluginURL));
+        fileName.Set(url::GetFileName(gPluginURL));
         // fall back to a generic "filename" instead of the more confusing temporary filename
         di.lpszDocName = fileName ? fileName : L"filename";
     }
@@ -162,7 +165,7 @@ static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, Abor
     const RectI printable(GetDeviceCaps(hdc, PHYSICALOFFSETX),
                           GetDeviceCaps(hdc, PHYSICALOFFSETY),
                           GetDeviceCaps(hdc, HORZRES), GetDeviceCaps(hdc, VERTRES));
-    const float dpiFactor = min(GetDeviceCaps(hdc, LOGPIXELSX) / engine.GetFileDPI(),
+    const float dpiFactor = std::min(GetDeviceCaps(hdc, LOGPIXELSX) / engine.GetFileDPI(),
                                 GetDeviceCaps(hdc, LOGPIXELSY) / engine.GetFileDPI());
     bool bPrintPortrait = paperSize.dx < paperSize.dy;
     if (pd.devMode && (pd.devMode.Get()->dmFields & DM_ORIENTATION))
@@ -180,12 +183,12 @@ static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, Abor
             StartPage(hdc);
 
             geomutil::SizeT<float> bSize = bounds.Size().Convert<float>();
-            float zoom = min((float)printable.dx / bSize.dx,
+            float zoom = std::min((float)printable.dx / bSize.dx,
                              (float)printable.dy / bSize.dy);
             // use the correct zoom values, if the page fits otherwise
             // and the user didn't ask for anything else (default setting)
             if (PrintScaleShrink == pd.advData.scale)
-                zoom = min(dpiFactor, zoom);
+                zoom = std::min(dpiFactor, zoom);
             else if (PrintScaleNone == pd.advData.scale)
                 zoom = dpiFactor;
 
@@ -253,14 +256,14 @@ static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, Abor
             // Turn the document by 90 deg if it isn't in portrait mode
             if (pSize.dx > pSize.dy) {
                 rotation += 90;
-                Swap(pSize.dx, pSize.dy);
+                std::swap(pSize.dx, pSize.dy);
             }
             // make sure not to print upside-down
             rotation = (rotation % 180) == 0 ? 0 : 270;
             // finally turn the page by (another) 90 deg in landscape mode
             if (!bPrintPortrait) {
                 rotation = (rotation + 90) % 360;
-                Swap(pSize.dx, pSize.dy);
+                std::swap(pSize.dx, pSize.dy);
             }
 
             // dpiFactor means no physical zoom
@@ -279,9 +282,9 @@ static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, Abor
                 // and the whole document page on the physical paper
                 RectD rect = engine.PageContentBox(pageNo, Target_Print);
                 geomutil::RectT<float> cbox = engine.Transform(rect, pageNo, 1.0, rotation).Convert<float>();
-                zoom = min((float)printable.dx / cbox.dx,
-                       min((float)printable.dy / cbox.dy,
-                       min((float)paperSize.dx / pSize.dx,
+                zoom = std::min((float)printable.dx / cbox.dx,
+                       std::min((float)printable.dy / cbox.dy,
+                       std::min((float)paperSize.dx / pSize.dx,
                            (float)paperSize.dy / pSize.dy)));
                 // use the correct zoom values, if the page fits otherwise
                 // and the user didn't ask for anything else (default setting)
@@ -307,7 +310,7 @@ static bool PrintToDevice(PrintData& pd, ProgressUpdateUI *progressUI=NULL, Abor
             bool ok = false;
             if (!pd.advData.asImage) {
                 RectI rc = RectI::FromXY(offset.x, offset.y, paperSize.dx, paperSize.dy);
-				
+
 				if(pd.printOnPlotter)
 					rc = RectI::FromXY(printable.x, printable.y, (int)(pSize.dx * zoom), (int)(pSize.dy * zoom));
 
@@ -371,6 +374,8 @@ public:
     PrintThreadData(WindowInfo *win, PrintData *data) :
         win(win), data(data), isCanceled(false), thread(NULL) {
         wnd = new NotificationWnd(win->hwndCanvas, L"", _TR("Printing page %d of %d..."), this);
+        // don't use a groupId for this notification so that
+        // multiple printing notifications could coexist between tabs
         win->notifications->Add(wnd);
     }
 
@@ -470,7 +475,7 @@ So far have tested printing from XP to
  - HP Deskjet D4160
  - Lexmark Z515 inkjet, which should cover most bases.
 */
-#define MAXPAGERANGES 10
+enum { MAXPAGERANGES = 10 };
 void OnMenuPrint(WindowInfo *win, bool waitForCompletion, bool printOnPlotter)
 {
     // we remember some printer settings per process
@@ -492,26 +497,46 @@ void OnMenuPrint(WindowInfo *win, bool waitForCompletion, bool printOnPlotter)
     Vec<PRINTPAGERANGE> ranges;
     PRINTER_INFO_2 printerInfo = { 0 };
 
-    if (!HasPermission(Perm_PrinterAccess)) return;
-
-    DisplayModel *dm = win->dm;
-    assert(dm);
-    if (!dm) return;
-
-    if (!dm->engine || !dm->engine->AllowsPrinting())
+    if (!HasPermission(Perm_PrinterAccess))
         return;
 
-    if (win->IsChm()) {
-        win->dm->AsChmEngine()->PrintCurrentPage();
+    if (win->AsChm()) {
+        // the Print dialog allows access to the file system, so fall back
+        // to printing the entire document without dialog if that isn't desired
+        bool showUI = HasPermission(Perm_DiskAccess);
+        win->AsChm()->PrintCurrentPage(showUI);
+        return;
+    }
+    if (win->AsEbook()) {
+        // TODO: use EbookEngine for printing?
         return;
     }
 
+    CrashIf(!win->AsFixed());
+    if (!win->AsFixed()) return;
+    DisplayModel *dm = win->AsFixed();
+
+#ifndef DISABLE_DOCUMENT_RESTRICTIONS
+    if (!dm->GetEngine()->AllowsPrinting())
+        return;
+#endif
+
     if (win->printThread) {
-        int res = MessageBox(win->hwndFrame, _TR("Printing is still in progress. Abort and start over?"), _TR("Printing in progress."), MB_ICONEXCLAMATION | MB_YESNO | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+        int res = MessageBox(win->hwndFrame, 
+                             _TR("Printing is still in progress. Abort and start over?"),
+                             _TR("Printing in progress."),
+                             MB_ICONEXCLAMATION | MB_YESNO | MbRtlReadingMaybe());
         if (res == IDNO)
             return;
     }
     AbortPrinting(win);
+
+    // the Print dialog allows access to the file system, so fall back
+    // to printing the entire document without dialog if that isn't desired
+    if (!HasPermission(Perm_DiskAccess)) {
+        PrintFile(dm->GetEngine());
+        return;
+    }
 
     PRINTDLGEX pd;
     ZeroMemory(&pd, sizeof(PRINTDLGEX));
@@ -539,8 +564,10 @@ void OnMenuPrint(WindowInfo *win, bool waitForCompletion, bool printOnPlotter)
     pd.nPropertyPages = 1;
 
     // restore remembered settings
-    if (defaultDevMode)
-        pd.hDevMode = GlobalMemDup(defaultDevMode.Get(), defaultDevMode.Get()->dmSize + defaultDevMode.Get()->dmDriverExtra);
+    if (defaultDevMode) {
+        DEVMODE *p = defaultDevMode.Get();
+        pd.hDevMode = GlobalMemDup(p, p->dmSize + p->dmDriverExtra);
+    }
 
     if (PrintDlgEx(&pd) != S_OK) {
         if (CommDlgExtendedError() != 0) {
@@ -549,7 +576,8 @@ void OnMenuPrint(WindowInfo *win, bool waitForCompletion, bool printOnPlotter)
                error code, which we could look at here if we wanted.
                for now just warn the user that printing has stopped
                becasue of an error */
-            MessageBox(win->hwndFrame, _TR("Couldn't initialize printer"), _TR("Printing problem."), MB_ICONEXCLAMATION | MB_OK | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+            MessageBoxWarning(win->hwndFrame, _TR("Couldn't initialize printer"), 
+                              _TR("Printing problem."));
         }
         goto Exit;
     }
@@ -589,10 +617,9 @@ void OnMenuPrint(WindowInfo *win, bool waitForCompletion, bool printOnPlotter)
         printerInfo.pPrinterName = (LPWSTR)devNames + devNames->wDeviceOffset;
         printerInfo.pPortName = (LPWSTR)devNames + devNames->wOutputOffset;
     }
-    PrintData *data = new PrintData(dm->engine, &printerInfo, devMode, ranges, advanced,
-                                    dm->Rotation(), printSelection ? win->selectionOnPage : NULL);
+    PrintData *data = new PrintData(dm->GetEngine(), &printerInfo, devMode, ranges, advanced,
+                                    dm->GetRotation(), printSelection ? win->selectionOnPage : NULL);
 	data->printOnPlotter = printOnPlotter;
-
     if (devNames)
         GlobalUnlock(pd.hDevNames);
     if (devMode)
@@ -604,9 +631,9 @@ void OnMenuPrint(WindowInfo *win, bool waitForCompletion, bool printOnPlotter)
     // unexpectedly deleted
     // TODO: instead prevent closing the document so that printing
     // can still happen on a separate thread and be interruptible
-    bool failedEngineClone = dm->engine && !data->engine;
+    bool failedEngineClone = dm->GetEngine() && !data->engine;
     if (failedEngineClone)
-        data->engine = dm->engine;
+        data->engine = dm->GetEngine();
 
     if (!waitForCompletion && !failedEngineClone)
         PrintToDeviceOnThread(win, data);
@@ -623,13 +650,38 @@ Exit:
     GlobalFree(pd.hDevMode);
 }
 
-static void ApplyPrintSettings(const WCHAR *settings, int pageCount, Vec<PRINTPAGERANGE>& ranges, Print_Advanced_Data& advanced)
+static short GetPaperSourceByName(const WCHAR *name, LPDEVMODE devMode)
+{
+    CrashIf(!(devMode->dmFields & DM_DEFAULTSOURCE));
+    if (!(devMode->dmFields & DM_DEFAULTSOURCE))
+        return devMode->dmDefaultSource;
+    DWORD count = DeviceCapabilities(devMode->dmDeviceName, NULL, DC_BINS, NULL, NULL);
+    DWORD count2 = DeviceCapabilities(devMode->dmDeviceName, NULL, DC_BINNAMES, NULL, NULL);
+    if (count != count2 || 0 == count)
+        return devMode->dmDefaultSource;
+    // try to determine the paper bin number by name
+    ScopedMem<WORD> bins(AllocArray<WORD>(count));
+    ScopedMem<WCHAR> binNames(AllocArray<WCHAR>(24 * count + 1));
+    DeviceCapabilities(devMode->dmDeviceName, NULL, DC_BINS, (WCHAR *)bins.Get(), NULL);
+    DeviceCapabilities(devMode->dmDeviceName, NULL, DC_BINNAMES, binNames.Get(), NULL);
+    for (DWORD i = 0; i < count; i++) {
+        if (str::EqIS(binNames.Get() + 24 * i, name))
+            return bins.Get()[i];
+    }
+    // alternatively allow indicating the paper bin directly by number
+    if (str::Parse(L"%u%$", name, &count))
+        return (short)count;
+    return devMode->dmDefaultSource;
+}
+
+static void ApplyPrintSettings(const WCHAR *settings, int pageCount, Vec<PRINTPAGERANGE>& ranges, Print_Advanced_Data& advanced, LPDEVMODE devMode)
 {
     WStrVec rangeList;
     if (settings)
         rangeList.Split(settings, L",", true);
 
     for (size_t i = 0; i < rangeList.Count(); i++) {
+        int val;
         PRINTPAGERANGE pr;
         if (str::Parse(rangeList.At(i), L"%d-%d%$", &pr.nFromPage, &pr.nToPage)) {
             pr.nFromPage = limitValue(pr.nFromPage, (DWORD)1, (DWORD)pageCount);
@@ -640,18 +692,28 @@ static void ApplyPrintSettings(const WCHAR *settings, int pageCount, Vec<PRINTPA
             pr.nFromPage = pr.nToPage = limitValue(pr.nFromPage, (DWORD)1, (DWORD)pageCount);
             ranges.Append(pr);
         }
-        else if (str::Eq(rangeList.At(i), L"even"))
+        else if (str::EqI(rangeList.At(i), L"even"))
             advanced.range = PrintRangeEven;
-        else if (str::Eq(rangeList.At(i), L"odd"))
+        else if (str::EqI(rangeList.At(i), L"odd"))
             advanced.range = PrintRangeOdd;
-        else if (str::Eq(rangeList.At(i), L"noscale"))
+        else if (str::EqI(rangeList.At(i), L"noscale"))
             advanced.scale = PrintScaleNone;
-        else if (str::Eq(rangeList.At(i), L"shrink"))
+        else if (str::EqI(rangeList.At(i), L"shrink"))
             advanced.scale = PrintScaleShrink;
-        else if (str::Eq(rangeList.At(i), L"fit"))
+        else if (str::EqI(rangeList.At(i), L"fit"))
             advanced.scale = PrintScaleFit;
-        else if (str::Eq(rangeList.At(i), L"compat"))
+        else if (str::EqI(rangeList.At(i), L"compat"))
             advanced.asImage = true;
+        else if (str::Parse(rangeList.At(i), L"%dx%$", &val) && 0 < val && val < 1000)
+            devMode->dmCopies = (short)val;
+        else if (str::EqI(rangeList.At(i), L"simplex"))
+            devMode->dmDuplex = DMDUP_SIMPLEX;
+        else if (str::EqI(rangeList.At(i), L"duplex") || str::EqI(rangeList.At(i), L"duplexlong"))
+            devMode->dmDuplex = DMDUP_VERTICAL;
+        else if (str::EqI(rangeList.At(i), L"duplexshort"))
+            devMode->dmDuplex = DMDUP_HORIZONTAL;
+        else if (str::StartsWithI(rangeList.At(i), L"bin="))
+            devMode->dmDefaultSource = GetPaperSourceByName(rangeList.At(i) + 4, devMode);
     }
 
     if (ranges.Count() == 0) {
@@ -660,24 +722,33 @@ static void ApplyPrintSettings(const WCHAR *settings, int pageCount, Vec<PRINTPA
     }
 }
 
-bool PrintFile(const WCHAR *fileName, const WCHAR *printerName, bool displayErrors, const WCHAR *settings)
+bool PrintFile(BaseEngine *engine, WCHAR *printerName, bool displayErrors, const WCHAR *settings)
 {
+    bool ok = false;
     if (!HasPermission(Perm_PrinterAccess))
         return false;
 
-    ScopedMem<WCHAR> fileName2(path::Normalize(fileName));
-    BaseEngine *engine = EngineManager::CreateEngine(fileName2, true /* prefer Chm2Engine */);
-    if (!engine || !engine->AllowsPrinting()) {
+#ifndef DISABLE_DOCUMENT_RESTRICTIONS
+    if (engine && !engine->AllowsPrinting())
+        engine = NULL;
+#endif
+    if (!engine) {
         if (displayErrors)
-            MessageBox(NULL, _TR("Cannot print this file"), _TR("Printing problem."), MB_ICONEXCLAMATION | MB_OK | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+            MessageBoxWarning(NULL, _TR("Cannot print this file"), _TR("Printing problem."));
         return false;
     }
 
+    ScopedMem<WCHAR> defaultPrinter;
+    if (!printerName) {
+        defaultPrinter.Set(GetDefaultPrinterName());
+        printerName = defaultPrinter;
+    }
+
     HANDLE printer;
-    bool ok = OpenPrinter((WCHAR *)printerName, &printer, NULL);
-    if (!ok) {
+    BOOL res = OpenPrinter(printerName, &printer, NULL);
+    if (!res) {
         if (displayErrors)
-            MessageBox(NULL, _TR("Printer with given name doesn't exist"), _TR("Printing problem."), MB_ICONEXCLAMATION | MB_OK | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+            MessageBoxWarning(NULL, _TR("Printer with given name doesn't exist"), _TR("Printing problem."));
         return false;
     }
 
@@ -687,35 +758,37 @@ bool PrintFile(const WCHAR *fileName, const WCHAR *printerName, bool displayErro
     GetPrinter(printer, 2, NULL, 0, &needed);
     ScopedMem<PRINTER_INFO_2> infoData((PRINTER_INFO_2 *)AllocArray<BYTE>(needed));
     if (infoData)
-        ok = GetPrinter(printer, 2, (LPBYTE)infoData.Get(), needed, &needed);
-    if (!ok || !infoData || needed <= sizeof(PRINTER_INFO_2)) goto Exit;
+        res = GetPrinter(printer, 2, (LPBYTE)infoData.Get(), needed, &needed);
+    if (!res || !infoData || needed <= sizeof(PRINTER_INFO_2))
+        goto Exit;
 
     LONG structSize = DocumentProperties(NULL,
-        printer,                /* Handle to our printer. */
-        (WCHAR *)printerName,   /* Name of the printer. */
+        printer,
+        printerName,
         NULL,                   /* Asking for size, so */
-        NULL,                   /* these are not used. */
+        NULL,                   /* not used. */
         0);                     /* Zero returns buffer size. */
     if (structSize < sizeof(DEVMODE)) {
         // If failure, inform the user, cleanup and return failure.
         if (displayErrors)
-            MessageBox(NULL, _TR("Could not obtain Printer properties"), _TR("Printing problem."), MB_ICONEXCLAMATION | MB_OK | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+            MessageBoxWarning(NULL, _TR("Could not obtain Printer properties"), _TR("Printing problem."));
         goto Exit;
     }
     devMode = (LPDEVMODE)malloc(structSize);
-    if (!devMode) goto Exit;
+    if (!devMode)
+        goto Exit;
 
     // Get the default DevMode for the printer and modify it for your needs.
     LONG returnCode = DocumentProperties(NULL,
         printer,
-        (WCHAR *)printerName,
+        printerName,
         devMode,        /* The address of the buffer to fill. */
         NULL,           /* Not using the input buffer. */
         DM_OUT_BUFFER); /* Have the output buffer filled. */
     if (IDOK != returnCode) {
         // If failure, inform the user, cleanup and return failure.
         if (displayErrors)
-            MessageBox(NULL, _TR("Could not obtain Printer properties"), _TR("Printing problem."), MB_ICONEXCLAMATION | MB_OK | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+            MessageBoxWarning(NULL, _TR("Could not obtain Printer properties"), _TR("Printing problem."));
         goto Exit;
     }
 
@@ -725,19 +798,26 @@ bool PrintFile(const WCHAR *fileName, const WCHAR *printerName, bool displayErro
     {
         Print_Advanced_Data advanced;
         Vec<PRINTPAGERANGE> ranges;
-        ApplyPrintSettings(settings, engine->PageCount(), ranges, advanced);
+        ApplyPrintSettings(settings, engine->PageCount(), ranges, advanced, devMode);
 
         PrintData pd(engine, infoData, devMode, ranges, advanced);
         ok = PrintToDevice(pd);
         if (!ok && displayErrors)
-            MessageBox(NULL, _TR("Couldn't initialize printer"), _TR("Printing problem."),
-                MB_ICONEXCLAMATION | MB_OK | (IsUIRightToLeft() ? MB_RTLREADING : 0));
+            MessageBoxWarning(NULL, _TR("Couldn't initialize printer"), _TR("Printing problem."));
     }
 
 Exit:
     free(devMode);
     if (printer)
         ClosePrinter(printer);
+    return ok;
+}
+
+bool PrintFile(const WCHAR *fileName, WCHAR *printerName, bool displayErrors, const WCHAR *settings)
+{
+    ScopedMem<WCHAR> fileName2(path::Normalize(fileName));
+    BaseEngine *engine = EngineManager::CreateEngine(fileName2);
+    bool ok = PrintFile(engine, printerName, displayErrors, settings);
     delete engine;
     return ok;
 }

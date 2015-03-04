@@ -1,13 +1,17 @@
-/* Copyright 2013 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2014 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "BaseUtil.h"
 #include "WindowInfo.h"
 
+#include "Caption.h"
+#include "Controller.h"
+#include "DisplayModel.h"
+#include "EbookController.h"
+#include "EngineManager.h"
 #include "FileUtil.h"
+#include "FrameRateWnd.h"
 #include "Notifications.h"
-#include "PdfSync.h"
-#include "Print.h"
 #include "resource.h"
 #include "Selection.h"
 #include "StressTesting.h"
@@ -17,27 +21,27 @@
 #include "WinUtil.h"
 
 WindowInfo::WindowInfo(HWND hwnd) :
-    dm(NULL), menu(NULL), hwndFrame(hwnd),
+    ctrl(NULL), menu(NULL), hwndFrame(hwnd), isMenuHidden(false),
     linkOnLastButtonDown(NULL), url(NULL), selectionOnPage(NULL),
     tocLoaded(false), tocVisible(false), tocRoot(NULL), tocKeepSelection(false),
-    fullScreen(false), presentation(PM_DISABLED), tocBeforeFullScreen(false),
-    windowStateBeforePresentation(0), prevStyle(0),
+    isFullScreen(false), presentation(PM_DISABLED), tocBeforeFullScreen(false),
+    windowStateBeforePresentation(0), nonFullScreenWindowStyle(0),
     hwndCanvas(NULL), hwndToolbar(NULL), hwndReBar(NULL),
     hwndFindText(NULL), hwndFindBox(NULL), hwndFindBg(NULL),
     hwndPageText(NULL), hwndPageBox(NULL), hwndPageBg(NULL), hwndPageTotal(NULL),
-    hwndTocBox(NULL), hwndTocTree(NULL),
-    hwndSidebarSplitter(NULL), hwndFavSplitter(NULL),
+    hwndTocBox(NULL), hwndTocTree(NULL), tocLabelWithClose(NULL),
+    sidebarSplitter(NULL), favSplitter(NULL),
     hwndInfotip(NULL), infotipVisible(false),
     findThread(NULL), findCanceled(false), printThread(NULL), printCanceled(false),
     showSelection(false), mouseAction(MA_IDLE), dragStartPending(false),
     prevZoomVirtual(INVALID_ZOOM), prevDisplayMode(DM_AUTOMATIC),
     loadedFilePath(NULL), currPageNo(0),
     xScrollSpeed(0), yScrollSpeed(0), wheelAccumDelta(0),
-    delayedRepaintTimer(0), watcher(NULL),
-    pdfsync(NULL), stressTest(NULL),
-    hwndFavBox(NULL), hwndFavTree(NULL),
-    userAnnots(NULL), userAnnotsModified(false),
-    uia_provider(NULL)
+    delayedRepaintTimer(0), watcher(NULL), stressTest(NULL),
+    hwndFavBox(NULL), hwndFavTree(NULL), favLabelWithClose(NULL),
+    uia_provider(NULL), cbHandler(NULL), frameRateWnd(NULL),
+    hwndTabBar(NULL), tabsVisible(false), tabsInTitlebar(false), tabSelectionHistory(NULL),
+    hwndCaption(NULL), caption(NULL), extendedFrameHeight(0)
 {
 	betsyApi = NULL;
     dpi = win::GetHwndDpi(hwndFrame, &uiDPIFactor);
@@ -56,25 +60,39 @@ WindowInfo::~WindowInfo()
     // release our copy of UIA provider
     // the UI automation still might have a copy somewhere
     if (uia_provider) {
-        if (dm)
+        if (AsFixed())
             uia_provider->OnDocumentUnload();
         uia_provider->Release();
     }
 
-    delete pdfsync;
     delete linkHandler;
     delete buffer;
     delete selectionOnPage;
     delete linkOnLastButtonDown;
     delete tocRoot;
     delete notifications;
-    delete userAnnots;
+    delete tabSelectionHistory;
+    delete caption;
     // delete DisplayModel/BaseEngine last, as e.g.
     // DocTocItem or PageElement might still need the
     // BaseEngine in their destructors
-    delete dm;
-
+    delete ctrl;
+    // cbHandler is passed into Controller and
+    // must be deleted afterwards
+    delete cbHandler;
+    DeleteFrameRateWnd(frameRateWnd);
+    free(sidebarSplitter);
+    free(favSplitter);
+    free(tocLabelWithClose);
+    free(favLabelWithClose);
     free(loadedFilePath);
+}
+
+EngineType WindowInfo::GetEngineType() const
+{
+    if (ctrl && ctrl->AsFixed())
+        return ctrl->AsFixed()->engineType;
+    return Engine_None;
 }
 
 // Notify both display model and double-buffer (if they exist)
@@ -93,7 +111,7 @@ void WindowInfo::UpdateCanvasSize()
 
     if (IsDocLoaded()) {
         // the display model needs to know the full size (including scroll bars)
-        dm->ChangeViewPortSize(GetViewPortSize());
+        ctrl->SetViewPortSize(GetViewPortSize());
     }
 
     // keep the notifications visible (only needed for right-to-left layouts)
@@ -110,6 +128,7 @@ SizeI WindowInfo::GetViewPortSize()
         size.dx += GetSystemMetrics(SM_CXVSCROLL);
     if ((style & WS_HSCROLL))
         size.dy += GetSystemMetrics(SM_CYHSCROLL);
+    CrashIf((style & (WS_VSCROLL | WS_HSCROLL)) && !AsFixed());
 
     return size;
 }
@@ -117,33 +136,36 @@ SizeI WindowInfo::GetViewPortSize()
 void WindowInfo::RedrawAll(bool update)
 {
     InvalidateRect(this->hwndCanvas, NULL, false);
+    if (this->AsEbook())
+        this->AsEbook()->RequestRepaint();
     if (update)
         UpdateWindow(this->hwndCanvas);
 }
 
 void WindowInfo::ToggleZoom()
 {
-    assert(this->dm);
+    CrashIf(!this->ctrl);
     if (!this->IsDocLoaded()) return;
 
-    if (ZOOM_FIT_PAGE == this->dm->ZoomVirtual())
-        this->dm->ZoomTo(ZOOM_FIT_WIDTH);
-    else if (ZOOM_FIT_WIDTH == this->dm->ZoomVirtual())
-        this->dm->ZoomTo(ZOOM_FIT_CONTENT);
+    if (ZOOM_FIT_PAGE == this->ctrl->GetZoomVirtual())
+        this->ctrl->SetZoomVirtual(ZOOM_FIT_WIDTH);
+    else if (ZOOM_FIT_WIDTH == this->ctrl->GetZoomVirtual())
+        this->ctrl->SetZoomVirtual(ZOOM_FIT_CONTENT);
     else
-        this->dm->ZoomTo(ZOOM_FIT_PAGE);
+        this->ctrl->SetZoomVirtual(ZOOM_FIT_PAGE);
 }
 
 void WindowInfo::MoveDocBy(int dx, int dy)
 {
-    assert(this->dm);
-    if (!this->IsDocLoaded()) return;
-    assert(!this->linkOnLastButtonDown);
+    CrashIf(!this->AsFixed());
+    if (!this->AsFixed()) return;
+    CrashIf(this->linkOnLastButtonDown);
     if (this->linkOnLastButtonDown) return;
+    DisplayModel *dm = this->ctrl->AsFixed();
     if (0 != dx)
-        this->dm->ScrollXBy(dx);
+        dm->ScrollXBy(dx);
     if (0 != dy)
-        this->dm->ScrollYBy(dy, false);
+        dm->ScrollYBy(dy, false);
 }
 
 #define MULTILINE_INFOTIP_WIDTH_PX 500
@@ -184,6 +206,12 @@ void WindowInfo::DeleteInfotip()
     infotipVisible = false;
 }
 
+void WindowInfo::ShowNotification(const WCHAR *message, bool autoDismiss, bool highlight, NotificationGroup groupId)
+{
+    NotificationWnd *wnd = new NotificationWnd(hwndCanvas, message, autoDismiss ? 3000 : 0, highlight, notifications);
+    notifications->Add(wnd, groupId);
+}
+
 bool WindowInfo::CreateUIAProvider()
 {
     if (!uia_provider) {
@@ -191,40 +219,40 @@ bool WindowInfo::CreateUIAProvider()
         if (!uia_provider)
             return false;
         // load data to provider
-        if (dm)
-            uia_provider->OnDocumentLoad(dm);
+        if (AsFixed())
+            uia_provider->OnDocumentLoad(AsFixed());
     }
 
     return true;
 }
 
-void WindowInfo::LaunchBrowser(const WCHAR *url)
-{
-    ::LaunchBrowser(url);
-}
+class RemoteDestination : public PageDestination {
+    PageDestType type;
+    int pageNo;
+    RectD rect;
+    ScopedMem<WCHAR> value;
+    ScopedMem<WCHAR> name;
 
-void WindowInfo::FocusFrame(bool always)
-{
-    if (always || !FindWindowInfoByHwnd(GetFocus()))
-        SetFocus(hwndFrame);
-}
+public:
+    RemoteDestination(PageDestination *dest) :
+        type(dest->GetDestType()), pageNo(dest->GetDestPageNo()),
+        rect(dest->GetDestRect()), value(dest->GetDestValue()),
+        name(dest->GetDestName()) { }
+    virtual ~RemoteDestination() { }
 
-BaseEngine *LinkHandler::engine() const
-{
-    if (!owner || !owner->dm)
-        return NULL;
-    return owner->dm->engine;
-}
+    virtual PageDestType GetDestType() const { return type; }
+    virtual int GetDestPageNo() const { return pageNo; }
+    virtual RectD GetDestRect() const { return rect; }
+    virtual WCHAR *GetDestValue() const { return str::Dup(value); }
+    virtual WCHAR *GetDestName() const { return str::Dup(name); }
+};
 
 void LinkHandler::GotoLink(PageDestination *link)
 {
-    assert(owner && owner->linkHandler == this);
-    if (!link)
-        return;
-    if (!engine())
+    CrashIf(!owner || owner->linkHandler != this);
+    if (!link || !owner->IsDocLoaded())
         return;
 
-    DisplayModel *dm = owner->dm;
     ScopedMem<WCHAR> path(link->GetDestValue());
     PageDestType type = link->GetDestType();
     if (Dest_ScrollTo == type) {
@@ -234,20 +262,26 @@ void LinkHandler::GotoLink(PageDestination *link)
     else if (Dest_LaunchURL == type) {
         if (!path)
             /* ignore missing URLs */;
-        else if (!str::FindChar(path, ':')) {
-            // treat relative URIs as file paths
-            // LaunchFile will reject unsupported file types
-            LaunchFile(path, NULL);
-        }
         else {
-            // LaunchBrowser will reject unsupported URI schemes
-            LaunchBrowser(path);
+            WCHAR *colon = str::FindChar(path, ':');
+            WCHAR *hash = str::FindChar(path, '#');
+            if (!colon || (hash && colon > hash)) {
+                // treat relative URIs as file paths (without fragment identifier)
+                if (hash)
+                    *hash = '\0';
+                // LaunchFile will reject unsupported file types
+                LaunchFile(path, NULL);
+            }
+            else {
+                // LaunchBrowser will reject unsupported URI schemes
+                LaunchBrowser(path);
+            }
         }
     }
     else if (Dest_LaunchEmbedded == type) {
         // open embedded PDF documents in a new window
-        if (path && str::StartsWith(path.Get(), dm->FilePath())) {
-            WindowInfo *newWin = FindWindowInfoByFile(path);
+        if (path && str::StartsWith(path.Get(), owner->ctrl->FilePath())) {
+            WindowInfo *newWin = FindWindowInfoByFile(path, true);
             if (!newWin) {
                 LoadArgs args(path, owner);
                 newWin = LoadDocument(args);
@@ -270,22 +304,22 @@ void LinkHandler::GotoLink(PageDestination *link)
     }
     // predefined named actions
     else if (Dest_NextPage == type)
-        dm->GoToNextPage(0);
+        owner->ctrl->GoToNextPage();
     else if (Dest_PrevPage == type)
-        dm->GoToPrevPage(0);
+        owner->ctrl->GoToPrevPage();
     else if (Dest_FirstPage == type)
-        dm->GoToFirstPage();
+        owner->ctrl->GoToFirstPage();
     else if (Dest_LastPage == type)
-        dm->GoToLastPage();
+        owner->ctrl->GoToLastPage();
     // Adobe Reader extensions to the spec, cf. http://www.tug.org/applications/hyperref/manual.html
     else if (Dest_FindDialog == type)
         PostMessage(owner->hwndFrame, WM_COMMAND, IDM_FIND_FIRST, 0);
     else if (Dest_FullScreen == type)
         PostMessage(owner->hwndFrame, WM_COMMAND, IDM_VIEW_PRESENTATION_MODE, 0);
     else if (Dest_GoBack == type)
-        dm->Navigate(-1);
+        owner->ctrl->Navigate(-1);
     else if (Dest_GoForward == type)
-        dm->Navigate(1);
+        owner->ctrl->Navigate(1);
     else if (Dest_GoToPageDialog == type)
         PostMessage(owner->hwndFrame, WM_COMMAND, IDM_GOTO_PAGE, 0);
     else if (Dest_PrintDialog == type)
@@ -300,60 +334,13 @@ void LinkHandler::GotoLink(PageDestination *link)
 
 void LinkHandler::ScrollTo(PageDestination *dest)
 {
-    assert(owner && owner->linkHandler == this);
+    CrashIf(!owner || owner->linkHandler != this);
+    if (!dest || !owner->IsDocLoaded())
+        return;
+
     int pageNo = dest->GetDestPageNo();
-    if (pageNo <= 0)
-        return;
-
-    if (owner->dm->AsChmEngine()) {
-        owner->dm->AsChmEngine()->GoToDestination(dest);
-        return;
-    }
-
-    DisplayModel *dm = owner->dm;
-    PointI scroll(-1, 0);
-    RectD rect = dest->GetDestRect();
-
-    if (rect.IsEmpty()) {
-        // PDF: /XYZ top left
-        // scroll to rect.TL()
-        PointD scrollD = dm->engine->Transform(rect.TL(), pageNo, dm->ZoomReal(), dm->Rotation());
-        scroll = scrollD.Convert<int>();
-
-        // default values for the coordinates mean: keep the current position
-        if (DEST_USE_DEFAULT == rect.x)
-            scroll.x = -1;
-        if (DEST_USE_DEFAULT == rect.y) {
-            PageInfo *pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
-            scroll.y = -(pageInfo->pageOnScreen.y - dm->GetWindowMargin()->top);
-            scroll.y = max(scroll.y, 0); // Adobe Reader never shows the previous page
-        }
-    }
-    else if (rect.dx != DEST_USE_DEFAULT && rect.dy != DEST_USE_DEFAULT) {
-        // PDF: /FitR left bottom right top
-        RectD rectD = dm->engine->Transform(rect, pageNo, dm->ZoomReal(), dm->Rotation());
-        scroll = rectD.TL().Convert<int>();
-
-        // Rect<float> rectF = dm->engine->Transform(rect, pageNo, 1.0, dm->rotation()).Convert<float>();
-        // zoom = 100.0f * min(owner->canvasRc.dx / rectF.dx, owner->canvasRc.dy / rectF.dy);
-    }
-    else if (rect.y != DEST_USE_DEFAULT) {
-        // PDF: /FitH top  or  /FitBH top
-        PointD scrollD = dm->engine->Transform(rect.TL(), pageNo, dm->ZoomReal(), dm->Rotation());
-        scroll.y = max(scrollD.Convert<int>().y, 0); // Adobe Reader never shows the previous page
-
-        // zoom = FitBH ? ZOOM_FIT_CONTENT : ZOOM_FIT_WIDTH
-    }
-    // else if (Fit || FitV) zoom = ZOOM_FIT_PAGE
-    // else if (FitB || FitBV) zoom = ZOOM_FIT_CONTENT
-    /* // ignore author-set zoom settings (at least as long as there's no way to overrule them)
-    if (zoom != INVALID_ZOOM) {
-        // TODO: adjust the zoom level before calculating the scrolling coordinates
-        dm->zoomTo(zoom);
-        UpdateToolbarState(owner);
-    }
-    // */
-    dm->GoToPage(pageNo, scroll.y, true, scroll.x);
+    if (pageNo > 0)
+        owner->ctrl->ScrollToLink(dest);
 }
 
 void LinkHandler::LaunchFile(const WCHAR *path, PageDestination *link)
@@ -366,46 +353,58 @@ void LinkHandler::LaunchFile(const WCHAR *path, PageDestination *link)
         return;
     }
 
-    ScopedMem<WCHAR> fullPath(path::GetDir(owner->dm->FilePath()));
+    // TODO: link is deleted when opening the document in a new tab
+    RemoteDestination *remoteLink = NULL;
+    if (link) {
+        remoteLink = new RemoteDestination(link);
+        link = NULL;
+    }
+
+    ScopedMem<WCHAR> fullPath(path::GetDir(owner->ctrl->FilePath()));
     fullPath.Set(path::Join(fullPath, path));
     fullPath.Set(path::Normalize(fullPath));
     // TODO: respect link->ld.gotor.new_window for PDF documents ?
-    WindowInfo *newWin = FindWindowInfoByFile(fullPath);
+    WindowInfo *newWin = FindWindowInfoByFile(fullPath, true);
     // TODO: don't show window until it's certain that there was no error
     if (!newWin) {
         LoadArgs args(fullPath, owner);
         newWin = LoadDocument(args);
-        if (!newWin)
+        if (!newWin) {
+            delete remoteLink;
             return;
+        }
     }
 
     if (!newWin->IsDocLoaded()) {
-        CloseWindow(newWin, true);
+        CloseTab(newWin);
         // OpenFileExternally rejects files we'd otherwise
         // have to show a notification to be sure (which we
         // consider bad UI and thus simply don't)
         bool ok = OpenFileExternally(fullPath);
         if (!ok) {
             ScopedMem<WCHAR> msg(str::Format(_TR("Error loading %s"), fullPath));
-            ShowNotification(owner, msg, true /* autoDismiss */, true /* highlight */);
+            owner->ShowNotification(msg, true /* autoDismiss */, true /* highlight */);
         }
+        delete remoteLink;
         return;
     }
 
     newWin->Focus();
-    if (!link)
+    if (!remoteLink)
         return;
 
-    ScopedMem<WCHAR> name(link->GetDestName());
-    if (!name)
-        newWin->linkHandler->ScrollTo(link);
-    else {
-        PageDestination *dest = newWin->dm->engine->GetNamedDest(name);
+    ScopedMem<WCHAR> destName(remoteLink->GetDestName());
+    if (destName) {
+        PageDestination *dest = newWin->ctrl->GetNamedDest(destName);
         if (dest) {
             newWin->linkHandler->ScrollTo(dest);
             delete dest;
         }
     }
+    else {
+        newWin->linkHandler->ScrollTo(remoteLink);
+    }
+    delete remoteLink;
 }
 
 // normalizes case and whitespace in the string
@@ -449,21 +448,21 @@ PageDestination *LinkHandler::FindTocItem(DocTocItem *item, const WCHAR *name, b
 
 void LinkHandler::GotoNamedDest(const WCHAR *name)
 {
-    assert(owner && owner->linkHandler == this);
-    if (!engine())
+    CrashIf(!owner || owner->linkHandler != this);
+    if (!owner->ctrl)
         return;
 
     // Match order:
     // 1. Exact match on internal destination name
     // 2. Fuzzy match on full ToC item title
     // 3. Fuzzy match on a part of a ToC item title
-    PageDestination *dest = engine()->GetNamedDest(name);
+    PageDestination *dest = owner->ctrl->GetNamedDest(name);
     if (dest) {
         ScrollTo(dest);
         delete dest;
     }
-    else if (engine()->HasTocTree()) {
-        DocTocItem *root = engine()->GetTocTree();
+    else if (owner->ctrl->HasTocTree()) {
+        DocTocItem *root = owner->ctrl->GetTocTree();
         ScopedMem<WCHAR> fuzName(NormalizeFuzzy(name));
         dest = FindTocItem(root, fuzName);
         if (!dest)
@@ -473,17 +472,3 @@ void LinkHandler::GotoNamedDest(const WCHAR *name)
         delete root;
     }
 }
-
-// TODO: this is a bad place for it, but for now there are circular dependencies
-// between SumatraWindow, WindowInfo, EbookWindow
-#include "EbookWindow.h"
-
-HWND SumatraWindow::HwndFrame() const
-{
-    if (AsWindowInfo())
-        return AsWindowInfo()->hwndFrame;
-    if (AsEbookWindow())
-        return AsEbookWindow()->hwndFrame;
-    return NULL;
-}
-
