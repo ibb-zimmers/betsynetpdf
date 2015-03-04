@@ -1,5 +1,5 @@
 ﻿/*
-Copyright 2012-2014 IBB Ehlert&Wolf GbR
+Copyright 2012-2015 IBB Ehlert&Wolf GbR
 Author: Silvio Zimmer
 
 This file is part of BetsyNetPDF.
@@ -96,7 +96,7 @@ namespace BetsyNetPDF
         }
 
         #region properties
-        public string Version { get { return BetsyNetPDF.AssemblyInfo.VERSION; } }
+        public string Version { get { return "1." + BetsyNetPDF.AssemblyInfo.VERSION; } }
         #endregion
 
         #region public methods
