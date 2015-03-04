@@ -142,26 +142,10 @@ namespace BetsyNetPDF.Parser
         {
             LocatedObject locObj = null;
             double angle = this.Angle - pageSize.Rotation;
-            int pageRotation = 360 - pageSize.Rotation;
-
-            if (pageRotation % 360 == 0)
-                locObj = new LocatedObject(FromDPI(this.AscentLine.GetStartPoint()[Vector.I1]), FromDPI(this.AscentLine.GetStartPoint()[Vector.I2]), angle, this.Text);
-            if (pageRotation == 90)
-                locObj = new LocatedObject(FromDPI(pageSize.Width - this.AscentLine.GetStartPoint()[Vector.I2]), FromDPI(this.AscentLine.GetStartPoint()[Vector.I1]), angle, this.Text);
-            if (pageRotation == 180)
-                locObj = new LocatedObject(FromDPI(pageSize.Width - this.AscentLine.GetStartPoint()[Vector.I1]), FromDPI(pageSize.Height - this.AscentLine.GetStartPoint()[Vector.I2]), angle, this.Text);
-            if (pageRotation == 270)
-                locObj = new LocatedObject(FromDPI(this.AscentLine.GetStartPoint()[Vector.I2]), FromDPI(pageSize.Height - this.AscentLine.GetStartPoint()[Vector.I1]), angle, this.Text);
-
-            if (locObj == null)
-                locObj = new LocatedObject(0, 0, 0, "null");
+                        
+            locObj = new LocatedObject(BetsyNetPDFEditor.TranslateCoords(this.AscentLine.GetStartPoint()[Vector.I1], this.AscentLine.GetStartPoint()[Vector.I2], pageSize), angle, this.Text);
 
             return locObj;
-        }
-
-        private double FromDPI(float dpi)
-        {
-            return (dpi / 72.0) * 2540.0;
         }
 
         private double CalcAngle()

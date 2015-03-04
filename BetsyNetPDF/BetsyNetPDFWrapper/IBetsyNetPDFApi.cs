@@ -58,6 +58,10 @@ namespace BetsyNetPDF
         void SetMouseOverEnabled(IntPtr win, bool enabled);
         void SetMeasureModeEnabled(IntPtr win, bool enabled);
         void SetLineModeEnabled(IntPtr win, bool enabled);
+        void SetLineStart(IntPtr win, double x, double y);
+        PointF GetLineStart(IntPtr win);
+        bool IsLineStart(IntPtr win);
+        void SetFixedAngle(IntPtr win, double angle);
         void SetDeactivateTextSelection(IntPtr win, bool value);
         void SetPreventOverlayObjectSelection(IntPtr win, bool value);
         void SetShowOverlapping(IntPtr win, bool value);

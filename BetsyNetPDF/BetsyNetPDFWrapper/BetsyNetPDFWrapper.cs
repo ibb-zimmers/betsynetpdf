@@ -155,6 +155,35 @@ namespace BetsyNetPDF
             api.SetLineModeEnabled(win, enabled);
         }
 
+        public void SetLineStart(double x, double y)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+            api.SetLineStart(win, x, y);
+        }
+
+        public PointF GetLineStart()
+        {
+            if (api == null || win == IntPtr.Zero)
+                return PointF.Empty;
+            return api.GetLineStart(win);
+        }
+
+        public bool IsLineStart()
+        {
+            if (api == null || win == IntPtr.Zero)
+                return false;
+            return api.IsLineStart(win);
+        }
+
+        public void SetFixedAngle(double angle)
+        {
+            if (api == null || win == IntPtr.Zero)
+                return;
+
+            api.SetFixedAngle(win, angle);
+        }
+
         public void SetDeactivateTextSelection(bool value)
         {
             if (api == null || win == IntPtr.Zero)
@@ -351,9 +380,14 @@ namespace BetsyNetPDF
 
         #region public call back methods
         public void OnSelectionChangedCallBack() { OnSelectionChanged(); }
-        public void OnMouseClickCallBack(double x, double y) { OnMouseClick(x, y); }
         public void OnDeleteCallBack() { OnDelete(); }
         public void OnObjectMovedCallBack(double deltaX, double deltaY, bool moveLabel) { OnObjectMoved(deltaX, deltaY, moveLabel); }
+
+        public void OnMouseClickCallBack(double x, double y, IntPtr key)
+        {
+            string skey = Marshal.PtrToStringAnsi(key);
+            OnMouseClick(x, y, skey);
+        }
 
         public void OnRequestContextMenuCallBack(int x, int y, IntPtr idPtr)
         {
@@ -368,6 +402,7 @@ namespace BetsyNetPDF
                 OnMouseOverObject(sid);
         }
         public void OnDistanceMeasuredCallBack(double distance) { OnDistanceMeasured(distance); }
+
         public void OnLineDrawnCallBack(double p1x, double p1y, double p2x, double p2y) { OnLineDrawn(p1x, p1y, p2x, p2y); }
         #endregion
 
@@ -382,10 +417,10 @@ namespace BetsyNetPDF
         #endregion
 
         #region event handler methods
-        protected virtual void OnMouseClick(double x, double y)
+        protected virtual void OnMouseClick(double x, double y, string key)
         {
             if (MouseClickEvent != null)
-                MouseClickEvent(x, y);
+                MouseClickEvent(x, y, key);
         }
 
         protected virtual void OnMouseOverObject(string id)
@@ -436,7 +471,7 @@ namespace BetsyNetPDF
         public delegate void CallBackOnSelectionChanged();
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        public delegate void CallBackOnMouseClick(double x, double y);
+        public delegate void CallBackOnMouseClick(double x, double y, IntPtr key);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         public delegate void CallBackOnDelete();
@@ -456,7 +491,7 @@ namespace BetsyNetPDF
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         public delegate void CallBackOnLineDrawnDelegate(double p1x, double p1y, double p2x, double p2y);
 
-        public delegate void MouseClickEventHandler(double x, double y);
+        public delegate void MouseClickEventHandler(double x, double y, string key);
         public delegate void SelectionChangedEventHandler();
         public delegate void DeleteEventHandler();
         public delegate void ObjectMovedEventHandler(double deltaX, double deltaY, bool moveLabel);
