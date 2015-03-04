@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Drawing;
 
 namespace BetsyNetPDF.Parser
 {
@@ -17,10 +18,10 @@ namespace BetsyNetPDF.Parser
         public double Angle { get { return this.angle; } }
         public string Text { get { return this.text; } }
 
-        public LocatedObject(double x, double y, double angle, string text)
+        public LocatedObject(PointF origin, double angle, string text)
         {
-            this.x = x;
-            this.y = y;
+            this.x = origin.X;
+            this.y = origin.Y;
             this.angle = angle;
             this.text = text;
         }

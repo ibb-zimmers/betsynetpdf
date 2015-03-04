@@ -33,6 +33,7 @@ Sie sollten eine Kopie der GNU Lesser General Public License zusammen mit diesem
 Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
 */
 
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -42,7 +43,8 @@ using BetsyNetPDF.Parser;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
 using iTextSharp.text.pdf.parser;
-using System;
+using iTextSharp.awt.geom;
+using System.Text;
 
 namespace BetsyNetPDF
 {
@@ -83,9 +85,9 @@ namespace BetsyNetPDF
                 string[] slines;
                 string tmpText;
                 ColumnText column;
-                float pageHeight = reader.GetPageSize(1).Height;
+                iTextSharp.text.Rectangle pageRect = reader.GetPageSizeWithRotation(1);
                 float llx, lly, urx, ury, height, lineHeight, maxWidth, tmpWidth;
-                System.Drawing.Drawing2D.Matrix rotation = null;
+                AffineTransform rotation = null;
                 foreach (OverlayObject oo in objects)
                 {
                     height = maxWidth = tmpWidth = 0;
@@ -124,8 +126,8 @@ namespace BetsyNetPDF
                         cline.SetBackground(bg, 2, 2, 2 + maxWidth - tmpWidth, 3);
                     }
 
-                    float xdpi = (float)oo.GetXdpi();
-                    float ydpi = (float)oo.GetYdpi();
+                    float xdpi = (float)oo.GetXdpi() + pageRect.Left;
+                    float ydpi = (float)oo.GetYdpi() + pageRect.Bottom;
                     urx = xdpi + maxWidth + 4f;
                     ury = ydpi;
                     llx = xdpi;
@@ -134,34 +136,28 @@ namespace BetsyNetPDF
                     layerContent.SaveState();
 
                     //rotate
-                    using (rotation = new System.Drawing.Drawing2D.Matrix())
+                    rotation = new AffineTransform();
+                    if (oo.angle != 0.0)
                     {
-                        if (oo.angle != 0.0)
-                        {
-                            rotation.RotateAt((float)oo.angle, new PointF(xdpi, ydpi), MatrixOrder.Append);
-                            layerContent.Transform(rotation);
-                        }
-
-                        column = new ColumnText(layerContent);
-                        foreach (Chunk cline in lines)
-                        {
-                            column.AddText(cline);
-                            column.AddText(Chunk.NEWLINE);
-                        }
-
-                        column.Alignment = Element.ALIGN_LEFT;
-                        column.Leading = lineHeight;
-                        column.SetSimpleColumn(llx, lly, urx, ury);
-                        column.Go();
-
-                        //rotate back
-                        if (oo.angle != 0.0 && !rotation.IsIdentity)
-                        {
-                            rotation.Invert();
-                            layerContent.Transform(rotation);
-                            rotation.Dispose();
-                        }
+                        rotation.SetToRotation(oo.angle * (Math.PI / 180), xdpi, ydpi);
+                        layerContent.Transform(rotation);
                     }
+
+                    column = new ColumnText(layerContent);
+                    foreach (Chunk cline in lines)
+                    {
+                        column.AddText(cline);
+                        column.AddText(Chunk.NEWLINE);
+                    }
+
+                    column.Alignment = Element.ALIGN_LEFT;
+                    column.Leading = lineHeight;
+                    column.SetSimpleColumn(llx, lly, urx, ury);
+                    column.Go();
+
+                    //rotate back
+                    if (oo.angle != 0.0 && !rotation.IsIdentity())
+                        layerContent.Transform(rotation.CreateInverse());
 
                     layerContent.RestoreState();
                 }
@@ -172,11 +168,16 @@ namespace BetsyNetPDF
 
         public static List<LocatedObject> ExtractTextAndCoordinates(string sourceFile, string regEx)
         {
+            return ExtractTextAndCoordinates(new FileStream(sourceFile, FileMode.Open), regEx);
+        }
+
+        public static List<LocatedObject> ExtractTextAndCoordinates(Stream inputStream, string regEx)
+        {
             List<LocatedObject> locObjects = new List<LocatedObject>();
             if (string.IsNullOrEmpty(regEx))
                 regEx = ".*";
 
-            using (PdfReader reader = new PdfReader(sourceFile))
+            using (PdfReader reader = new PdfReader(inputStream))
             {
                 iTextSharp.text.Rectangle pageSizeWR = reader.GetPageSizeWithRotation(1);
                 PdfReaderContentParser parser = new PdfReaderContentParser(reader);
@@ -187,7 +188,7 @@ namespace BetsyNetPDF
                     strategy = parser.ProcessContent<Parser.TextPositionExtractionStrategy>(i, new Parser.TextPositionExtractionStrategy());
 
                     foreach (Parser.LocatedTextChunk chunk in strategy.LocationResult)
-                        if (oRegex.IsMatch(chunk.Text))
+                        if (!string.IsNullOrEmpty(chunk.Text.Trim()) && oRegex.IsMatch(chunk.Text))
                             locObjects.Add(chunk.Convert2LocatedObject(pageSizeWR));
                 }
             }
@@ -212,8 +213,7 @@ namespace BetsyNetPDF
 
         public static List<LocatedObject> ExtractTextAndCoordsFromLayer(string file, string layer, string regEx)
         {
-            List<string> texts = new List<string>();
-            List<LocatedObject> layerObjs = new List<LocatedObject>();
+            List<LocatedObject> texts = new List<LocatedObject>();
 
             if (string.IsNullOrEmpty(regEx))
                 regEx = ".*";
@@ -221,8 +221,11 @@ namespace BetsyNetPDF
             if (string.IsNullOrEmpty(layer))
                 return ExtractTextAndCoordinates(file, regEx);
 
+            string tmpFile = Path.GetTempFileName();
+
             using (PdfReader reader = new PdfReader(file))
-            using (PdfStamper stamper = new PdfStamper(reader, new MemoryStream()))
+            using (FileStream resPdf = new FileStream(tmpFile, FileMode.Open))
+            using (PdfStamper stamper = new PdfStamper(reader, resPdf))
             {
                 PdfDictionary ocProps = reader.Catalog.GetAsDict(PdfName.OCPROPERTIES);
                 PdfArray ocgs = ocProps.GetAsArray(PdfName.OCGS);
@@ -255,11 +258,11 @@ namespace BetsyNetPDF
                 }
 
                 if (ocgRef == null || ocgDict == null || ocgName == null)
-                    return layerObjs;
+                    return texts;
 
                 PdfDictionary page = reader.GetPageN(1);
                 if (page == null)
-                    return layerObjs;
+                    return texts;
 
                 PdfDictionary resources = page.GetAsDict(PdfName.RESOURCES);
                 PdfDictionary properties = resources.GetAsDict(PdfName.PROPERTIES);
@@ -279,7 +282,125 @@ namespace BetsyNetPDF
                 }
 
                 if (ocgID == null)
-                    return layerObjs;
+                    return texts;
+
+                List<PdfObject> contents;
+                PdfArray contentArray = page.GetAsArray(PdfName.CONTENTS);
+                if (contentArray != null)
+                    contents = contentArray.ArrayList;
+                else
+                {
+                    contents = new List<PdfObject>();
+                    PdfObject contentStream = page.Get(PdfName.CONTENTS);
+                    if (contentStream != null)
+                        contents.Add(contentStream);
+                }
+
+                PRIndirectReference streamRef;
+                PRStream stream;
+                byte[] streamBytes;
+                string curline, layerStart = string.Format("/OC {0} BDC", ocgID.ToString());
+                bool insideLayer, insideTextObj, insideText;
+                byte[] resbytes;
+                StringReader contentReader;
+                StringBuilder resContent;
+                int end, curLineNo, lineNoTextStart;
+                foreach (PdfObject pdfo in contents)
+                {
+                    insideLayer = false;
+                    insideText = false;
+                    insideTextObj = false;
+                    resContent = new StringBuilder();
+
+                    streamRef = pdfo as PRIndirectReference;
+                    if (streamRef == null)
+                        continue;
+
+                    stream = streamRef.Reader.GetPdfObject(streamRef.Number) as PRStream;
+                    if (stream == null)
+                        continue;
+
+                    streamBytes = PdfReader.GetStreamBytes(stream);
+                    if (streamBytes.Length == 0)
+                        continue;
+
+                    using (contentReader = new StringReader(Encoding.ASCII.GetString(streamBytes)))
+                    {
+                        curLineNo = 0;
+                        lineNoTextStart = -1;
+                        while ((curline = contentReader.ReadLine()) != null)
+                        {
+                            curLineNo++;
+                            if (curline.StartsWith(layerStart) || curline.Trim().EndsWith(layerStart) || curline.Contains(" " + layerStart + " "))
+                                insideLayer = true;
+
+                            if (curline.StartsWith("BT"))
+                                insideTextObj = true;
+
+                            if (insideTextObj && curline.StartsWith("ET"))
+                                insideTextObj = insideText = false;
+
+                            if (insideTextObj && !insideText && (curline.StartsWith("(") || curline.StartsWith("<")))
+                            {
+                                insideText = true;
+                                lineNoTextStart = curLineNo;
+                            }
+
+                            if (!insideLayer)
+                            {
+                                if (insideText && (curline.StartsWith("(") || curline.StartsWith("<")) && curline.EndsWith("Tj") && curLineNo == lineNoTextStart)
+                                    curline = "()Tj";
+
+                                if (insideText && (curline.StartsWith("(") || curline.StartsWith("<")) && curLineNo == lineNoTextStart && !curline.EndsWith("Tj"))
+                                    curline = "(";
+
+                                if (insideText && curLineNo > lineNoTextStart && curline.EndsWith("Tj"))
+                                    curline = ")Tj";
+
+                                if (insideText && curLineNo > lineNoTextStart && !curline.EndsWith("Tj"))
+                                    curline = "";
+                            }
+
+                            if (insideText && curline.EndsWith("Tj"))
+                                insideText = false;
+
+                            resContent.AppendLine(curline);
+
+                            if (insideLayer && (curline.StartsWith("EMC") || curline.Trim().EndsWith(" EMC") || curline.Contains(" EMC ")) && !curline.Trim().EndsWith(layerStart))
+                                insideLayer = false;
+                        }
+
+                        resbytes = Encoding.ASCII.GetBytes(resContent.ToString());
+                        stream.Put(PdfName.LENGTH, new PdfNumber(resbytes.Length));
+                        stream.SetData(resbytes);
+                    }
+                }
+            }
+
+            texts = ExtractTextAndCoordinates(tmpFile, regEx);
+            if (File.Exists(tmpFile))
+                File.Delete(tmpFile);
+
+            return texts;
+        }
+
+        // minLength in percentage of the page size 0.0 = 0% -> 1.0 = 100%
+        public static List<PointF> ExtractLinesFromPdf(string file, float minLength)
+        {
+            List<PointF> linePoints = new List<PointF>();
+
+            using (PdfReader reader = new PdfReader(file))
+            {
+                PdfDictionary page = reader.GetPageN(1);
+                iTextSharp.text.Rectangle pageSizeWR = reader.GetPageSizeWithRotation(1);
+                float maxPageSize;
+                if (pageSizeWR.Height > pageSizeWR.Width)
+                    maxPageSize = FromDPI(pageSizeWR.Height);
+                else
+                    maxPageSize = FromDPI(pageSizeWR.Width);
+
+                if (page == null)
+                    return linePoints;
 
                 List<PdfObject> contents;
                 PdfArray contentArray = page.GetAsArray(PdfName.CONTENTS);
@@ -298,6 +419,11 @@ namespace BetsyNetPDF
                 PRTokeniser streamTok;
                 PdfContentParser parser;
                 byte[] streamBytes;
+                List<PointF> currentPoints = null;
+                PointF p1, p2;
+                float length, tmpFacX = 1, tmpFacY = 1, tmpOffsetX = 0, tmpOffsetY = 0, facX = 1, facY = 1, offsetX = 0, offsetY = 0, x, y, cX = 0, cY = 0;
+                bool facSet = false;
+                string op;
                 foreach (PdfObject pdfo in contents)
                 {
                     streamRef = pdfo as PRIndirectReference;
@@ -315,51 +441,109 @@ namespace BetsyNetPDF
                     streamTok = new PRTokeniser(new RandomAccessFileOrArray(streamBytes));
                     parser = new PdfContentParser(streamTok);
                     List<PdfObject> operands = new List<PdfObject>();
-                    string oc = null, ocID = null, bdc = null, emc = null;
                     while (parser.Parse(operands).Count > 0)
                     {
-                        if (operands.Count > 2 && oc == null && ocID == null && bdc == null && emc == null)
+                        if (operands.Count == 7 && linePoints.Count == 0 && !facSet)
                         {
-                            oc = operands[0].ToString();
-                            ocID = operands[1].ToString();
-                            bdc = operands[2].ToString();
-
-                            if (!oc.Equals("/OC") || !ocID.Equals(ocgID.ToString()) || !bdc.Equals("BDC"))
-                                oc = ocID = bdc = emc = null;
-                        }
-                        if (operands.Count == 1 && oc != null && ocID != null && bdc != null && emc == null)
-                        {
-                            emc = operands[0].ToString();
-                            if (emc.Equals("EMC"))
-                                oc = ocID = bdc = emc = null;
-                            else
-                                emc = null;
-                        }
-
-                        if (oc != null && ocID != null && bdc != null && emc == null)
-                        {
-                            foreach (PdfObject pdfop in operands)
+                            if (operands[6].ToString().Equals("cm"))
                             {
-                                if (pdfop.IsString())
-                                    texts.Add(pdfop.ToString());
+                                float.TryParse(operands[0].ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out tmpFacX);
+                                float.TryParse(operands[3].ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out tmpFacY);
+                                float.TryParse(operands[4].ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out tmpOffsetX);
+                                float.TryParse(operands[5].ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out tmpOffsetY);
+
+                                if (tmpFacX == 1.0f &&
+                                    tmpFacY == 1.0f &&
+                                    tmpOffsetX == 0.0f &&
+                                    tmpOffsetY == 0.0f)
+                                    continue;
+
+                                facX = tmpFacX;
+                                facY = tmpFacY;
+                                offsetX = tmpOffsetX;
+                                offsetY = tmpOffsetY;
+                                facSet = true;
                             }
+                        }
+                        if (operands.Count == 3)
+                        {
+                            float.TryParse(operands[0].ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out x);
+                            float.TryParse(operands[1].ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out y);
+                            op = operands[2].ToString().ToLower();
+
+                            if (currentPoints == null && op.Equals("m"))
+                            {
+                                currentPoints = new List<PointF>();
+                                cX = x;
+                                cY = y;
+                            }
+                            if (currentPoints != null && op.Equals("m"))
+                            {
+                                cX = x;
+                                cY = y;
+                            }
+                            if (currentPoints != null && op.Equals("l"))
+                            {
+                                p1 = TranslateCoords((cX * facX) + offsetX, (cY * facY) + offsetY, pageSizeWR);
+                                p2 = TranslateCoords((x * facX) + offsetX, (y * facY) + offsetY, pageSizeWR);
+                                length = CalcLength(p1, p2);
+                                if ((length / maxPageSize) > minLength)
+                                {
+                                    currentPoints.Add(p1);
+                                    currentPoints.Add(p2);
+                                }
+
+                                cX = x;
+                                cY = y;
+                            }
+                        }
+                        if (operands.Count == 1)
+                        {
+                            op = operands[0].ToString().ToLower();
+                            if (currentPoints != null && op.Equals("s"))
+                            {
+                                linePoints.AddRange(currentPoints);
+                                currentPoints = null;
+                            }
+                            else
+                                currentPoints = null;
                         }
                     }
                 }
             }
 
-            if (texts.Count <= 0)
-                return layerObjs;
+            return linePoints;
+        }
 
-            List<LocatedObject> allObjs = ExtractTextAndCoordinates(file, regEx);
-            foreach (LocatedObject obj in allObjs)
-            {
-                Console.WriteLine(obj.ToString());
-                if (texts.Contains(obj.Text))
-                    layerObjs.Add(obj);
-            }
+        public static PointF TranslateCoords(float x, float y, iTextSharp.text.Rectangle pageSize)
+        {
+            PointF res = PointF.Empty;
+            int pageRotation = 360 - pageSize.Rotation;
 
-            return layerObjs;
+            if (pageRotation % 360 == 0)
+                res = new PointF(FromDPI(x), FromDPI(y));
+            if (pageRotation == 90)
+                res = new PointF(FromDPI(pageSize.Width - y), FromDPI(x));
+            if (pageRotation == 180)
+                res = new PointF(FromDPI(pageSize.Width - x), FromDPI(pageSize.Height - y));
+            if (pageRotation == 270)
+                res = new PointF(FromDPI(y), FromDPI(pageSize.Height - x));
+
+            return res;
+        }
+
+        private static float CalcLength(PointF p1, PointF p2)
+        {
+            float pdfA = p2.X - p1.X;
+            float pdfB = p2.Y - p1.Y;
+            float pdfLength = (pdfA * pdfA) + (pdfB * pdfB);
+
+            return (float)Math.Sqrt(pdfLength);
+        }
+
+        private static float FromDPI(float dpi)
+        {
+            return (dpi / 72.0f) * 2540.0f;
         }
 
         private static PdfStamper CreateStamper(PdfReader reader, FileStream output)

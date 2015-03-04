@@ -85,6 +85,7 @@
             this.Controls.Add(this.barDockControlTop);
             this.Name = "BetsyNetPDFCtrl";
             this.Resize += new System.EventHandler(this.BetsyNetPDFArea_Resize);
+            this.Enter += new System.EventHandler(this.BetsyNetPDFCtrl_Enter);
             ((System.ComponentModel.ISupportInitialize)(this.BetsyNetPDFArea)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.dummyBarManager)).EndInit();
             this.ResumeLayout(false);

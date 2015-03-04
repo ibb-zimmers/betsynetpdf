@@ -35,15 +35,11 @@ Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
 
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Drawing;
-using System.Data;
-using System.Text;
-using System.Windows.Forms;
-using DevExpress.XtraEditors;
-using DevExpress.XtraBars;
-using System.IO;
 using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Windows.Forms;
+using DevExpress.XtraBars;
 
 namespace BetsyNetPDF
 {
@@ -111,7 +107,7 @@ namespace BetsyNetPDF
         #endregion
 
         #region delegates
-        public delegate void BetsyNetPDFMouseClickEventHandler(double x, double y);
+        public delegate void BetsyNetPDFMouseClickEventHandler(double x, double y, string key);
         public delegate void BetsyNetPDFSelectionChangedEventHandler();
         public delegate void BetsyNetPDFDeleteEventHandler();
         public delegate void BetsyNetPDFObjectMovedEventHandler(double deltaX, double deltaY, bool moveLabel);
@@ -142,6 +138,10 @@ namespace BetsyNetPDF
         public void SetMouseOverEnabled(bool enabled) { wrapper.SetMouseOverEnabled(enabled); }
         public void SetMeasureModeEnabled(bool enabled) { wrapper.SetMeasureModeEnabled(enabled); }
         public void SetLineModeEnabled(bool enabled) { wrapper.SetLineModeEnabled(enabled); }
+        public void SetLineStart(double x, double y) { wrapper.SetLineStart(x, y); }
+        public PointF GetLineStart() { return wrapper.GetLineStart(); }
+        public bool IsLineStart() { return wrapper.IsLineStart(); }
+        public void SetFixedAngle(double angle) { wrapper.SetFixedAngle(angle); }
         public void SetDeactivateTextSelection(bool value) { wrapper.SetDeactivateTextSelection(value); }
         public void SetPreventOverlayObjectSelection(bool value) { wrapper.SetPreventOverlayObjectSelection(value); }
         public void SetShowOverlapping(bool value) { wrapper.SetShowOverlapping(value); }
@@ -196,6 +196,12 @@ namespace BetsyNetPDF
         public int GetDocumentRotation()
         {
             return wrapper.GetDocumentRotation();
+        }
+
+        // minLength in percentage of the page size
+        public List<PointF> GetLinePointsFromPdf(float minLength)
+        {
+            return BetsyNetPDFEditor.ExtractLinesFromPdf(this.currentFile, minLength);
         }
         #endregion
 
@@ -305,10 +311,10 @@ namespace BetsyNetPDF
             return hwnd;
         }
 
-        private void OnBetsyNetPDFMouseClick(double x, double y)
+        private void OnBetsyNetPDFMouseClick(double x, double y, string key)
         {
             if (BetsyNetPDFMouseClickEvent != null)
-                BetsyNetPDFMouseClickEvent(x, y);
+                BetsyNetPDFMouseClickEvent(x, y, key);
         }
 
         private void OnBetsyNetPDFSelectionChanged()
@@ -376,9 +382,9 @@ namespace BetsyNetPDF
             OnBetsyNetPDFSelectionChanged();
         }
 
-        private void wrapper_MouseClickEvent(double x, double y)
+        private void wrapper_MouseClickEvent(double x, double y, string key)
         {
-            OnBetsyNetPDFMouseClick(x, y);
+            OnBetsyNetPDFMouseClick(x, y, key);
         }
 
         void wrapper_ObjectMovedEvent(double deltaX, double deltaY, bool moveLabel)
@@ -496,12 +502,16 @@ namespace BetsyNetPDF
 
         void barBtnAbout_ItemClick(object sender, ItemClickEventArgs e)
         {
-            using (AboutDialog about = new AboutDialog("rev. " + this.Version))
+            using (AboutDialog about = new AboutDialog("Version: 1." + this.Version))
             {
                 about.ShowDialog();
             }
         }
-        #endregion
 
+        private void BetsyNetPDFCtrl_Enter(object sender, EventArgs e)
+        {
+            wrapper.FocusViewer();
+        }
+        #endregion
     }
 }

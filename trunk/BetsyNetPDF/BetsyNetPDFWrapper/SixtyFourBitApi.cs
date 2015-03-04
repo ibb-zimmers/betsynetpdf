@@ -89,6 +89,7 @@ namespace BetsyNetPDF
         }
 
         [DllImport(DLL, EntryPoint = "CallIsDocOpen", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.I1)]
         static private extern bool IsDocOpen_EXT(IntPtr obj);
 
         public bool IsDocOpen(IntPtr obj)
@@ -160,6 +161,41 @@ namespace BetsyNetPDF
         public void SetLineModeEnabled(IntPtr obj, bool enabled)
         {
             SetLineModeEnabled_EXT(obj, enabled);
+        }
+
+        [DllImport(DLL, EntryPoint = "CallSetLineStart", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetLineStart_EXT(IntPtr obj, double x, double y);
+
+        public void SetLineStart(IntPtr win, double x, double y)
+        {
+            SetLineStart_EXT(win, x, y);
+        }
+
+        [DllImport(DLL, EntryPoint = "CallGetLineStart", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern IntPtr GetLineStart_EXT(IntPtr obj);
+
+        public PointF GetLineStart(IntPtr win)
+        {
+            IntPtr startCoords = GetLineStart_EXT(win);
+            return (PointF)Marshal.PtrToStructure(startCoords, typeof(PointF));
+        }
+
+        //http://blogs.msdn.com/b/jaredpar/archive/2008/10/14/pinvoke-and-bool-or-should-i-say-bool.aspx
+        [DllImport(DLL, EntryPoint = "CallIsLineStart", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.I1)]
+        static private extern bool IsLineStart_EXT(IntPtr obj);
+
+        public bool IsLineStart(IntPtr win)
+        {
+            return IsLineStart_EXT(win);
+        }
+
+        [DllImport(DLL, EntryPoint = "CallSetFixedAngle", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
+        static private extern void SetFixedAngle_EXT(IntPtr obj, double angle);
+
+        public void SetFixedAngle(IntPtr obj, double angle)
+        {
+            SetFixedAngle_EXT(obj, angle);
         }
 
         [DllImport(DLL, EntryPoint = "CallSetDeactivateTextSelection", CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
