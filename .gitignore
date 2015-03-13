@@ -6,7 +6,6 @@
 *.exe
 *.o
 *.so
-bin/**
  
 # Packages #
 ############
@@ -36,3 +35,16 @@ bin/**
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+*.licx
+*.testrunconfig
+BetsyNetPDF/UpgradeLog.XML
+bin/**
+**/obj/**
+**/docs/**
+**/cmake/**
+**UpgradeReport**
+Neues Textdokument.txt
+sumatrapdf/CMakeLists-files.txt
+sumatrapdf/CMakeLists.txt
+sumatrapdf/vs/sumatrapdf-vc2010.opensdf
