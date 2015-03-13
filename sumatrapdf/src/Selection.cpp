@@ -357,8 +357,8 @@ void OnSelectionStart(WindowInfo *win, int x, int y, WPARAM key)
     win->mouseAction = MA_SELECTING;
 
     // Ctrl+drag forces a rectangular selection
-    if (!(key & MK_CONTROL) || (key & MK_SHIFT)) {
-        DisplayModel *dm = win->AsFixed();
+	DisplayModel *dm = win->AsFixed();
+	if (!dm->deactivateTextSelection && (!(key & MK_CONTROL) || (key & MK_SHIFT))) {
         int pageNo = dm->GetPageNoByPoint(PointI(x, y));
         if (dm->ValidPageNo(pageNo)) {
             PointD pt = dm->CvtFromScreen(PointI(x, y), pageNo);

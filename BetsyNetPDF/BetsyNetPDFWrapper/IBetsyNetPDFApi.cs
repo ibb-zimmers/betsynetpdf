@@ -42,7 +42,7 @@ namespace BetsyNetPDF
 {
     interface IBetsyNetPDFApi
     {
-        IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, string printerName,
+        IntPtr BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, string printerName, IntPtr curWin,
             BetsyNetPDFWrapper.CallBackOnSelectionChanged onSelectionChangedDelegate,
             BetsyNetPDFWrapper.CallBackOnMouseClick onMouseClickDelegate,
             BetsyNetPDFWrapper.CallBackOnDelete onDeleteDelegate,

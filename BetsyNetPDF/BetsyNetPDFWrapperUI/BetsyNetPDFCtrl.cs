@@ -371,8 +371,7 @@ namespace BetsyNetPDF
             string sobjects = this.GetAllOverlayObjects();
             BetsyNetPDFEditor.ExportOverlayObjects2PDF(currentFile, Path.GetTempPath() + file, sobjects, "BetsyNetPDF");
 
-            BetsyNetPDFWrapper pwrapper = new BetsyNetPDFWrapper();
-            pwrapper.DirectPrinting(Path.GetTempPath() + file, false, "");
+            wrapper.DirectPrinting(Path.GetTempPath() + file, false, "");
         }
         #endregion
 

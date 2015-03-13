@@ -106,7 +106,7 @@ namespace BetsyNetPDF
                 return;
 
             if (win == IntPtr.Zero)
-                win = api.BetsyNetPDFViewer(hwnd, file, useExternContextMenu, false, false, "", this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
+                win = api.BetsyNetPDFViewer(hwnd, file, useExternContextMenu, false, false, "", IntPtr.Zero, this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
             else
                 api.OpenNewFile(win, file);
         }
@@ -116,7 +116,7 @@ namespace BetsyNetPDF
             if (api == null)
                 return;
 
-            win = api.BetsyNetPDFViewer("", file, false, true, defaultPrinter, printerName, this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
+            api.BetsyNetPDFViewer("", file, false, true, defaultPrinter, printerName, win, this.onSelectionChangedDelegate, this.onMouseClickDelegate, this.onDeleteDelegate, this.onObjectMovedDelegate, this.OnRequestContextMenuDelegate, this.onMouseOverObjectDelegate, this.OnDistanceMeasuredDelegate, this.OnLineDrawnDelegate);
         }
 
         public bool IsDocOpen()

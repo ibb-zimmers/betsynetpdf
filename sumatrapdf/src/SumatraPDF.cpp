@@ -6044,7 +6044,7 @@ std::string BetsyNetPDFUnmanagedApi::GetFakedCmd(std::string file, std::string h
 ///////////////////////////////////////////////////////////////////////////////
 // BetsyNetPDF unmanged api callers
 ///////////////////////////////////////////////////////////////////////////////
-extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName,
+extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName, WindowInfo* viewer,
 	OnSelectionChangedDelegate selChangedPtr, 
 	OnMouseClickDelegate mouseClickPointer, 
 	OnDeleteDelegate onDeletePointer, 
@@ -6213,7 +6213,11 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
             continue;
         }
         if (i.printDialog)
+		{
+			if(viewer)
+				win->selectionOnPage = viewer->selectionOnPage;
             OnMenuPrint(win, i.exitWhenDone);
+		}
     }
     if (i.fileNames.Count() > 0 && !win) {
         // failed to create any window, even though there

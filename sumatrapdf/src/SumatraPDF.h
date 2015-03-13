@@ -351,7 +351,7 @@ private:
 
 extern "C" {
 	
-	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName,
+	extern UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName, WindowInfo* win,
 		OnSelectionChangedDelegate selChangedPtr, 
 		OnMouseClickDelegate mouseClickPointer, 
 		OnDeleteDelegate onDeletePointer, 
