@@ -95,10 +95,6 @@ namespace BetsyNetPDF
             InitWrapper();
         }
 
-        #region properties
-        public string Version { get { return "1." + BetsyNetPDF.AssemblyInfo.VERSION; } }
-        #endregion
-
         #region public methods
         public void BetsyNetPDFViewer(string hwnd, string file, bool useExternContextMenu)
         {

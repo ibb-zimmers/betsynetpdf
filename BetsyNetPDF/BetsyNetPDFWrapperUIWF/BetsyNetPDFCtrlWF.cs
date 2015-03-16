@@ -49,7 +49,7 @@ namespace BetsyNetPDF
         private BetsyNetPDFWrapper wrapper;
         private bool useExternContextMenu, printOnPlotter;
 
-        public string Version { get { if (wrapper != null)return wrapper.Version; return ""; } }
+        public string Version { get { return this.GetType().Assembly.GetName().Version.ToString(); } }
         public bool UseExternContextMenu { get { return useExternContextMenu; } set { this.useExternContextMenu = value; } }
         public bool PrintOnPlotter { get { return printOnPlotter; } set { printOnPlotter = value; } }
 

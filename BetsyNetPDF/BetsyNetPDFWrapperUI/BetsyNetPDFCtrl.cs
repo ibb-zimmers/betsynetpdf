@@ -97,7 +97,7 @@ namespace BetsyNetPDF
         }
 
         #region properties
-        public string Version { get { if (wrapper != null)return wrapper.Version; return ""; } }
+        public string Version { get { return this.GetType().Assembly.GetName().Version.ToString(); } }
         public string CurrentFile { get { return currentFile; } }
         public bool ShowSaveBtn { set { barBtnSaveAs.Visibility = value ? BarItemVisibility.Always : BarItemVisibility.Never; } }
         public bool ShowPrintBtn { set { barBtnPrint.Visibility = value ? BarItemVisibility.Always : BarItemVisibility.Never; } }
