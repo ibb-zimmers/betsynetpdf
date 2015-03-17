@@ -304,7 +304,7 @@ namespace BetsyNetPDF
                 byte[] resbytes;
                 StringReader contentReader;
                 StringBuilder resContent;
-                int end, curLineNo, lineNoTextStart;
+                int curLineNo, lineNoTextStart;
                 foreach (PdfObject pdfo in contents)
                 {
                     insideLayer = false;
@@ -324,7 +324,7 @@ namespace BetsyNetPDF
                     if (streamBytes.Length == 0)
                         continue;
 
-                    using (contentReader = new StringReader(Encoding.ASCII.GetString(streamBytes)))
+                    using (contentReader = new StringReader(Encoding.UTF8.GetString(streamBytes)))
                     {
                         curLineNo = 0;
                         lineNoTextStart = -1;
@@ -340,7 +340,7 @@ namespace BetsyNetPDF
                             if (insideTextObj && curline.StartsWith("ET"))
                                 insideTextObj = insideText = false;
 
-                            if (insideTextObj && !insideText && (curline.StartsWith("(") || curline.StartsWith("<")))
+                            if (insideTextObj && !insideText && (curline.StartsWith("(") || curline.StartsWith("<") || (curline.Contains(" <") && !curline.Contains("("))))
                             {
                                 insideText = true;
                                 lineNoTextStart = curLineNo;
@@ -350,6 +350,12 @@ namespace BetsyNetPDF
                             {
                                 if (insideText && (curline.StartsWith("(") || curline.StartsWith("<")) && curline.EndsWith("Tj") && curLineNo == lineNoTextStart)
                                     curline = "()Tj";
+
+                                if (insideText && (curline.Contains(" <") && !curline.Contains("(")) && curline.EndsWith("Tj") && curLineNo == lineNoTextStart)
+                                    curline = curline.Substring(0, curline.IndexOf("<")) + "()Tj";
+
+                                if (insideText && (curline.Contains(" <") && !curline.Contains("(")) && !curline.EndsWith("Tj") && curLineNo == lineNoTextStart)
+                                    curline = curline.Substring(0, curline.IndexOf("<")) + "(";
 
                                 if (insideText && (curline.StartsWith("(") || curline.StartsWith("<")) && curLineNo == lineNoTextStart && !curline.EndsWith("Tj"))
                                     curline = "(";
@@ -366,7 +372,7 @@ namespace BetsyNetPDF
 
                             resContent.AppendLine(curline);
 
-                            if (insideLayer && (curline.StartsWith("EMC") || curline.Trim().EndsWith(" EMC") || curline.Contains(" EMC ")) && !curline.Trim().EndsWith(layerStart))
+                            if (insideLayer && (curline.StartsWith("EMC") || curline.Trim().EndsWith(" EMC") || curline.Contains(" EMC ")) && !curline.Contains(layerStart))
                                 insideLayer = false;
                         }
 
