@@ -380,5 +380,10 @@ namespace BetsyNetPDF
             PointF pointstart = ctrl.GetLineStart();
             MessageBox.Show(string.Format("x: {0}\ty:{1}", pointstart.X, pointstart.Y));
         }
+
+        private void barButtonItem15_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            BetsyNetPDFEditor.DebugPdfFile(ctrl.CurrentFile);
+        }
     }
 }

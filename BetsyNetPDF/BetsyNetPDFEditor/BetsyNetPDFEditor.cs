@@ -86,6 +86,10 @@ namespace BetsyNetPDF
                 string tmpText;
                 ColumnText column;
                 iTextSharp.text.Rectangle pageRect = reader.GetPageSizeWithRotation(1);
+                iTextSharp.text.Rectangle cropBox = reader.GetCropBox(1);
+                while (cropBox.Rotation != pageRect.Rotation)
+                    cropBox = cropBox.Rotate();
+
                 float llx, lly, urx, ury, height, lineHeight, maxWidth, tmpWidth;
                 AffineTransform rotation = null;
                 foreach (OverlayObject oo in objects)
@@ -126,8 +130,8 @@ namespace BetsyNetPDF
                         cline.SetBackground(bg, 2, 2, 2 + maxWidth - tmpWidth, 3);
                     }
 
-                    float xdpi = (float)oo.GetXdpi() + pageRect.Left;
-                    float ydpi = (float)oo.GetYdpi() + pageRect.Bottom;
+                    float xdpi = (float)oo.GetXdpi() + pageRect.Left + cropBox.Left;
+                    float ydpi = (float)oo.GetYdpi() + pageRect.Bottom + cropBox.Bottom;
                     urx = xdpi + maxWidth + 4f;
                     ury = ydpi;
                     llx = xdpi;
@@ -164,6 +168,17 @@ namespace BetsyNetPDF
 
                 layerContent.EndLayer();
             }
+        }
+
+        public static void DebugPdfFile(string sourceFile)
+        {
+            StringBuilder sb = new StringBuilder();
+            using (StringWriter writer = new StringWriter(sb))
+            {
+                PdfContentReaderTool.ListContentStream(sourceFile, writer);
+            }
+
+            File.WriteAllText(sourceFile + ".debug", sb.ToString());
         }
 
         public static List<LocatedObject> ExtractTextAndCoordinates(string sourceFile, string regEx)
