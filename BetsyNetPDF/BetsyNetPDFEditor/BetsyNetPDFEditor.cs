@@ -220,7 +220,7 @@ namespace BetsyNetPDF
             {
                 Dictionary<string, PdfLayer> layerDict = stamper.GetPdfLayers();
                 foreach (string l in layerDict.Keys)
-                    layers.Add(l);
+                    layers.Add(layerDict[l].GetAsString(PdfName.NAME).ToString());
             }
 
             return layers;
