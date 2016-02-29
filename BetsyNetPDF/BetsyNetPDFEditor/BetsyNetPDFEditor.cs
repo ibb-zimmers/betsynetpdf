@@ -52,7 +52,7 @@ namespace BetsyNetPDF
     {
         public static void AttachFiles2PDF(string pdfFile, List<string> attachments)
         {
-
+            throw new NotImplementedException();
         }
 
         public static void ExportOverlayObjects2PDF(string input, string output, string sobjects, string layerTitle)
