@@ -50,9 +50,28 @@ namespace BetsyNetPDF
 {
     public class BetsyNetPDFEditor
     {
-        public static void AttachFiles2PDF(string pdfFile, List<string> attachments)
+        public static string MergePdfFiles(List<string> pdfFiles)
         {
+            PdfReader reader;
+            FileStream inputFS;
+            string tmpFile = Path.GetTempFileName();
+            using (Document doc = new Document())
+            using (FileStream outputFS = new FileStream(tmpFile, FileMode.Open, FileAccess.Write))
+            using (PdfCopy copy = new PdfCopy(doc, outputFS))
+            {
+                doc.Open();
+                foreach (string file in pdfFiles)
+                {
+                    using (inputFS = new FileStream(file, FileMode.Open, FileAccess.Read))
+                    using (reader = new PdfReader(inputFS))
+                    {
+                        copy.AddDocument(reader);
+                    }
+                }
+                doc.Close();
+            }
 
+            return tmpFile;
         }
 
         public static void ExportOverlayObjects2PDF(string input, string output, string sobjects, string layerTitle)
@@ -67,8 +86,8 @@ namespace BetsyNetPDF
             if (input.EndsWith("\""))
                 input = input.Substring(0, input.Length - 1);
 
-            using (Stream inputStream = new FileStream(input, FileMode.Open))
-            using (FileStream outputStream = new FileStream(output, FileMode.Create))
+            using (Stream inputStream = new FileStream(input, FileMode.Open, FileAccess.Read))
+            using (FileStream outputStream = new FileStream(output, FileMode.Create, FileAccess.Write))
             using (PdfReader reader = new PdfReader(inputStream))
             using (PdfStamper stamper = CreateStamper(reader, outputStream))
             {
@@ -183,7 +202,10 @@ namespace BetsyNetPDF
 
         public static List<LocatedObject> ExtractTextAndCoordinates(string sourceFile, string regEx)
         {
-            return ExtractTextAndCoordinates(new FileStream(sourceFile, FileMode.Open), regEx);
+            using (FileStream inputFS = new FileStream(sourceFile, FileMode.Open, FileAccess.Read))
+            {
+                return ExtractTextAndCoordinates(inputFS, regEx);
+            }
         }
 
         public static List<LocatedObject> ExtractTextAndCoordinates(Stream inputStream, string regEx)
@@ -215,8 +237,10 @@ namespace BetsyNetPDF
         {
             List<string> layers = new List<string>();
 
-            using (PdfReader reader = new PdfReader(file))
-            using (PdfStamper stamper = new PdfStamper(reader, new MemoryStream()))
+            using (FileStream inputFS = new FileStream(file, FileMode.Open, FileAccess.Read))
+            using (PdfReader reader = new PdfReader(inputFS))
+            using (MemoryStream ms = new MemoryStream())
+            using (PdfStamper stamper = new PdfStamper(reader, ms))
             {
                 Dictionary<string, PdfLayer> layerDict = stamper.GetPdfLayers();
                 foreach (string l in layerDict.Keys)
@@ -238,8 +262,9 @@ namespace BetsyNetPDF
 
             string tmpFile = Path.GetTempFileName();
 
-            using (PdfReader reader = new PdfReader(file))
-            using (FileStream resPdf = new FileStream(tmpFile, FileMode.Open))
+            using (FileStream inputFS = new FileStream(file, FileMode.Open, FileAccess.Read))
+            using (PdfReader reader = new PdfReader(inputFS))
+            using (FileStream resPdf = new FileStream(tmpFile, FileMode.Open, FileAccess.Write))
             using (PdfStamper stamper = new PdfStamper(reader, resPdf))
             {
                 PdfDictionary ocProps = reader.Catalog.GetAsDict(PdfName.OCPROPERTIES);
@@ -410,7 +435,8 @@ namespace BetsyNetPDF
         {
             List<PointF> linePoints = new List<PointF>();
 
-            using (PdfReader reader = new PdfReader(file))
+            using (FileStream inputFS = new FileStream(file, FileMode.Open, FileAccess.Read))
+            using (PdfReader reader = new PdfReader(inputFS))
             {
                 PdfDictionary page = reader.GetPageN(1);
                 iTextSharp.text.Rectangle pageSizeWR = reader.GetPageSizeWithRotation(1);

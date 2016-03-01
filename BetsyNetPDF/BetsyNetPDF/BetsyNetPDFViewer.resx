@@ -210,6 +210,9 @@
   <data name="barButtonItem15.Caption" xml:space="preserve">
     <value>debug</value>
   </data>
+  <data name="barBtnMergeFiles.Caption" xml:space="preserve">
+    <value>Merge files</value>
+  </data>
   <data name="bar2.Text" xml:space="preserve">
     <value>Main menu</value>
   </data>
@@ -500,6 +503,12 @@
   <data name="&gt;&gt;barButtonItem14.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
+  <data name="&gt;&gt;barButtonItem15.Name" xml:space="preserve">
+    <value>barButtonItem15</value>
+  </data>
+  <data name="&gt;&gt;barButtonItem15.Type" xml:space="preserve">
+    <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
+  </data>
   <data name="&gt;&gt;bar3.Name" xml:space="preserve">
     <value>bar3</value>
   </data>
@@ -524,10 +533,10 @@
   <data name="&gt;&gt;barButtonItem4.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
-  <data name="&gt;&gt;barButtonItem15.Name" xml:space="preserve">
-    <value>barButtonItem15</value>
+  <data name="&gt;&gt;barBtnMergeFiles.Name" xml:space="preserve">
+    <value>barBtnMergeFiles</value>
   </data>
-  <data name="&gt;&gt;barButtonItem15.Type" xml:space="preserve">
+  <data name="&gt;&gt;barBtnMergeFiles.Type" xml:space="preserve">
     <value>DevExpress.XtraBars.BarButtonItem, DevExpress.XtraBars.v10.2, Version=10.2.3.0, Culture=neutral, PublicKeyToken=b88d1754d700e49a</value>
   </data>
   <data name="&gt;&gt;$this.Name" xml:space="preserve">
