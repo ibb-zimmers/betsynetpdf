@@ -49,7 +49,3 @@ sumatrapdf/CMakeLists-files.txt
 sumatrapdf/CMakeLists.txt
 sumatrapdf/vs/sumatrapdf-vc2010.opensdf
 *.suo
-*.suo
-*.suo
-BetsyNetPDF/BetsyNetPDF.v11.suo
-*.suo

@@ -54,7 +54,11 @@ namespace BetsyNetPDF
         {
             PdfReader reader;
             FileStream inputFS;
+            
             string tmpFile = Path.GetTempFileName();
+            File.Move(tmpFile, tmpFile + ".pdf");
+
+            tmpFile = tmpFile + ".pdf";
             using (Document doc = new Document())
             using (FileStream outputFS = new FileStream(tmpFile, FileMode.Open, FileAccess.Write))
             using (PdfCopy copy = new PdfCopy(doc, outputFS))
