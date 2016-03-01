@@ -385,5 +385,29 @@ namespace BetsyNetPDF
         {
             BetsyNetPDFEditor.DebugPdfFile(ctrl.CurrentFile);
         }
+
+        private void barBtnMergeFiles_ItemClick(object sender, DevExpress.XtraBars.ItemClickEventArgs e)
+        {
+            string[] files = null;
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "PDF|*.pdf";
+                ofd.Multiselect = true;
+                if (ofd.ShowDialog() != DialogResult.OK)
+                    return;
+
+                files = ofd.FileNames;
+            }
+
+            if (files == null || files.Length < 2)
+                return;
+
+            string mergedFile = BetsyNetPDFEditor.MergePdfFiles(files.ToList<string>());
+
+            if (ctrl == null)
+                InitPdfCtrl();
+            ctrl.OpenPdfFile(mergedFile);
+            ctrl.FocusViewer();
+        }
     }
 }

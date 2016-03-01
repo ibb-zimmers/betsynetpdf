@@ -48,3 +48,5 @@ Neues Textdokument.txt
 sumatrapdf/CMakeLists-files.txt
 sumatrapdf/CMakeLists.txt
 sumatrapdf/vs/sumatrapdf-vc2010.opensdf
+*.suo
+*.suo

@@ -61,6 +61,7 @@ namespace BetsyNetPDF
             this.barCheckItem2 = new DevExpress.XtraBars.BarCheckItem();
             this.barButtonItem13 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem14 = new DevExpress.XtraBars.BarButtonItem();
+            this.barButtonItem15 = new DevExpress.XtraBars.BarButtonItem();
             this.bar3 = new DevExpress.XtraBars.Bar();
             this.barDockControlTop = new DevExpress.XtraBars.BarDockControl();
             this.barDockControlBottom = new DevExpress.XtraBars.BarDockControl();
@@ -69,7 +70,7 @@ namespace BetsyNetPDF
             this.barButtonItem2 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem3 = new DevExpress.XtraBars.BarButtonItem();
             this.barButtonItem4 = new DevExpress.XtraBars.BarButtonItem();
-            this.barButtonItem15 = new DevExpress.XtraBars.BarButtonItem();
+            this.barBtnMergeFiles = new DevExpress.XtraBars.BarButtonItem();
             ((System.ComponentModel.ISupportInitialize)(this.barManager1)).BeginInit();
             this.SuspendLayout();
             // 
@@ -116,9 +117,10 @@ namespace BetsyNetPDF
             this.barSubItem5,
             this.barButtonItem13,
             this.barButtonItem14,
-            this.barButtonItem15});
+            this.barButtonItem15,
+            this.barBtnMergeFiles});
             this.barManager1.MainMenu = this.bar2;
-            this.barManager1.MaxItemId = 43;
+            this.barManager1.MaxItemId = 44;
             this.barManager1.StatusBar = this.bar3;
             // 
             // bar1
@@ -146,7 +148,8 @@ namespace BetsyNetPDF
             new DevExpress.XtraBars.LinkPersistInfo(this.barSubItem4),
             new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem11),
             new DevExpress.XtraBars.LinkPersistInfo(this.barSubItem5),
-            new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem15)});
+            new DevExpress.XtraBars.LinkPersistInfo(this.barButtonItem15),
+            new DevExpress.XtraBars.LinkPersistInfo(this.barBtnMergeFiles)});
             this.bar2.OptionsBar.MultiLine = true;
             this.bar2.OptionsBar.UseWholeRow = true;
             resources.ApplyResources(this.bar2, "bar2");
@@ -366,6 +369,13 @@ namespace BetsyNetPDF
             this.barButtonItem14.Name = "barButtonItem14";
             this.barButtonItem14.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem14_ItemClick);
             // 
+            // barButtonItem15
+            // 
+            resources.ApplyResources(this.barButtonItem15, "barButtonItem15");
+            this.barButtonItem15.Id = 42;
+            this.barButtonItem15.Name = "barButtonItem15";
+            this.barButtonItem15.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem15_ItemClick);
+            // 
             // bar3
             // 
             this.bar3.BarName = "Status bar";
@@ -417,12 +427,12 @@ namespace BetsyNetPDF
             this.barButtonItem4.Id = 8;
             this.barButtonItem4.Name = "barButtonItem4";
             // 
-            // barButtonItem15
+            // barBtnMergeFiles
             // 
-            resources.ApplyResources(this.barButtonItem15, "barButtonItem15");
-            this.barButtonItem15.Id = 42;
-            this.barButtonItem15.Name = "barButtonItem15";
-            this.barButtonItem15.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barButtonItem15_ItemClick);
+            resources.ApplyResources(this.barBtnMergeFiles, "barBtnMergeFiles");
+            this.barBtnMergeFiles.Id = 43;
+            this.barBtnMergeFiles.Name = "barBtnMergeFiles";
+            this.barBtnMergeFiles.ItemClick += new DevExpress.XtraBars.ItemClickEventHandler(this.barBtnMergeFiles_ItemClick);
             // 
             // BetsyNetPDFViewer
             // 
@@ -480,6 +490,7 @@ namespace BetsyNetPDF
         private DevExpress.XtraBars.BarButtonItem barButtonItem13;
         private DevExpress.XtraBars.BarButtonItem barButtonItem14;
         private DevExpress.XtraBars.BarButtonItem barButtonItem15;
+        private DevExpress.XtraBars.BarButtonItem barBtnMergeFiles;
 
 
     }
