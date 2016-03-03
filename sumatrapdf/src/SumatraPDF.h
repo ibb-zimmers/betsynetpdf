@@ -217,6 +217,7 @@ public:
 	bool selected, bold, italic, moveAll;
 	GraphicsPath currentPath, currentLabelPath;
 	Color foreGround, backGround;
+	PointD ulOnDoc, urOnDoc, llOnDoc, lrOnDoc;
 
 	OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround, std::string subObjects);
 	void Clone(OverlayObject* oo);
@@ -284,6 +285,7 @@ public:
 	PointD* lineStart;
 	PointD* lineEnd;
 	Point* curLineEnd;
+	PointD selectionStartOnDoc, selectionEndOnDoc, ulSelectionOnDoc, lrSelectionOnDoc;
 	//Region objectsRegion, labelsRegion;
 
 	BetsyNetPDFUnmanagedApi();

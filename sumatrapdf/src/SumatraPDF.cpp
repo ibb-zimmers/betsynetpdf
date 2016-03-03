@@ -4542,6 +4542,8 @@ OverlayObject::OverlayObject(std::string id, std::string label, std::string font
 	this->italic = false;
 	this->foreGround = foreGround;
 	this->backGround = backGround;
+	this->ulOnDoc = PointD(-1, -1);
+	this->lrOnDoc = PointD(-1, -1);
 
 	this->SetDimensions(x, y, dx, dy, lx, ly, rx, ry);
 
@@ -4775,6 +4777,11 @@ void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* boun
 	this->currentPath.AddLines(objPoints, 5);
 	this->currentPath.CloseFigure();
 
+	this->ulOnDoc = win->AsFixed()->CvtFromScreen(PointI((int)objPoints[0].X, (int)objPoints[0].Y), page);
+	this->urOnDoc = win->AsFixed()->CvtFromScreen(PointI((int)objPoints[1].X, (int)objPoints[1].Y), page);
+	this->lrOnDoc = win->AsFixed()->CvtFromScreen(PointI((int)objPoints[2].X, (int)objPoints[2].Y), page);
+	this->llOnDoc = win->AsFixed()->CvtFromScreen(PointI((int)objPoints[3].X, (int)objPoints[3].Y), page);
+
 	objRegion = ::new Region(&(this->currentPath));
 	objRegion->Intersect(bounds);
 	if(objRegion->IsEmpty(g))
@@ -5004,6 +5011,26 @@ bool OverlayObject::CheckIsInSelection(WindowInfo* win)
 	bool inSelection = CheckIsInSelection(win, false);
 	if(!inSelection)
 		inSelection = CheckIsInSelection(win, true);
+
+	if(!inSelection)
+	{
+		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+		if(this->ulOnDoc.x >= betsyApi->ulSelectionOnDoc.x && this->ulOnDoc.x <= betsyApi->lrSelectionOnDoc.x &&
+			this->ulOnDoc.y >= betsyApi->ulSelectionOnDoc.y && this->ulOnDoc.y <= betsyApi->lrSelectionOnDoc.y )
+			inSelection = true;
+
+		if(this->urOnDoc.x >= betsyApi->ulSelectionOnDoc.x && this->urOnDoc.x <= betsyApi->lrSelectionOnDoc.x &&
+			this->urOnDoc.y >= betsyApi->ulSelectionOnDoc.y && this->urOnDoc.y <= betsyApi->lrSelectionOnDoc.y )
+			inSelection = true;
+
+		if(this->llOnDoc.x >= betsyApi->ulSelectionOnDoc.x && this->llOnDoc.x <= betsyApi->lrSelectionOnDoc.x &&
+			this->llOnDoc.y >= betsyApi->ulSelectionOnDoc.y && this->llOnDoc.y <= betsyApi->lrSelectionOnDoc.y )
+			inSelection = true;
+		
+		if(this->lrOnDoc.x >= betsyApi->ulSelectionOnDoc.x && this->lrOnDoc.x <= betsyApi->lrSelectionOnDoc.x &&
+			this->lrOnDoc.y >= betsyApi->ulSelectionOnDoc.y && this->lrOnDoc.y <= betsyApi->lrSelectionOnDoc.y )
+			inSelection = true;
+	}
 
 	return inSelection;
 }
@@ -5624,6 +5651,31 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 	if(win->selectionRect.dx == 0 && win->selectionRect.dy == 0)
 		win->selectionRect = RectI(win->selectionRect.x, win->selectionRect.y, 1, 1);
 
+	// find ul and lr corner of selection in doc coordinates
+	double ulx,uly,lrx,lry;
+	if(this->selectionStartOnDoc.x < this->selectionEndOnDoc.x)
+		ulx = this->selectionStartOnDoc.x;
+	else
+		ulx = this->selectionEndOnDoc.x;
+
+	if(this->selectionStartOnDoc.y < this->selectionEndOnDoc.y)
+		uly = this->selectionStartOnDoc.y;
+	else
+		uly = this->selectionEndOnDoc.y;
+
+	if(this->selectionStartOnDoc.x > this->selectionEndOnDoc.x)
+		lrx = this->selectionStartOnDoc.x;
+	else
+		lrx = this->selectionEndOnDoc.x;
+
+	if(this->selectionStartOnDoc.y > this->selectionEndOnDoc.y)
+		lry = this->selectionStartOnDoc.y;
+	else
+		lry = this->selectionEndOnDoc.y;
+
+	this->ulSelectionOnDoc = PointD(ulx, uly);
+	this->lrSelectionOnDoc = PointD(lrx, lry);
+
 	this->selectionChanging = true;
 
 	bool prevSelectedState, selectionChanged = false, notify = false;
@@ -5667,6 +5719,11 @@ bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPr
 	}
 
 	this->selectionChanging = false;
+
+	this->selectionStartOnDoc = PointD(-1,-1);
+	this->selectionEndOnDoc = PointD(-1,-1);
+	this->ulSelectionOnDoc = PointD(-1,-1);
+	this->lrSelectionOnDoc = PointD(-1,-1);
 
 	if(notify)
 	{

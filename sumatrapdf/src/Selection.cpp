@@ -367,6 +367,18 @@ void OnSelectionStart(WindowInfo *win, int x, int y, WPARAM key)
         }
     }
 
+	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+	if(betsyApi != NULL)
+	{
+		int pageNo = dm->GetPageNoByPoint(PointI(x, y));
+        if (dm->ValidPageNo(pageNo)) 
+		{
+            PointD pt = dm->CvtFromScreen(PointI(x, y), pageNo);
+			betsyApi->selectionStartOnDoc = pt;
+			betsyApi->selectionEndOnDoc = pt;
+		}
+	}
+
     SetCapture(win->hwndCanvas);
     SetTimer(win->hwndCanvas, SMOOTHSCROLL_TIMER_ID, SMOOTHSCROLL_DELAY_IN_MS, NULL);
 
@@ -390,5 +402,17 @@ void OnSelectionStop(WindowInfo *win, int x, int y, bool aborted)
         win->selectionOnPage = SelectionOnPage::FromRectangle(win->AsFixed(), win->selectionRect);
         win->showSelection = win->selectionOnPage != NULL;
     }
+
+	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+	if(betsyApi != NULL)
+	{
+		int pageNo = win->AsFixed()->GetPageNoByPoint(PointI(x, y));
+        if (win->AsFixed()->ValidPageNo(pageNo)) 
+		{
+            PointD pt = win->AsFixed()->CvtFromScreen(PointI(x, y), pageNo);
+			betsyApi->selectionEndOnDoc = pt;
+		}
+	}
+
     win->RepaintAsync();
 }
