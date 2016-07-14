@@ -143,10 +143,10 @@ static void OnDraggingStop(WindowInfo& win, int x, int y, bool aborted)
 
     SizeI drag(x - win.dragPrevPos.x, y - win.dragPrevPos.y);
     BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
-	if(betsyApi != NULL && betsyApi->hitLabelForDragging)
-		betsyApi->MoveSelectedOverlayObjectsBy(&win, x, y);
-	else
-		win.MoveDocBy(drag.dx, -2 * drag.dy);
+    if(betsyApi != NULL && betsyApi->hitLabelForDragging)
+        betsyApi->MoveSelectedOverlayObjectsBy(&win, x, y);
+    else
+        win.MoveDocBy(drag.dx, -2 * drag.dy);
 }
 
 static void OnMouseMove(WindowInfo& win, int x, int y, WPARAM flags)
@@ -175,7 +175,7 @@ static void OnMouseMove(WindowInfo& win, int x, int y, WPARAM flags)
         win.linkOnLastButtonDown = NULL;
     }
 
-	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
+    BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
     switch (win.mouseAction) {
     case MA_SCROLLING:
         win.yScrollSpeed = (y - win.dragStart.y) / SMOOTHSCROLL_SLOW_DOWN_FACTOR;
@@ -193,18 +193,18 @@ static void OnMouseMove(WindowInfo& win, int x, int y, WPARAM flags)
         break;
     case MA_DRAGGING:
     case MA_DRAGGING_RIGHT:
-		if(betsyApi != NULL && betsyApi->hitLabelForDragging)
-			betsyApi->MoveSelectedOverlayObjectsBy(&win, x, y);
-		else
-			win.MoveDocBy(win.dragPrevPos.x - x, win.dragPrevPos.y - y);
+        if(betsyApi != NULL && betsyApi->hitLabelForDragging)
+            betsyApi->MoveSelectedOverlayObjectsBy(&win, x, y);
+        else
+            win.MoveDocBy(win.dragPrevPos.x - x, win.dragPrevPos.y - y);
         break;
 
-	case MA_IDLE:
-		if(betsyApi != NULL && betsyApi->mouseOverEnabled)
-			betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, flags & MK_CONTROL, false);
-		if(betsyApi != NULL && (betsyApi->measureMode || betsyApi->lineMode))
-			betsyApi->SetCurrentLineEnd(&win, x, y);
-		break;
+    case MA_IDLE:
+        if(betsyApi != NULL && betsyApi->mouseOverEnabled)
+            betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, flags & MK_CONTROL, false);
+        if(betsyApi != NULL && (betsyApi->measureMode || betsyApi->lineMode))
+            betsyApi->SetCurrentLineEnd(&win, x, y);
+        break;
     }
     // needed also for detecting cursor movement in presentation mode
     win.dragPrevPos = PointI(x, y);
@@ -243,9 +243,9 @@ static void OnMouseLeftButtonDown(WindowInfo& win, int x, int y, WPARAM key)
     win.dragStartPending = true;
     win.dragStart = PointI(x, y);
 
-	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
-	if(betsyApi != NULL)
-		betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, key & MK_CONTROL);
+    BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
+    if(betsyApi != NULL)
+        betsyApi->CheckOverlayObjectAtMousePos(&win, x, y, key & MK_CONTROL);
 
     // - without modifiers, clicking on text starts a text selection
     //   and clicking somewhere else starts a drag
@@ -270,25 +270,25 @@ static void OnMouseLeftButtonUp(WindowInfo& win, int x, int y, WPARAM key)
         abs(x - win.dragStart.x) > GetSystemMetrics(SM_CXDRAG) ||
         abs(y - win.dragStart.y) > GetSystemMetrics(SM_CYDRAG);
 
-	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
-	if (MA_DRAGGING == win.mouseAction)
-	{
-		OnDraggingStop(win, x, y, !didDragMouse);
-		if(betsyApi != NULL)
-		{
-			if(didDragMouse && betsyApi->hitLabelForDragging)
-				betsyApi->CheckOverlayObjectMoved(&win, x, y);
-			if(!didDragMouse)
-				betsyApi->CheckMouseClick(&win, x, y, key & MK_CONTROL);
-		}
-	}
-	else {
-		OnSelectionStop(&win, x, y, !didDragMouse);
-		if (MA_SELECTING == win.mouseAction && win.showSelection)
-			win.selectionMeasure = win.AsFixed()->CvtFromScreen(win.selectionRect).Size();
-		if(betsyApi != NULL && !(key & MK_SHIFT))
-			betsyApi->CheckSelectionChanged(&win, key & MK_CONTROL);
-	}
+    BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
+    if (MA_DRAGGING == win.mouseAction)
+    {
+        OnDraggingStop(win, x, y, !didDragMouse);
+        if(betsyApi != NULL)
+        {
+            if(didDragMouse && betsyApi->hitLabelForDragging)
+                betsyApi->CheckOverlayObjectMoved(&win, x, y);
+            if(!didDragMouse)
+                betsyApi->CheckMouseClick(&win, x, y, key & MK_CONTROL);
+        }
+    }
+    else {
+        OnSelectionStop(&win, x, y, !didDragMouse);
+        if (MA_SELECTING == win.mouseAction && win.showSelection)
+            win.selectionMeasure = win.AsFixed()->CvtFromScreen(win.selectionRect).Size();
+        if(betsyApi != NULL && !(key & MK_SHIFT))
+            betsyApi->CheckSelectionChanged(&win, key & MK_CONTROL);
+    }
 
     DisplayModel *dm = win.AsFixed();
     PointD ptPage = dm->CvtFromScreen(PointI(x, y));
@@ -665,12 +665,12 @@ static void DrawDocument(WindowInfo& win, HDC hdc, RECT *rcArea)
             continue;
         }
 
-		BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
-		if(betsyApi != NULL)
-		{
-			betsyApi->DrawOverlayObjets(&hdc, &win, pageNo, bounds);
-			betsyApi->DrawLine(&hdc, &win);
-		}
+        BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
+        if(betsyApi != NULL)
+        {
+            betsyApi->DrawOverlayObjets(&hdc, &win, pageNo, bounds);
+            betsyApi->DrawLine(&hdc, &win);
+        }
 
         if (!renderOutOfDateCue)
             continue;

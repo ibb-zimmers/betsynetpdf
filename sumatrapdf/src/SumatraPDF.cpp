@@ -1292,7 +1292,7 @@ static void CreateSidebar(WindowInfo* win)
 
 static WindowInfo* CreateWindowInfo()
 {
-	RectI windowPos = gGlobalPrefs->windowPos;
+    RectI windowPos = gGlobalPrefs->windowPos;
     if (!windowPos.IsEmpty())
         EnsureAreaVisibility(windowPos);
     else
@@ -1308,9 +1308,9 @@ static WindowInfo* CreateWindowInfo()
         return NULL;
 
     AssertCrash(NULL == FindWindowInfoByHwnd(hwndFrame));
-	WindowInfo *win = new WindowInfo(hwndFrame);
-	
-	// don't add a WS_EX_STATICEDGE so that the scrollbars touch the
+    WindowInfo *win = new WindowInfo(hwndFrame);
+    
+    // don't add a WS_EX_STATICEDGE so that the scrollbars touch the
     // screen's edge when maximized (cf. Fitts' law) and there are
     // no additional adjustments needed when (un)maximizing
     win->hwndCanvas = CreateWindow(
@@ -1346,7 +1346,7 @@ static WindowInfo* CreateWindowInfo()
         win->hwndCanvas, NULL, GetModuleHandle(NULL), NULL);
 
     CreateCaption(win);
-	CreateTabbar(win);
+    CreateTabbar(win);
     CreateToolbar(win);
     CreateSidebar(win);
     UpdateFindbox(win);
@@ -1524,16 +1524,16 @@ static WindowInfo* LoadDocumentOld(LoadArgs& args)
         args.win = win;
         args.isNewWindow = false;
     } else if (!win || !openNewTab && !args.forceReuse && win->IsDocLoaded()) {
-		WindowInfo *currWin = win;
-		win = CreateWindowInfo();
-		if (!win)
-			return NULL;
-		args.win = win;
-		args.isNewWindow = true;
-		if (currWin) {
-			RememberFavTreeExpansionState(currWin);
-			win->expandedFavorites = currWin->expandedFavorites;
-		}
+        WindowInfo *currWin = win;
+        win = CreateWindowInfo();
+        if (!win)
+            return NULL;
+        args.win = win;
+        args.isNewWindow = true;
+        if (currWin) {
+            RememberFavTreeExpansionState(currWin);
+            win->expandedFavorites = currWin->expandedFavorites;
+        }
     }
 
     CrashIf(openNewTab && args.forceReuse);
@@ -2308,11 +2308,11 @@ void CloseWindow(WindowInfo *win, bool quitIfLast, bool forceClose)
     CrashIf(forceClose && !quitIfLast);
     if (forceClose) quitIfLast = true;
 
-	if(win->betsyApi != NULL)
-	{
-		quitIfLast = false;
-		forceClose = false;
-	}
+    if(win->betsyApi != NULL)
+    {
+        quitIfLast = false;
+        forceClose = false;
+    }
 
     // when used as an embedded plugin, closing should happen automatically
     // when the parent window is destroyed (cf. WM_DESTROY)
@@ -3457,7 +3457,7 @@ bool FrameOnKeydown(WindowInfo *win, WPARAM key, LPARAM lparam, bool inTextfield
     if (PM_BLACK_SCREEN == win->presentation || PM_WHITE_SCREEN == win->presentation)
         return false;
 
-	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+    BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
 
     if (VK_UP == key) {
         if (dm && dm->NeedVScroll())
@@ -3498,23 +3498,23 @@ bool FrameOnKeydown(WindowInfo *win, WPARAM key, LPARAM lparam, bool inTextfield
             SendMessage(win->hwndCanvas, WM_VSCROLL, SB_BOTTOM, 0);
     } else if (VK_MULTIPLY == key && dm) {
         dm->RotateBy(90);
-	} else if (VK_DIVIDE == key && dm) {
-		dm->RotateBy(-90);
-		gIsDivideKeyDown = true;
+    } else if (VK_DIVIDE == key && dm) {
+        dm->RotateBy(-90);
+        gIsDivideKeyDown = true;
 #ifdef DEBUG
-	} else if (VK_F1 == key && win->AsEbook()) {
-		// TODO: this was in EbookWindow - is it still needed?
-		SendMessage(win->hwndFrame, WM_COMMAND, IDM_DEBUG_MUI, 0);
+    } else if (VK_F1 == key && win->AsEbook()) {
+        // TODO: this was in EbookWindow - is it still needed?
+        SendMessage(win->hwndFrame, WM_COMMAND, IDM_DEBUG_MUI, 0);
 #endif
-	} else if (VK_DELETE == key && betsyApi != NULL) {
-			betsyApi->CheckDeleteOverlayObject();
-	} else if (VK_ESCAPE == key && betsyApi != NULL) {
-			betsyApi->Escape(win);
-	} else {
-		return false;
-	}
+    } else if (VK_DELETE == key && betsyApi != NULL) {
+            betsyApi->CheckDeleteOverlayObject();
+    } else if (VK_ESCAPE == key && betsyApi != NULL) {
+            betsyApi->Escape(win);
+    } else {
+        return false;
+    }
 
-	return true;
+    return true;
 }
 
 static void FrameOnChar(WindowInfo& win, WPARAM key, LPARAM info=0)
@@ -3567,7 +3567,7 @@ static void FrameOnChar(WindowInfo& win, WPARAM key, LPARAM info=0)
     if (!win.IsDocLoaded())
         return;
 
-	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
+    BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win.betsyApi;
 
     switch (key) {
     case VK_SPACE:
@@ -3588,18 +3588,18 @@ static void FrameOnChar(WindowInfo& win, WPARAM key, LPARAM info=0)
         break;
     case 'k':
         FrameOnKeydown(&win, VK_UP, 0);
-		break;
-	case 'l':
-		if(betsyApi != NULL)
-			betsyApi->notifyMouseClick(-1, -1, "l");
-		break;
+        break;
+    case 'l':
+        if(betsyApi != NULL)
+            betsyApi->notifyMouseClick(-1, -1, "l");
+        break;
     case 'n':
         win.ctrl->GoToNextPage();
         break;
     case 'p':
-		if(betsyApi == NULL)
-			win.ctrl->GoToPrevPage();
-		break;
+        if(betsyApi == NULL)
+            win.ctrl->GoToPrevPage();
+        break;
     case 'z':
         win.ToggleZoom();
         break;
@@ -3620,9 +3620,9 @@ static void FrameOnChar(WindowInfo& win, WPARAM key, LPARAM info=0)
         gIsDivideKeyDown = false;
         break;
     case 'c':
-		if(betsyApi == NULL)
-			OnMenuViewContinuous(win);
-		break;
+        if(betsyApi == NULL)
+            OnMenuViewContinuous(win);
+        break;
     case 'b':
         if (win.AsFixed() && !IsSingle(win.ctrl->GetDisplayMode())) {
             // "e-book view": flip a single page
@@ -4529,650 +4529,650 @@ void CrashHandlerMessage()
 ///////////////////////////////////////////////////////////////////////////////
 OverlayObject::OverlayObject(std::string id, std::string label, std::string font, double x, double y, double dx, double dy, double lx, double ly, double rx, double ry, double angle, double labelAngle, float fontSize, Color foreGround, Color backGround, std::string subObjects)
 {
-	this->id = id;
-	this->label = label;
-	this->font = font;
-	this->page = 1;
-	this->angle = angle;
-	this->labelAngle = labelAngle;
-	this->fontSize = fontSize;
-	this->selected = false;
-	this->moveAll = false;
-	this->bold = false;
-	this->italic = false;
-	this->foreGround = foreGround;
-	this->backGround = backGround;
+    this->id = id;
+    this->label = label;
+    this->font = font;
+    this->page = 1;
+    this->angle = angle;
+    this->labelAngle = labelAngle;
+    this->fontSize = fontSize;
+    this->selected = false;
+    this->moveAll = false;
+    this->bold = false;
+    this->italic = false;
+    this->foreGround = foreGround;
+    this->backGround = backGround;
 
-	this->SetDimensions(x, y, dx, dy, lx, ly, rx, ry);
+    this->SetDimensions(x, y, dx, dy, lx, ly, rx, ry);
 
-	this->CreateSubObjects(subObjects);
+    this->CreateSubObjects(subObjects);
 }
 
 void OverlayObject::Clone(OverlayObject* oo)
 {
-	this->label = oo->label;
-	this->font = oo->font;
-	this->angle = oo->angle;
-	this->labelAngle = oo->labelAngle;
-	this->fontSize = oo->fontSize;
-	this->foreGround = oo->foreGround;
-	this->backGround = oo->backGround;
+    this->label = oo->label;
+    this->font = oo->font;
+    this->angle = oo->angle;
+    this->labelAngle = oo->labelAngle;
+    this->fontSize = oo->fontSize;
+    this->foreGround = oo->foreGround;
+    this->backGround = oo->backGround;
 
-	this->SetDimensions(oo->GetX(), oo->GetY(), oo->GetDX(), oo->GetDY(), oo->GetLX(), oo->GetLY(), oo->GetRX(), oo->GetRY());
+    this->SetDimensions(oo->GetX(), oo->GetY(), oo->GetDX(), oo->GetDY(), oo->GetLX(), oo->GetLY(), oo->GetRX(), oo->GetRY());
 }
 
 void OverlayObject::CreateSubObjects(std::string subObjects)
 {
-	this->subObjects.clear();
+    this->subObjects.clear();
 
-	if(subObjects.length() < 1)
-		return;
+    if(subObjects.length() < 1)
+        return;
 
-	SubObject* so;
-	std::string objToken;
-	size_t pos = subObjects.find_first_of(">");
-	bool found;
-	while(pos != std::string::npos)
-	{
-		objToken = subObjects.substr(0, pos + 1);
-		subObjects = subObjects.substr(pos + 1);
+    SubObject* so;
+    std::string objToken;
+    size_t pos = subObjects.find_first_of(">");
+    bool found;
+    while(pos != std::string::npos)
+    {
+        objToken = subObjects.substr(0, pos + 1);
+        subObjects = subObjects.substr(pos + 1);
 
-		so = SubObject::CreateFromString(objToken);
-		this->subObjects.push_back(so);
-		
-		pos = subObjects.find_first_of(">");
-	}
+        so = SubObject::CreateFromString(objToken);
+        this->subObjects.push_back(so);
+        
+        pos = subObjects.find_first_of(">");
+    }
 }
 
 double OverlayObject::GetX()
 {
-	return (this->x_dpi / 72.0) * 2540.0;
+    return (this->x_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetY()
 {
-	return (this->y_dpi / 72.0) * 2540.0;
+    return (this->y_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetDX()
 {
-	if(this->dx_dpi <= 0.0)
-		return -1;
+    if(this->dx_dpi <= 0.0)
+        return -1;
 
-	return (this->dx_dpi / 72.0) * 2540.0;
+    return (this->dx_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetDY()
 {
-	if(this->dy_dpi <= 0.0)
-		return -1;
+    if(this->dy_dpi <= 0.0)
+        return -1;
 
-	return (this->dy_dpi / 72.0) * 2540.0;
+    return (this->dy_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetLX()
 {
-	if(this->lx_dpi <= 0.0)
-		return -1;
+    if(this->lx_dpi <= 0.0)
+        return -1;
 
-	return (this->lx_dpi / 72.0) * 2540.0;
+    return (this->lx_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetLY()
 {
-	if(this->ly_dpi <= 0.0)
-		return -1;
+    if(this->ly_dpi <= 0.0)
+        return -1;
 
-	return (this->ly_dpi / 72.0) * 2540.0;
+    return (this->ly_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetRX()
 {
-	return (this->rx_dpi / 72.0) * 2540.0;
+    return (this->rx_dpi / 72.0) * 2540.0;
 }
 
 double OverlayObject::GetRY()
 {
-	return (this->ry_dpi / 72.0) * 2540.0;
+    return (this->ry_dpi / 72.0) * 2540.0;
 }
 
 void OverlayObject::SetDimensions(double x, double y, double dx, double dy, double lx, double ly, double rx, double ry)
 {
-	this->x_dpi = (x / 2540.0) * 72.0;
-	this->y_dpi = (y / 2540.0) * 72.0;
-	this->dx_dpi = (dx / 2540.0) * 72.0;
-	this->dy_dpi = (dy / 2540.0) * 72.0;
+    this->x_dpi = (x / 2540.0) * 72.0;
+    this->y_dpi = (y / 2540.0) * 72.0;
+    this->dx_dpi = (dx / 2540.0) * 72.0;
+    this->dy_dpi = (dy / 2540.0) * 72.0;
 
-	if(dx <= 0.0)
-	{
-		if(dy > 0.0)
-			this->dx_dpi = 1;
-		else
-			this->dx_dpi = -1;
-	}
-	if(dx == 1.0)
-		this->dx_dpi = 1.0;
+    if(dx <= 0.0)
+    {
+        if(dy > 0.0)
+            this->dx_dpi = 1;
+        else
+            this->dx_dpi = -1;
+    }
+    if(dx == 1.0)
+        this->dx_dpi = 1.0;
 
-	if(dy <= 0.0)
-	{
-		if(dx > 0.0)
-			this->dy_dpi = 1;
-		else
-			this->dy_dpi = -1;
-	}
-	if(dy == 1.0)
-		this->dy_dpi = 1.0;
+    if(dy <= 0.0)
+    {
+        if(dx > 0.0)
+            this->dy_dpi = 1;
+        else
+            this->dy_dpi = -1;
+    }
+    if(dy == 1.0)
+        this->dy_dpi = 1.0;
 
-	if(lx <= 0.0)
-		this->lx_dpi = -1;
-	else
-		this->lx_dpi = (lx / 2540.0) * 72.0;
+    if(lx <= 0.0)
+        this->lx_dpi = -1;
+    else
+        this->lx_dpi = (lx / 2540.0) * 72.0;
 
-	if(ly <= 0.0)
-		this->ly_dpi = -1;
-	else
-		this->ly_dpi = (ly / 2540.0) * 72.0;
+    if(ly <= 0.0)
+        this->ly_dpi = -1;
+    else
+        this->ly_dpi = (ly / 2540.0) * 72.0;
 
-	this->rx_dpi = (rx / 2540.0) * 72.0;
-	this->ry_dpi = (ry / 2540.0) * 72.0;
+    this->rx_dpi = (rx / 2540.0) * 72.0;
+    this->ry_dpi = (ry / 2540.0) * 72.0;
 }
 
 void OverlayObject::Move(double deltaX, double deltaY, bool moveLabel)
 {
-	if(this->moveAll)
-	{
-		this->lx_dpi -= deltaX;
-		this->ly_dpi += deltaY;
+    if(this->moveAll)
+    {
+        this->lx_dpi -= deltaX;
+        this->ly_dpi += deltaY;
 
-		this->x_dpi -= deltaX;
-		this->y_dpi += deltaY;
+        this->x_dpi -= deltaX;
+        this->y_dpi += deltaY;
 
-		return;
-	}
-	if(moveLabel)
-	{
-		this->lx_dpi -= deltaX;
-		this->ly_dpi += deltaY;
-	}
-	else
-	{
-		this->x_dpi -= deltaX;
-		this->y_dpi += deltaY;
-	}
+        return;
+    }
+    if(moveLabel)
+    {
+        this->lx_dpi -= deltaX;
+        this->ly_dpi += deltaY;
+    }
+    else
+    {
+        this->x_dpi -= deltaX;
+        this->y_dpi += deltaY;
+    }
 }
 
 void OverlayObject::Paint(Graphics* g, WindowInfo* win, int pageNo, Region* bounds, Region* objRegion, Matrix* rotation, Matrix* elemRotation)
 {
-	if(this->page!=pageNo)
-		return;
+    if(this->page!=pageNo)
+        return;
 
-	BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
+    BetsyNetPDFUnmanagedApi* betsyApi = (BetsyNetPDFUnmanagedApi*)win->betsyApi;
 
-	double pageHeight = win->AsFixed()->GetPageInfo(1)->page.dy;
-	float zoom = win->AsFixed()->GetZoomReal(pageNo);
+    double pageHeight = win->AsFixed()->GetPageInfo(1)->page.dy;
+    float zoom = win->AsFixed()->GetZoomReal(pageNo);
 
-	PointD ulOnPage(this->x_dpi - this->rx_dpi, pageHeight - this->y_dpi + this->ry_dpi);
-	PointI ulOnScreen = win->AsFixed()->CvtToScreen(pageNo, ulOnPage);
+    PointD ulOnPage(this->x_dpi - this->rx_dpi, pageHeight - this->y_dpi + this->ry_dpi);
+    PointI ulOnScreen = win->AsFixed()->CvtToScreen(pageNo, ulOnPage);
 
-	PointD rotOnPage(this->x_dpi, pageHeight - this->y_dpi);
-	PointI rotOnScreen = win->AsFixed()->CvtToScreen(pageNo, rotOnPage);
+    PointD rotOnPage(this->x_dpi, pageHeight - this->y_dpi);
+    PointI rotOnScreen = win->AsFixed()->CvtToScreen(pageNo, rotOnPage);
 
-	// calc size on screen
-	Widen<wchar_t> to_wstring;
-	std::wstring wsfont = to_wstring(this->font);
-	std::wstring wslabel = to_wstring(this->label);
+    // calc size on screen
+    Widen<wchar_t> to_wstring;
+    std::wstring wsfont = to_wstring(this->font);
+    std::wstring wslabel = to_wstring(this->label);
 
-	FontFamily  fontFamily(wsfont.c_str());
-	float fsize = this->fontSize * zoom;
-	Font        font(&fontFamily, fsize, this->selected ? FontStyleBold : FontStyleRegular, Gdiplus::Unit::UnitPoint);
-	PointF      ulEdge(ulOnScreen.x, ulOnScreen.y);
-	PointF      rotPoint(rotOnScreen.x, rotOnScreen.y);
-	RectF		bbox( 0, 0, 0, 0);
-	g->MeasureString(wslabel.c_str(), -1, &font, ulEdge, &bbox);
+    FontFamily  fontFamily(wsfont.c_str());
+    float fsize = this->fontSize * zoom;
+    Font        font(&fontFamily, fsize, this->selected ? FontStyleBold : FontStyleRegular, Gdiplus::Unit::UnitPoint);
+    PointF      ulEdge(ulOnScreen.x, ulOnScreen.y);
+    PointF      rotPoint(rotOnScreen.x, rotOnScreen.y);
+    RectF		bbox( 0, 0, 0, 0);
+    g->MeasureString(wslabel.c_str(), -1, &font, ulEdge, &bbox);
 
-	if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
-	{
-		bbox.Width = this->dx_dpi * zoom;
-		bbox.Height = this->dy_dpi * zoom;
-	}
-	if(bbox.Width <= 1.0)
-		bbox.Width = 1.0;
-	if(bbox.Height <= 1.0)
-		bbox.Height = 1.0;
+    if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
+    {
+        bbox.Width = this->dx_dpi * zoom;
+        bbox.Height = this->dy_dpi * zoom;
+    }
+    if(bbox.Width <= 1.0)
+        bbox.Width = 1.0;
+    if(bbox.Height <= 1.0)
+        bbox.Height = 1.0;
 
-	PointF objPoints[5] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y) };
-	PointF labelLineStartPoints[8] = 
-	{ 
-		PointF(bbox.X, bbox.Y), 
-		PointF(bbox.X + bbox.Width / 2.0f, bbox.Y), 
-		PointF(bbox.X + bbox.Width, bbox.Y), 
-		PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2.0f),
-		PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height),		
-		PointF(bbox.X + bbox.Width / 2.0f, bbox.Y + bbox.Height),
-		PointF(bbox.X, bbox.Y + bbox.Height),
-		PointF(bbox.X, bbox.Y + bbox.Height / 2.0f)
-	};
+    PointF objPoints[5] = { PointF(bbox.X, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y), PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y + bbox.Height), PointF(bbox.X, bbox.Y) };
+    PointF labelLineStartPoints[8] = 
+    { 
+        PointF(bbox.X, bbox.Y), 
+        PointF(bbox.X + bbox.Width / 2.0f, bbox.Y), 
+        PointF(bbox.X + bbox.Width, bbox.Y), 
+        PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2.0f),
+        PointF(bbox.X + bbox.Width, bbox.Y + bbox.Height),		
+        PointF(bbox.X + bbox.Width / 2.0f, bbox.Y + bbox.Height),
+        PointF(bbox.X, bbox.Y + bbox.Height),
+        PointF(bbox.X, bbox.Y + bbox.Height / 2.0f)
+    };
 
-	// calc rotation	
-	if(win->AsFixed()->GetRotation() != 0)
-	{
-		rotation->RotateAt(win->AsFixed()->GetRotation(), ulEdge, Gdiplus::MatrixOrderAppend);
-		rotation->TransformPoints(objPoints, 5);
-		rotation->TransformPoints(labelLineStartPoints, 8);
-		g->SetTransform(rotation);
-	}
-	if(this->angle != 0.0)
-	{
-		elemRotation->RotateAt(-this->angle, rotPoint, Gdiplus::MatrixOrderAppend);
-		elemRotation->TransformPoints(objPoints, 5);
-		elemRotation->TransformPoints(labelLineStartPoints, 8);
-		rotation->Multiply(elemRotation, Gdiplus::MatrixOrderAppend);
-		g->SetTransform(rotation);
-	}
+    // calc rotation	
+    if(win->AsFixed()->GetRotation() != 0)
+    {
+        rotation->RotateAt(win->AsFixed()->GetRotation(), ulEdge, Gdiplus::MatrixOrderAppend);
+        rotation->TransformPoints(objPoints, 5);
+        rotation->TransformPoints(labelLineStartPoints, 8);
+        g->SetTransform(rotation);
+    }
+    if(this->angle != 0.0)
+    {
+        elemRotation->RotateAt(-this->angle, rotPoint, Gdiplus::MatrixOrderAppend);
+        elemRotation->TransformPoints(objPoints, 5);
+        elemRotation->TransformPoints(labelLineStartPoints, 8);
+        rotation->Multiply(elemRotation, Gdiplus::MatrixOrderAppend);
+        g->SetTransform(rotation);
+    }
 
-	//store current location
-	this->currentPath.StartFigure();
-	this->currentPath.AddLines(objPoints, 5);
-	this->currentPath.CloseFigure();
+    //store current location
+    this->currentPath.StartFigure();
+    this->currentPath.AddLines(objPoints, 5);
+    this->currentPath.CloseFigure();
 
-	objRegion = ::new Region(&(this->currentPath));
-	objRegion->Intersect(bounds);
-	if(objRegion->IsEmpty(g))
-	{
-		if(!rotation->IsIdentity())
-			g->ResetTransform();
+    objRegion = ::new Region(&(this->currentPath));
+    objRegion->Intersect(bounds);
+    if(objRegion->IsEmpty(g))
+    {
+        if(!rotation->IsIdentity())
+            g->ResetTransform();
 
-		this->currentPath.Reset();
-		return;
-	}
+        this->currentPath.Reset();
+        return;
+    }
 
-	// paint lable bg
-	SolidBrush  bbrush(this->backGround);
-	SolidBrush  fbrush(this->foreGround);
-	if(this->selected)
-	{
-		bbrush.SetColor(Color::Purple);
-		fbrush.SetColor(Color::White);
-	}
+    // paint lable bg
+    SolidBrush  bbrush(this->backGround);
+    SolidBrush  fbrush(this->foreGround);
+    if(this->selected)
+    {
+        bbrush.SetColor(Color::Purple);
+        fbrush.SetColor(Color::White);
+    }
 
 
-	Color curBg;
-	bbrush.GetColor(&curBg);
-	if(betsyApi->transparantOverlayObjects)
-	{		
-		Color transpBg(168, curBg.GetR(), curBg.GetG(), curBg.GetB());
-		bbrush.SetColor(transpBg);
-	}
+    Color curBg;
+    bbrush.GetColor(&curBg);
+    if(betsyApi->transparantOverlayObjects)
+    {		
+        Color transpBg(168, curBg.GetR(), curBg.GetG(), curBg.GetB());
+        bbrush.SetColor(transpBg);
+    }
 
-	g->FillRectangle(&bbrush, bbox);
+    g->FillRectangle(&bbrush, bbox);
 
-	StringFormat sformat;
-	sformat.SetAlignment(StringAlignmentNear);
-	// it is a line -> draw with direction
-	if(this->dx_dpi > 1.0 && this->dy_dpi == 1.0)
-	{
-		PointF startPoint(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2.0);
-		PointF end1(startPoint.X - 10.0 * zoom, startPoint.Y - 5.0 * zoom);
-		PointF end2(end1.X, startPoint.Y + 5.0 * zoom);
-		g->DrawLine(::new Pen(&bbrush, bbox.Height), startPoint, end1);
-		g->DrawLine(::new Pen(&bbrush, bbox.Height), startPoint, end2);
-	}
-	// it is a point -> draw small circle
-	if(this->dx_dpi == 1.0 && this->dy_dpi == 1.0)
-	{
-		g->DrawEllipse(::new Pen(&bbrush, bbox.Height), bbox);
-	}
+    StringFormat sformat;
+    sformat.SetAlignment(StringAlignmentNear);
+    // it is a line -> draw with direction
+    if(this->dx_dpi > 1.0 && this->dy_dpi == 1.0)
+    {
+        PointF startPoint(bbox.X + bbox.Width, bbox.Y + bbox.Height / 2.0);
+        PointF end1(startPoint.X - 10.0 * zoom, startPoint.Y - 5.0 * zoom);
+        PointF end2(end1.X, startPoint.Y + 5.0 * zoom);
+        g->DrawLine(::new Pen(&bbrush, bbox.Height), startPoint, end1);
+        g->DrawLine(::new Pen(&bbrush, bbox.Height), startPoint, end2);
+    }
+    // it is a point -> draw small circle
+    if(this->dx_dpi == 1.0 && this->dy_dpi == 1.0)
+    {
+        g->DrawEllipse(::new Pen(&bbrush, bbox.Height), bbox);
+    }
 
-	std::vector<SubObject*>::iterator iter;
-	SubObject* curObj;
-	for(iter = this->subObjects.begin(); iter != this->subObjects.end(); iter++)
-	{
-		curObj = *iter;
-		curObj->Paint(g, win, bbox, curBg);
-	}
+    std::vector<SubObject*>::iterator iter;
+    SubObject* curObj;
+    for(iter = this->subObjects.begin(); iter != this->subObjects.end(); iter++)
+    {
+        curObj = *iter;
+        curObj->Paint(g, win, bbox, curBg);
+    }
 
-	// paint lable fg
-	if(this->dx_dpi <= 0.0 && this->dy_dpi <= 0.0)
-	{
-		g->DrawString(wslabel.c_str(), -1, &font, bbox, &sformat, &fbrush);
+    // paint lable fg
+    if(this->dx_dpi <= 0.0 && this->dy_dpi <= 0.0)
+    {
+        g->DrawString(wslabel.c_str(), -1, &font, bbox, &sformat, &fbrush);
 
-		// reset rotation
-		if(!rotation->IsIdentity())
-		{
-			rotation->Reset();
-			g->ResetTransform();
-		}
-	}
-	else
-	{
-		// reset rotation
-		if(!rotation->IsIdentity())
-		{
-			rotation->Reset();
-			g->ResetTransform();
-		}
-		if(!betsyApi->hideLabels)
-		{
-			PointF labelPoint;
+        // reset rotation
+        if(!rotation->IsIdentity())
+        {
+            rotation->Reset();
+            g->ResetTransform();
+        }
+    }
+    else
+    {
+        // reset rotation
+        if(!rotation->IsIdentity())
+        {
+            rotation->Reset();
+            g->ResetTransform();
+        }
+        if(!betsyApi->hideLabels)
+        {
+            PointF labelPoint;
 
-			this->currentPath.GetBounds(&bbox);
-			// draw label below object
-			if(bbox.Width > bbox.Height)
-				labelPoint = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height + 25 * zoom);
-			//draw label left of object
-			else
-				labelPoint = PointF(bbox.X + bbox.Width + 25 * zoom, bbox.Y + bbox.Height / 2);
+            this->currentPath.GetBounds(&bbox);
+            // draw label below object
+            if(bbox.Width > bbox.Height)
+                labelPoint = PointF(bbox.X + bbox.Width / 2, bbox.Y + bbox.Height + 25 * zoom);
+            //draw label left of object
+            else
+                labelPoint = PointF(bbox.X + bbox.Width + 25 * zoom, bbox.Y + bbox.Height / 2);
 
-			if(lx_dpi > 0.0 && ly_dpi > 0.0)
-			{
-				PointD lpointOnPage(this->lx_dpi, pageHeight - this->ly_dpi);
-				PointI lpointOnScreen = win->AsFixed()->CvtToScreen(pageNo, lpointOnPage);
+            if(lx_dpi > 0.0 && ly_dpi > 0.0)
+            {
+                PointD lpointOnPage(this->lx_dpi, pageHeight - this->ly_dpi);
+                PointI lpointOnScreen = win->AsFixed()->CvtToScreen(pageNo, lpointOnPage);
 
-				labelPoint = PointF(lpointOnScreen.x, lpointOnScreen.y);
-			}
-			else
-			{
-				PointD lpointOnPage = win->AsFixed()->CvtFromScreen(PointI((int)labelPoint.X, (int)labelPoint.Y));
-				this->lx_dpi = lpointOnPage.x;
-				this->ly_dpi = pageHeight - lpointOnPage.y;
-			}
+                labelPoint = PointF(lpointOnScreen.x, lpointOnScreen.y);
+            }
+            else
+            {
+                PointD lpointOnPage = win->AsFixed()->CvtFromScreen(PointI((int)labelPoint.X, (int)labelPoint.Y));
+                this->lx_dpi = lpointOnPage.x;
+                this->ly_dpi = pageHeight - lpointOnPage.y;
+            }
 
-			double lblRotation = win->AsFixed()->GetRotation() - this->labelAngle;
-			if(lblRotation != 0.0)
-			{
-				rotation->RotateAt(lblRotation, labelPoint, Gdiplus::MatrixOrderAppend);
-				g->SetTransform(rotation);
-			}
+            double lblRotation = win->AsFixed()->GetRotation() - this->labelAngle;
+            if(lblRotation != 0.0)
+            {
+                rotation->RotateAt(lblRotation, labelPoint, Gdiplus::MatrixOrderAppend);
+                g->SetTransform(rotation);
+            }
 
-			// calc label position & size
-			RectF llabelBox(0, 0, 0, 0);
-			g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
+            // calc label position & size
+            RectF llabelBox(0, 0, 0, 0);
+            g->MeasureString(wslabel.c_str(), -1, &font, labelPoint, &llabelBox);
 
-			PointF lblpoints[5] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y) };
-			PointF labelLineEndPoints[8] =
-			{
-				PointF(llabelBox.X, llabelBox.Y), 
-				PointF(llabelBox.X + llabelBox.Width / 2.0f, llabelBox.Y),
-				PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), 
-				PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height / 2.0f), 
-				PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), 
-				PointF(llabelBox.X + llabelBox.Width/ 2.0f, llabelBox.Y + llabelBox.Height), 
-				PointF(llabelBox.X, llabelBox.Y + llabelBox.Height),
-				PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2.0f)
-			};
+            PointF lblpoints[5] = { PointF(llabelBox.X, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y + llabelBox.Height), PointF(llabelBox.X, llabelBox.Y) };
+            PointF labelLineEndPoints[8] =
+            {
+                PointF(llabelBox.X, llabelBox.Y), 
+                PointF(llabelBox.X + llabelBox.Width / 2.0f, llabelBox.Y),
+                PointF(llabelBox.X + llabelBox.Width, llabelBox.Y), 
+                PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height / 2.0f), 
+                PointF(llabelBox.X + llabelBox.Width, llabelBox.Y + llabelBox.Height), 
+                PointF(llabelBox.X + llabelBox.Width/ 2.0f, llabelBox.Y + llabelBox.Height), 
+                PointF(llabelBox.X, llabelBox.Y + llabelBox.Height),
+                PointF(llabelBox.X, llabelBox.Y + llabelBox.Height / 2.0f)
+            };
 
-			if(!rotation->IsIdentity())
-			{
-				rotation->TransformPoints(lblpoints, 5);
-				rotation->TransformPoints(labelLineEndPoints, 8);
-			}
+            if(!rotation->IsIdentity())
+            {
+                rotation->TransformPoints(lblpoints, 5);
+                rotation->TransformPoints(labelLineEndPoints, 8);
+            }
 
-			//store current label location
-			this->currentLabelPath.StartFigure();
-			this->currentLabelPath.AddLines(lblpoints, 5);
-			this->currentLabelPath.CloseFigure();
+            //store current label location
+            this->currentLabelPath.StartFigure();
+            this->currentLabelPath.AddLines(lblpoints, 5);
+            this->currentLabelPath.CloseFigure();
 
-			g->FillRectangle(&bbrush, llabelBox);
+            g->FillRectangle(&bbrush, llabelBox);
 
-			g->DrawString(wslabel.c_str(), -1, &font, llabelBox, &sformat, &fbrush);
+            g->DrawString(wslabel.c_str(), -1, &font, llabelBox, &sformat, &fbrush);
 
-			// reset rotation
-			if(!rotation->IsIdentity())
-			{
-				rotation->Reset();
-				g->ResetTransform();
-			}
+            // reset rotation
+            if(!rotation->IsIdentity())
+            {
+                rotation->Reset();
+                g->ResetTransform();
+            }
 
-			this->DrawLabelLine(g, labelLineStartPoints, labelLineEndPoints, zoom);
-		}
-	}
+            this->DrawLabelLine(g, labelLineStartPoints, labelLineEndPoints, zoom);
+        }
+    }
 }
 
 void OverlayObject::DrawLabelLine(Graphics* g, PointF* startPoints, PointF* endPoints, float zoom)
 {
-	Region objRegion(&(this->currentPath));
-	objRegion.Intersect(&(this->currentLabelPath));
-	bool noIntersection = objRegion.IsEmpty(g);	
+    Region objRegion(&(this->currentPath));
+    objRegion.Intersect(&(this->currentLabelPath));
+    bool noIntersection = objRegion.IsEmpty(g);	
 
-	if(!noIntersection)
-		return;
+    if(!noIntersection)
+        return;
 
-	double curDist, minDist, a, b;
-	PointF ps, pe, curStartPoint, curEndPoint;
-	for(int i = 0; i < 8; i++)
-	{
-		ps = startPoints[i];
+    double curDist, minDist, a, b;
+    PointF ps, pe, curStartPoint, curEndPoint;
+    for(int i = 0; i < 8; i++)
+    {
+        ps = startPoints[i];
 
-		for(int j = 0; j < 8; j++)
-		{
-			pe = endPoints[j];
+        for(int j = 0; j < 8; j++)
+        {
+            pe = endPoints[j];
 
-			a = pe.X - ps.X;
-			b = pe.Y - ps.Y;
+            a = pe.X - ps.X;
+            b = pe.Y - ps.Y;
 
-			curDist = a * a + b * b;
+            curDist = a * a + b * b;
 
-			if(i == 0 && j == 0)
-			{
-				minDist = curDist;
-				curStartPoint = ps;
-				curEndPoint = pe;
-			}
+            if(i == 0 && j == 0)
+            {
+                minDist = curDist;
+                curStartPoint = ps;
+                curEndPoint = pe;
+            }
 
-			if(curDist < minDist)
-			{
-				minDist = curDist;
-				curStartPoint = ps;
-				curEndPoint = pe;
-			}
-		}
-	}
+            if(curDist < minDist)
+            {
+                minDist = curDist;
+                curStartPoint = ps;
+                curEndPoint = pe;
+            }
+        }
+    }
 
-	Pen linePen(Color::Black, zoom);
-	g->DrawLine(&linePen, curStartPoint, curEndPoint);
+    Pen linePen(Color::Black, zoom);
+    g->DrawLine(&linePen, curStartPoint, curEndPoint);
 }
 
 void OverlayObject::MakeVisible(WindowInfo* win)
 {
-	double pageHeight = win->AsFixed()->GetPageInfo(this->page)->page.dy;
-	PointD pointOnPage(this->x_dpi, pageHeight - this->y_dpi);
-	RectI rect(pointOnPage.x, pointOnPage.y, 1, 1);
-	TextSel res = { 1, &this->page, &rect };
-	win->AsFixed()->ShowResultRectToScreen(&res);
+    double pageHeight = win->AsFixed()->GetPageInfo(this->page)->page.dy;
+    PointD pointOnPage(this->x_dpi, pageHeight - this->y_dpi);
+    RectI rect(pointOnPage.x, pointOnPage.y, 1, 1);
+    TextSel res = { 1, &this->page, &rect };
+    win->AsFixed()->ShowResultRectToScreen(&res);
 }
 
 bool OverlayObject::CheckSelectionChanged(WindowInfo* win)
 {
-	bool inSelection = this->CheckIsInSelection(win);
+    bool inSelection = this->CheckIsInSelection(win);
 
-	if(inSelection == this->selected)
-	{
-		if(this->selected)
-			return true;
-		else
-			return false;
-	}
-	else
-	{
-		this->selected = inSelection;
-		return true;
-	}
+    if(inSelection == this->selected)
+    {
+        if(this->selected)
+            return true;
+        else
+            return false;
+    }
+    else
+    {
+        this->selected = inSelection;
+        return true;
+    }
 }
 
 bool OverlayObject::CheckIsInSelection(WindowInfo* win)
 {
-	bool inSelection = CheckIsInSelection(win, false);
-	if(!inSelection)
-		inSelection = CheckIsInSelection(win, true);
+    bool inSelection = CheckIsInSelection(win, false);
+    if(!inSelection)
+        inSelection = CheckIsInSelection(win, true);
 
-	return inSelection;
+    return inSelection;
 }
 
 bool OverlayObject::CheckIsInSelection(WindowInfo* win, bool label)
 {
-	Region* checkRegion;
-	if(label)
-		checkRegion = ::new Region(&this->currentLabelPath);
-	else
-		checkRegion = ::new Region(&this->currentPath);
+    Region* checkRegion;
+    if(label)
+        checkRegion = ::new Region(&this->currentLabelPath);
+    else
+        checkRegion = ::new Region(&this->currentPath);
 
-	RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
-	return checkRegion->IsVisible(selOnScreen);
+    RectF selOnScreen(win->selectionRect.x, win->selectionRect.y, win->selectionRect.dx, win->selectionRect.dy);
+    return checkRegion->IsVisible(selOnScreen);
 }
 
 std::string OverlayObject::ToString()
 {
-	std::stringstream stream;	
-	int fgR, fgG, fgB, bgR, bgG, bgB;
-	fgR = this->foreGround.GetR();
-	fgG = this->foreGround.GetG();
-	fgB = this->foreGround.GetB();
-	bgR = this->backGround.GetR();	
-	bgG = this->backGround.GetG();
-	bgB = this->backGround.GetB();	
-	
-	stream << "{";
-	stream << this->id << "|";
-	stream << this->label << "|";
-	stream << this->GetX() << "|";
-	stream << this->GetY() << "|";
-	stream << this->GetDX() << "|";
-	stream << this->GetDY() << "|";
-	stream << this->GetLX() << "|";
-	stream << this->GetLY() << "|";
-	stream << this->GetRX() << "|";
-	stream << this->GetRY() << "|";
-	stream << this->angle << "|";
-	stream << this->labelAngle << "|";
-	stream << this->font << "|";
-	stream << this->fontSize << "|";
-	stream << fgR << "|";
-	stream << fgG << "|";
-	stream << fgB << "|";
-	stream << bgR << "|";	
-	stream << bgG << "|";
-	stream << bgB << "|";
-	stream << "}";
+    std::stringstream stream;	
+    int fgR, fgG, fgB, bgR, bgG, bgB;
+    fgR = this->foreGround.GetR();
+    fgG = this->foreGround.GetG();
+    fgB = this->foreGround.GetB();
+    bgR = this->backGround.GetR();	
+    bgG = this->backGround.GetG();
+    bgB = this->backGround.GetB();	
+    
+    stream << "{";
+    stream << this->id << "|";
+    stream << this->label << "|";
+    stream << this->GetX() << "|";
+    stream << this->GetY() << "|";
+    stream << this->GetDX() << "|";
+    stream << this->GetDY() << "|";
+    stream << this->GetLX() << "|";
+    stream << this->GetLY() << "|";
+    stream << this->GetRX() << "|";
+    stream << this->GetRY() << "|";
+    stream << this->angle << "|";
+    stream << this->labelAngle << "|";
+    stream << this->font << "|";
+    stream << this->fontSize << "|";
+    stream << fgR << "|";
+    stream << fgG << "|";
+    stream << fgB << "|";
+    stream << bgR << "|";	
+    stream << bgG << "|";
+    stream << bgB << "|";
+    stream << "}";
 
-	return stream.str();
+    return stream.str();
 }
 
 OverlayObject* OverlayObject::CreateFromString(std::string obj)
 {
-	// remove {...}
-	obj = obj.substr(1, obj.length() - 1);
-	obj = obj.substr(0, obj.length() - 1);
+    // remove {...}
+    obj = obj.substr(1, obj.length() - 1);
+    obj = obj.substr(0, obj.length() - 1);
 
-	int loop = 0;
-	size_t pos = obj.find_first_of("|");
-	std::stringstream stream;
-	std::string stoken, id, label, font, subObjects;
-	int bb, bg, br, fr, fg, fb;
-	double x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle;
-	float fontSize;
-	while(pos != std::string::npos)
-	{
-		stream = std::stringstream("");
+    int loop = 0;
+    size_t pos = obj.find_first_of("|");
+    std::stringstream stream;
+    std::string stoken, id, label, font, subObjects;
+    int bb, bg, br, fr, fg, fb;
+    double x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle;
+    float fontSize;
+    while(pos != std::string::npos)
+    {
+        stream = std::stringstream("");
 
-		stoken = obj.substr(0, pos);
-		obj = obj.substr(pos + 1);
+        stoken = obj.substr(0, pos);
+        obj = obj.substr(pos + 1);
 
-		stream << stoken;
+        stream << stoken;
 
-		switch(loop)
-		{
-		case 0:
-			id = stream.str();
-			break;
+        switch(loop)
+        {
+        case 0:
+            id = stream.str();
+            break;
 
-		case 1:
-			label = stream.str();
-			break;
+        case 1:
+            label = stream.str();
+            break;
 
-		case 2:
-			stream >> x;
-			break;
+        case 2:
+            stream >> x;
+            break;
 
-		case 3:
-			stream >> y;
-			break;
+        case 3:
+            stream >> y;
+            break;
 
-		case 4:
-			stream >> dx;
-			break;
+        case 4:
+            stream >> dx;
+            break;
 
-		case 5:
-			stream >> dy;
-			break;
+        case 5:
+            stream >> dy;
+            break;
 
-		case 6:
-			stream >> lx;
-			break;
+        case 6:
+            stream >> lx;
+            break;
 
-		case 7:
-			stream >> ly;
-			break;
+        case 7:
+            stream >> ly;
+            break;
 
-		case 8:
-			stream >> rx;
-			break;
+        case 8:
+            stream >> rx;
+            break;
 
-		case 9:
-			stream >> ry;
-			break;
+        case 9:
+            stream >> ry;
+            break;
 
-		case 10:
-			stream >> angle;
-			break;
+        case 10:
+            stream >> angle;
+            break;
 
-		case 11:
-			stream >> labelAngle;
-			break;
+        case 11:
+            stream >> labelAngle;
+            break;
 
-		case 12:
-			font = stream.str();
-			break;
+        case 12:
+            font = stream.str();
+            break;
 
-		case 13:
-			stream >> fontSize;
-			break;
+        case 13:
+            stream >> fontSize;
+            break;
 
-		case 14:
-			stream >> fr;
-			break;
+        case 14:
+            stream >> fr;
+            break;
 
-		case 15:
-			stream >> fg;
-			break;
+        case 15:
+            stream >> fg;
+            break;
 
-		case 16:
-			stream >> fb;
-			break;
+        case 16:
+            stream >> fb;
+            break;
 
-		case 17:
-			stream >> br;
-			break;
+        case 17:
+            stream >> br;
+            break;
 
-		case 18:
-			stream >> bg;
-			break;
+        case 18:
+            stream >> bg;
+            break;
 
-		case 19:
-			stream >> bb;
-			break;
-		}
+        case 19:
+            stream >> bb;
+            break;
+        }
 
-		if( loop == 19)	break;
+        if( loop == 19)	break;
 
-		loop++;
-		pos = obj.find_first_of("|");
-	}
+        loop++;
+        pos = obj.find_first_of("|");
+    }
 
-	stream = std::stringstream("");
-	stream << obj;
-	stream >> subObjects;
+    stream = std::stringstream("");
+    stream << obj;
+    stream >> subObjects;
 
-	return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle, fontSize, Color(fr, fg, fb), Color(br, bg, bb), subObjects);
+    return new OverlayObject(id, label, font, x, y, dx, dy, lx, ly, rx, ry, angle, labelAngle, fontSize, Color(fr, fg, fb), Color(br, bg, bb), subObjects);
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF overlay objects
@@ -5183,114 +5183,114 @@ OverlayObject* OverlayObject::CreateFromString(std::string obj)
 ///////////////////////////////////////////////////////////////////////////////
 SubObject::SubObject(double x, double y, double dx, double dy, double angle)
 {
-	this->angle = angle;
-	this->SetDimensions(x, y, dx, dy);
+    this->angle = angle;
+    this->SetDimensions(x, y, dx, dy);
 }
 
 void SubObject::SetDimensions(double x, double y, double dx, double dy)
 {
-	this->x_dpi = (x / 2540.0) * 72.0;
-	this->y_dpi = (y / 2540.0) * 72.0;
-	if(dx <= 0.0)
-		this->dx_dpi = 1;
-	else
-		this->dx_dpi = (dx / 2540.0) * 72.0;
-	if(dy <= 0.0)
-		this->dy_dpi = 1;
-	else
-		this->dy_dpi = (dy / 2540.0) * 72.0;
+    this->x_dpi = (x / 2540.0) * 72.0;
+    this->y_dpi = (y / 2540.0) * 72.0;
+    if(dx <= 0.0)
+        this->dx_dpi = 1;
+    else
+        this->dx_dpi = (dx / 2540.0) * 72.0;
+    if(dy <= 0.0)
+        this->dy_dpi = 1;
+    else
+        this->dy_dpi = (dy / 2540.0) * 72.0;
 }
 
 void SubObject::Paint(Graphics* g, WindowInfo* win, RectF oobox, Color ooColor)
 {
-	float zoom = win->AsFixed()->GetZoomReal();
+    float zoom = win->AsFixed()->GetZoomReal();
 
-	RectF		bbox( oobox.X + (this->x_dpi * zoom), (oobox.Y + oobox.Height) - (this->y_dpi * zoom), 0, 0);
+    RectF		bbox( oobox.X + (this->x_dpi * zoom), (oobox.Y + oobox.Height) - (this->y_dpi * zoom), 0, 0);
 
-	if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
-	{
-		bbox.Width = this->dx_dpi * zoom;
-		bbox.Height = this->dy_dpi * zoom;
-		bbox.Y = bbox.Y - bbox.Height;
-	}
+    if(this->dx_dpi > 0.0 && this->dy_dpi > 0.0)
+    {
+        bbox.Width = this->dx_dpi * zoom;
+        bbox.Height = this->dy_dpi * zoom;
+        bbox.Y = bbox.Y - bbox.Height;
+    }
 
-	if(bbox.Width <= 1.0)
-		bbox.Width = 1.0;
-	if(bbox.Height <= 1.0)
-		bbox.Height = 1.0;
+    if(bbox.Width <= 1.0)
+        bbox.Width = 1.0;
+    if(bbox.Height <= 1.0)
+        bbox.Height = 1.0;
 
-	// calc rotation
-	Matrix subRotation;
-	Matrix currentWolrdRot;
-	if(this->angle != 0.0)
-	{
-		subRotation.RotateAt(-this->angle, PointF(bbox.X, bbox.Y), Gdiplus::MatrixOrderAppend);
-		g->GetTransform(&currentWolrdRot);
-		currentWolrdRot.Multiply(&subRotation);
-		g->SetTransform(&currentWolrdRot);
-	}
+    // calc rotation
+    Matrix subRotation;
+    Matrix currentWolrdRot;
+    if(this->angle != 0.0)
+    {
+        subRotation.RotateAt(-this->angle, PointF(bbox.X, bbox.Y), Gdiplus::MatrixOrderAppend);
+        g->GetTransform(&currentWolrdRot);
+        currentWolrdRot.Multiply(&subRotation);
+        g->SetTransform(&currentWolrdRot);
+    }
 
-	Color col = Color((ooColor.GetR() + 128) % 256, (ooColor.GetG() + 128) % 256, (ooColor.GetB() + 128) % 256);
-	float width = 1.0;
-	Pen pen(col, width * zoom);
-	g->DrawRectangle(&pen, bbox);
+    Color col = Color((ooColor.GetR() + 128) % 256, (ooColor.GetG() + 128) % 256, (ooColor.GetB() + 128) % 256);
+    float width = 1.0;
+    Pen pen(col, width * zoom);
+    g->DrawRectangle(&pen, bbox);
 
-	if(this->angle != 0.0)
-	{
-		subRotation.Invert();
-		currentWolrdRot.Multiply(&subRotation);
-		g->SetTransform(&currentWolrdRot);
-	}
+    if(this->angle != 0.0)
+    {
+        subRotation.Invert();
+        currentWolrdRot.Multiply(&subRotation);
+        g->SetTransform(&currentWolrdRot);
+    }
 }
 
 SubObject* SubObject::CreateFromString(std::string sobj)
 {
-	// remove <...>
-	sobj = sobj.substr(1, sobj.length() - 1);
-	sobj = sobj.substr(0, sobj.length() - 1);
+    // remove <...>
+    sobj = sobj.substr(1, sobj.length() - 1);
+    sobj = sobj.substr(0, sobj.length() - 1);
 
-	int loop = 0;
-	size_t pos = sobj.find_first_of("|");
-	std::stringstream stream;
-	std::string stoken;
-	double x, y, dx, dy, angle;
-	while(pos != std::string::npos)
-	{
-		stream = std::stringstream("");
+    int loop = 0;
+    size_t pos = sobj.find_first_of("|");
+    std::stringstream stream;
+    std::string stoken;
+    double x, y, dx, dy, angle;
+    while(pos != std::string::npos)
+    {
+        stream = std::stringstream("");
 
-		stoken = sobj.substr(0, pos);
-		sobj = sobj.substr(pos + 1);
+        stoken = sobj.substr(0, pos);
+        sobj = sobj.substr(pos + 1);
 
-		stream << stoken;
+        stream << stoken;
 
-		switch(loop)
-		{
-			case 0:
-				stream >> x;
-				break;
+        switch(loop)
+        {
+            case 0:
+                stream >> x;
+                break;
 
-			case 1:
-				stream >> y;
-				break;
+            case 1:
+                stream >> y;
+                break;
 
-			case 2:
-				stream >> dx;
-				break;
+            case 2:
+                stream >> dx;
+                break;
 
-			case 3:
-				stream >> dy;
-				break;
-		}
+            case 3:
+                stream >> dy;
+                break;
+        }
 
-		loop++;
-		pos = sobj.find_first_of("|");
-	}
+        loop++;
+        pos = sobj.find_first_of("|");
+    }
 
-	stream = std::stringstream("");
-	stream << sobj;
-	stream >> angle;
+    stream = std::stringstream("");
+    stream << sobj;
+    stream >> angle;
 
-	return new SubObject(x, y, dx, dy, angle);
+    return new SubObject(x, y, dx, dy, angle);
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF sub objects
@@ -5301,741 +5301,741 @@ SubObject* SubObject::CreateFromString(std::string sobj)
 ///////////////////////////////////////////////////////////////////////////////
 BetsyNetPDFUnmanagedApi::BetsyNetPDFUnmanagedApi()
 {
-	this->hitLabelForDragging = false;
-	this->selectionChanging = false;
-	this->mouseOverEnabled = false;
-	this->measureMode = false;
-	this->lineMode = false;
-	this->moveLabel = false;
-	this->useExternContextMenu = false;
-	this->preventOverlayObjectSelection = false;
-	this->showOverlapping = false;
-	this->hideLabels = false;
-	this->transparantOverlayObjects = false;
-	this->lastObj = NULL;
-	this->lineStart = NULL;
-	this->lineEnd = NULL;
-	this->curLineEnd = NULL;
-	this->fixAngle = -1;
+    this->hitLabelForDragging = false;
+    this->selectionChanging = false;
+    this->mouseOverEnabled = false;
+    this->measureMode = false;
+    this->lineMode = false;
+    this->moveLabel = false;
+    this->useExternContextMenu = false;
+    this->preventOverlayObjectSelection = false;
+    this->showOverlapping = false;
+    this->hideLabels = false;
+    this->transparantOverlayObjects = false;
+    this->lastObj = NULL;
+    this->lineStart = NULL;
+    this->lineEnd = NULL;
+    this->curLineEnd = NULL;
+    this->fixAngle = -1;
 }
 
 void BetsyNetPDFUnmanagedApi::PutSelectedOverlayObjectsOnTop()
 {
-	std::vector<OverlayObject*> selectedObjects;
-	std::vector<OverlayObject*>::iterator iter;
+    std::vector<OverlayObject*> selectedObjects;
+    std::vector<OverlayObject*>::iterator iter;
 
-	OverlayObject* cObj = this->RemoveSelectedOverlayObject();
-	while(cObj != NULL)
-	{
-		selectedObjects.push_back(cObj);
-		cObj = this->RemoveSelectedOverlayObject();
-	}
+    OverlayObject* cObj = this->RemoveSelectedOverlayObject();
+    while(cObj != NULL)
+    {
+        selectedObjects.push_back(cObj);
+        cObj = this->RemoveSelectedOverlayObject();
+    }
 
-	for(iter = selectedObjects.begin(); iter != selectedObjects.end(); iter++)
-		this->overlayObjects.push_back(*iter);
+    for(iter = selectedObjects.begin(); iter != selectedObjects.end(); iter++)
+        this->overlayObjects.push_back(*iter);
 }
 
 OverlayObject* BetsyNetPDFUnmanagedApi::RemoveSelectedOverlayObject()
 {
-	OverlayObject* ret = NULL;
-	OverlayObject* cObj;
-	std::vector<OverlayObject*>::iterator iter;
+    OverlayObject* ret = NULL;
+    OverlayObject* cObj;
+    std::vector<OverlayObject*>::iterator iter;
 
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		cObj = *iter;
-		if(cObj->selected)
-		{
-			ret = cObj;
-			break;
-		}
-	}
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        cObj = *iter;
+        if(cObj->selected)
+        {
+            ret = cObj;
+            break;
+        }
+    }
 
-	if(ret != NULL)
-		this->overlayObjects.erase(iter);
+    if(ret != NULL)
+        this->overlayObjects.erase(iter);
 
-	return ret;
+    return ret;
 }
 
 void BetsyNetPDFUnmanagedApi::UpdateViewer(WindowInfo* win, char* hwnd)
 {
-	if(!gPluginMode)
-		return;
+    if(!gPluginMode)
+        return;
 
-	Widen<wchar_t> to_wstring;
-	std::string shwnd(hwnd);
-	std::wstring wshwnd = to_wstring(shwnd);
+    Widen<wchar_t> to_wstring;
+    std::string shwnd(hwnd);
+    std::wstring wshwnd = to_wstring(shwnd);
 
-	HWND parentHWND = (HWND)_wtol(wshwnd.c_str());
+    HWND parentHWND = (HWND)_wtol(wshwnd.c_str());
 
-	SetParent(win->hwndFrame, parentHWND);
-	MoveWindow(win->hwndFrame, ClientRect(parentHWND));
-	ShowWindow(win->hwndFrame, SW_SHOW);
-	UpdateWindow(win->hwndFrame);
+    SetParent(win->hwndFrame, parentHWND);
+    MoveWindow(win->hwndFrame, ClientRect(parentHWND));
+    ShowWindow(win->hwndFrame, SW_SHOW);
+    UpdateWindow(win->hwndFrame);
 }
 
 void BetsyNetPDFUnmanagedApi::SetDelegates(
-	OnSelectionChangedDelegate selChanged, 
-	OnMouseClickDelegate mouseClick, 
-	OnDeleteDelegate onDelete, 
-	OnObjectMovedDelegate onMove, 
-	OnRequestContextMenuDelegate requestContextMenuPointer,
-	OnMouseOverObject onMouseOver,
-	OnDistanceMeasuredDelegate onMeasure,
-	OnLineDrawnDelegate onLine)
+    OnSelectionChangedDelegate selChanged, 
+    OnMouseClickDelegate mouseClick, 
+    OnDeleteDelegate onDelete, 
+    OnObjectMovedDelegate onMove, 
+    OnRequestContextMenuDelegate requestContextMenuPointer,
+    OnMouseOverObject onMouseOver,
+    OnDistanceMeasuredDelegate onMeasure,
+    OnLineDrawnDelegate onLine)
 {
-	this->notifySelectionChanged = selChanged;
-	this->notifyMouseClick = mouseClick;
-	this->notifyDelete = onDelete;
-	this->notifyObjectMoved = onMove;
-	this->requestContextMenu = requestContextMenuPointer;
-	this->notifyMouseOverObject = onMouseOver;
-	this->notifyDistanceMeasured = onMeasure;
-	this->notifyLineDrawn = onLine;
+    this->notifySelectionChanged = selChanged;
+    this->notifyMouseClick = mouseClick;
+    this->notifyDelete = onDelete;
+    this->notifyObjectMoved = onMove;
+    this->requestContextMenu = requestContextMenuPointer;
+    this->notifyMouseOverObject = onMouseOver;
+    this->notifyDistanceMeasured = onMeasure;
+    this->notifyLineDrawn = onLine;
 }
 
 void BetsyNetPDFUnmanagedApi::DrawOverlayObjets(HDC* hdc, WindowInfo* win, int pageNo, RectI bounds)
 {
-	if(this->selectionChanging)
-		return;
+    if(this->selectionChanging)
+        return;
 
-	OverlayObject *curObj;
-	Graphics g(*hdc);
-	std::vector<OverlayObject*>::iterator iter;
-	Matrix rotation, elemRotation;
-	Region boundsRegion(bounds.ToGdipRect());
-	Region objRegion;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		curObj = *iter;
-		curObj->currentPath.Reset();
-		curObj->currentLabelPath.Reset();
-		rotation.Reset();
-		elemRotation.Reset();
-		curObj->Paint(&g, win, pageNo, &boundsRegion, &objRegion, &rotation, &elemRotation);
-	}
+    OverlayObject *curObj;
+    Graphics g(*hdc);
+    std::vector<OverlayObject*>::iterator iter;
+    Matrix rotation, elemRotation;
+    Region boundsRegion(bounds.ToGdipRect());
+    Region objRegion;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        curObj = *iter;
+        curObj->currentPath.Reset();
+        curObj->currentLabelPath.Reset();
+        rotation.Reset();
+        elemRotation.Reset();
+        curObj->Paint(&g, win, pageNo, &boundsRegion, &objRegion, &rotation, &elemRotation);
+    }
 
-	if(!this->showOverlapping)
-		return;
+    if(!this->showOverlapping)
+        return;
 
-	Region* allObjects = ::new Region();
-	Region* overlapping = ::new Region();
-	Region* intersection;
+    Region* allObjects = ::new Region();
+    Region* overlapping = ::new Region();
+    Region* intersection;
 
-	allObjects->MakeEmpty();
-	overlapping->MakeEmpty();
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		curObj = *iter;
+    allObjects->MakeEmpty();
+    overlapping->MakeEmpty();
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        curObj = *iter;
 
-		intersection = allObjects->Clone();
-		intersection->Intersect(&curObj->currentPath);
-		overlapping->Union(intersection);
+        intersection = allObjects->Clone();
+        intersection->Intersect(&curObj->currentPath);
+        overlapping->Union(intersection);
 
-		intersection = allObjects->Clone();
-		intersection->Intersect(&curObj->currentLabelPath);
-		overlapping->Union(intersection);
+        intersection = allObjects->Clone();
+        intersection->Intersect(&curObj->currentLabelPath);
+        overlapping->Union(intersection);
 
-		allObjects->Union(&curObj->currentPath);
-		allObjects->Union(&curObj->currentLabelPath);
-	}
+        allObjects->Union(&curObj->currentPath);
+        allObjects->Union(&curObj->currentLabelPath);
+    }
 
-	Color tmp = Color::Firebrick;
-	Color ovColor(190, tmp.GetR(), tmp.GetG(), tmp.GetB());
-	SolidBrush ovBrush(ovColor);
-	g.FillRegion(&ovBrush, overlapping);
+    Color tmp = Color::Firebrick;
+    Color ovColor(190, tmp.GetR(), tmp.GetG(), tmp.GetB());
+    SolidBrush ovBrush(ovColor);
+    g.FillRegion(&ovBrush, overlapping);
 
-	delete allObjects;
-	delete overlapping;
-	delete intersection;
+    delete allObjects;
+    delete overlapping;
+    delete intersection;
 }
 
 void BetsyNetPDFUnmanagedApi::DrawLine(HDC* hdc, WindowInfo* win)
 {
-	if(!this->measureMode && !this->lineMode)
-		return;
+    if(!this->measureMode && !this->lineMode)
+        return;
 
-	if(this->lineStart == NULL || this->lineStart->y == -1 || this->curLineEnd == NULL)
-		return;
+    if(this->lineStart == NULL || this->lineStart->y == -1 || this->curLineEnd == NULL)
+        return;
 
-	Graphics g(*hdc);
-	SolidBrush lineBrush(Color::Red);
-	Pen linePen(&lineBrush, 2);
+    Graphics g(*hdc);
+    SolidBrush lineBrush(Color::Red);
+    Pen linePen(&lineBrush, 2);
 
-	PointI startScreen = win->AsFixed()->CvtToScreen(1, *this->lineStart);
-	PointI endScreen;
-	if(this->lineEnd != NULL)
-		endScreen = win->AsFixed()->CvtToScreen(1, *this->lineEnd);
+    PointI startScreen = win->AsFixed()->CvtToScreen(1, *this->lineStart);
+    PointI endScreen;
+    if(this->lineEnd != NULL)
+        endScreen = win->AsFixed()->CvtToScreen(1, *this->lineEnd);
 
-	g.DrawEllipse(&linePen, startScreen.x - 2, startScreen.y - 2, 4, 4);
+    g.DrawEllipse(&linePen, startScreen.x - 2, startScreen.y - 2, 4, 4);
 
-	if(this->lineEnd == NULL || this->lineEnd->y == -1)
-	{
-		g.DrawLine(&linePen, startScreen.x, startScreen.y, this->curLineEnd->X, this->curLineEnd->Y);
-		g.DrawEllipse(&linePen, this->curLineEnd->X - 2, this->curLineEnd->Y - 2, 4, 4);
-	}
-	else
-	{
-		g.DrawLine(&linePen, startScreen.x, startScreen.y, endScreen.x, endScreen.y);
-		g.DrawEllipse(&linePen, endScreen.x - 2, endScreen.y - 2, 4, 4);
-	}
+    if(this->lineEnd == NULL || this->lineEnd->y == -1)
+    {
+        g.DrawLine(&linePen, startScreen.x, startScreen.y, this->curLineEnd->X, this->curLineEnd->Y);
+        g.DrawEllipse(&linePen, this->curLineEnd->X - 2, this->curLineEnd->Y - 2, 4, 4);
+    }
+    else
+    {
+        g.DrawLine(&linePen, startScreen.x, startScreen.y, endScreen.x, endScreen.y);
+        g.DrawEllipse(&linePen, endScreen.x - 2, endScreen.y - 2, 4, 4);
+    }
 }
 
 void BetsyNetPDFUnmanagedApi::SetCurrentLineEnd(WindowInfo* win, int x, int y)
 {
-	if(this->lineStart == NULL)
-		return;
+    if(this->lineStart == NULL)
+        return;
 
-	if(this->fixAngle == -1)
-		this->curLineEnd = new Point(x, y);
-	else
-	{
-		PointI onScreen = win->AsFixed()->CvtToScreen(1, *this->lineStart);
-		int deltaX = onScreen.x - x;
-		int deltaY = onScreen.y - y;
-		double lengthq = (deltaX * deltaX) + (deltaY * deltaY);
-		double length = sqrt(lengthq);
+    if(this->fixAngle == -1)
+        this->curLineEnd = new Point(x, y);
+    else
+    {
+        PointI onScreen = win->AsFixed()->CvtToScreen(1, *this->lineStart);
+        int deltaX = onScreen.x - x;
+        int deltaY = onScreen.y - y;
+        double lengthq = (deltaX * deltaX) + (deltaY * deltaY);
+        double length = sqrt(lengthq);
 
-		double radians = 3.14159265359 * (360 - this->fixAngle) / 180.0;
-		double nX = onScreen.x + length * cos(radians);
-		double nY = onScreen.y + length * sin(radians);
+        double radians = 3.14159265359 * (360 - this->fixAngle) / 180.0;
+        double nX = onScreen.x + length * cos(radians);
+        double nY = onScreen.y + length * sin(radians);
 
-		this->curLineEnd = new Point(nX, nY);
-	}
-	win->RepaintAsync();
+        this->curLineEnd = new Point(nX, nY);
+    }
+    win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::Escape(WindowInfo* win)
 {
-	// reset
-	this->lineEnd = NULL;
-	this->curLineEnd = NULL;
-	this->lineStart = NULL;
+    // reset
+    this->lineEnd = NULL;
+    this->curLineEnd = NULL;
+    this->lineStart = NULL;
 
-	win->RepaintAsync();
+    win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::ProcessOverlayObjects(WindowInfo* win, char* objects)
 {
-	OverlayObject* oo;
-	OverlayObject* loo;
-	std::vector<OverlayObject*>::iterator iter;
+    OverlayObject* oo;
+    OverlayObject* loo;
+    std::vector<OverlayObject*>::iterator iter;
 
-	std::string sobjects(objects);
-	std::string objToken;
-	size_t pos = sobjects.find_first_of("}");
-	bool found;
-	while(pos != std::string::npos)
-	{
-		objToken = sobjects.substr(0, pos + 1);
-		sobjects = sobjects.substr(pos + 1);
+    std::string sobjects(objects);
+    std::string objToken;
+    size_t pos = sobjects.find_first_of("}");
+    bool found;
+    while(pos != std::string::npos)
+    {
+        objToken = sobjects.substr(0, pos + 1);
+        sobjects = sobjects.substr(pos + 1);
 
-		oo = OverlayObject::CreateFromString(objToken);
-		found = false;
-		for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-		{
-			loo = *iter;
-			if(loo->id == oo->id)
-			{
-				found = true;
-				loo->Clone(oo);
-				break;
-			}
-		}
+        oo = OverlayObject::CreateFromString(objToken);
+        found = false;
+        for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+        {
+            loo = *iter;
+            if(loo->id == oo->id)
+            {
+                found = true;
+                loo->Clone(oo);
+                break;
+            }
+        }
 
-		if(!found)
-		{
-			this->overlayObjects.push_back(oo);
-		}
-		
-		pos = sobjects.find_first_of("}");
-	}
+        if(!found)
+        {
+            this->overlayObjects.push_back(oo);
+        }
+        
+        pos = sobjects.find_first_of("}");
+    }
 
-	win->RepaintAsync();
+    win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::RemoveOverlayObject(WindowInfo* win, char* id)
 {
-	std::string sid(id);
+    std::string sid(id);
 
-	std::vector<OverlayObject*>::iterator iter;
-	OverlayObject* oo;
-	bool repaint = false;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end() ; iter++)
-	{
-		oo = *iter;
-		if(oo->id == sid)
-		{
-			overlayObjects.erase(iter);
-			repaint = true;
-			break;
-		}
-	}
+    std::vector<OverlayObject*>::iterator iter;
+    OverlayObject* oo;
+    bool repaint = false;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end() ; iter++)
+    {
+        oo = *iter;
+        if(oo->id == sid)
+        {
+            overlayObjects.erase(iter);
+            repaint = true;
+            break;
+        }
+    }
 
-	if(repaint)
-		win->RepaintAsync();
+    if(repaint)
+        win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::SetSelectedOverlayObjects(WindowInfo* win, char* objectIds)
 {
-	std::string sobjectIds(objectIds);
-	OverlayObject* curObj;
-	OverlayObject* firstObj = NULL;
-	bool repaint = false;
-	size_t pos;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		curObj = *iter;
-		pos = sobjectIds.find("|" + curObj->id + "|");
+    std::string sobjectIds(objectIds);
+    OverlayObject* curObj;
+    OverlayObject* firstObj = NULL;
+    bool repaint = false;
+    size_t pos;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        curObj = *iter;
+        pos = sobjectIds.find("|" + curObj->id + "|");
 
-		if(pos == std::string::npos)
-		{
-			if(curObj->selected)
-			{
-				repaint = true;
-				curObj->selected = false;
-			}
-		}
-		else
-		{
-			if(firstObj == NULL)
-				firstObj = curObj;
+        if(pos == std::string::npos)
+        {
+            if(curObj->selected)
+            {
+                repaint = true;
+                curObj->selected = false;
+            }
+        }
+        else
+        {
+            if(firstObj == NULL)
+                firstObj = curObj;
 
-			if(!curObj->selected)
-			{
-				repaint = true;
-				curObj->selected = true;
-			}
-		}
-	}
+            if(!curObj->selected)
+            {
+                repaint = true;
+                curObj->selected = true;
+            }
+        }
+    }
 
-	this->PutSelectedOverlayObjectsOnTop();
+    this->PutSelectedOverlayObjectsOnTop();
 
-	if(repaint)
-		win->RepaintAsync();
+    if(repaint)
+        win->RepaintAsync();
 
-	if(firstObj != NULL)
-		firstObj->MakeVisible(win);
+    if(firstObj != NULL)
+        firstObj->MakeVisible(win);
 }
 
 bool BetsyNetPDFUnmanagedApi::CheckSelectionChanged(WindowInfo* win, bool ctrlPressed)
 {
-	if(win->selectionRect.dx == 0 && win->selectionRect.dy == 0)
-		win->selectionRect = RectI(win->selectionRect.x, win->selectionRect.y, 1, 1);
+    if(win->selectionRect.dx == 0 && win->selectionRect.dy == 0)
+        win->selectionRect = RectI(win->selectionRect.x, win->selectionRect.y, 1, 1);
 
-	this->selectionChanging = true;
+    this->selectionChanging = true;
 
-	bool prevSelectedState, selectionChanged = false, notify = false;
-	OverlayObject *curObj;
-	OverlayObject *lastSelectedObject = NULL;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		curObj = *iter;
-		prevSelectedState = curObj->selected;
-		if(ctrlPressed)
-		{
-			if(curObj->CheckIsInSelection(win))
-			{
-				if(win->selectionRect.dx == 1 && win->selectionRect.dy == 1 && curObj->selected)
-					curObj->selected = false;
-				else
-					curObj->selected = true;
-				notify = true;
-			}
-		}
-		else
-			selectionChanged = curObj->CheckSelectionChanged(win);
+    bool prevSelectedState, selectionChanged = false, notify = false;
+    OverlayObject *curObj;
+    OverlayObject *lastSelectedObject = NULL;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        curObj = *iter;
+        prevSelectedState = curObj->selected;
+        if(ctrlPressed)
+        {
+            if(curObj->CheckIsInSelection(win))
+            {
+                if(win->selectionRect.dx == 1 && win->selectionRect.dy == 1 && curObj->selected)
+                    curObj->selected = false;
+                else
+                    curObj->selected = true;
+                notify = true;
+            }
+        }
+        else
+            selectionChanged = curObj->CheckSelectionChanged(win);
 
-		if(curObj->selected && win->selectionRect.dx > 1.0 && win->selectionRect.dy > 1.0 && curObj->CheckIsInSelection(win, true) && curObj->CheckIsInSelection(win, false))
-			curObj->moveAll = true;
-		else
-			curObj->moveAll = false;
+        if(curObj->selected && win->selectionRect.dx > 1.0 && win->selectionRect.dy > 1.0 && curObj->CheckIsInSelection(win, true) && curObj->CheckIsInSelection(win, false))
+            curObj->moveAll = true;
+        else
+            curObj->moveAll = false;
 
-		if(selectionChanged)
-		{
-			notify = true;
-			if(prevSelectedState == false && win->selectionRect.dx == 1 && win->selectionRect.dy == 1)
-			{
-				if(lastSelectedObject != NULL)
-					lastSelectedObject->selected = false;
+        if(selectionChanged)
+        {
+            notify = true;
+            if(prevSelectedState == false && win->selectionRect.dx == 1 && win->selectionRect.dy == 1)
+            {
+                if(lastSelectedObject != NULL)
+                    lastSelectedObject->selected = false;
 
-				lastSelectedObject = curObj;
-			}
-		}
-	}
+                lastSelectedObject = curObj;
+            }
+        }
+    }
 
-	this->selectionChanging = false;
+    this->selectionChanging = false;
 
-	if(notify)
-	{
-		this->PutSelectedOverlayObjectsOnTop();
+    if(notify)
+    {
+        this->PutSelectedOverlayObjectsOnTop();
 
-		win->showSelection = false;
+        win->showSelection = false;
 
-		win->RepaintAsync();
+        win->RepaintAsync();
 
-		this->notifySelectionChanged();
-	}
+        this->notifySelectionChanged();
+    }
 
-	return notify;
+    return notify;
 }
-	
+    
 char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjectIds()
 {
-	OverlayObject* oo;
-	std::stringstream objIds;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		if(oo->selected)
-			objIds << oo->id << "|";
-	}
+    OverlayObject* oo;
+    std::stringstream objIds;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        if(oo->selected)
+            objIds << oo->id << "|";
+    }
 
-	std::string sobjIds = objIds.str();
-	size_t len = sobjIds.length() + 1;
-	char* ret = new char[len];
-	strcpy(ret, sobjIds.c_str());
+    std::string sobjIds = objIds.str();
+    size_t len = sobjIds.length() + 1;
+    char* ret = new char[len];
+    strcpy(ret, sobjIds.c_str());
 
-	return ret;
+    return ret;
 }
 
 char* BetsyNetPDFUnmanagedApi::GetSelectedOverlayObjects()
 {
-	OverlayObject* oo;
-	std::stringstream objects;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		if(oo->selected)
-			objects << oo->ToString();
-	}
+    OverlayObject* oo;
+    std::stringstream objects;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        if(oo->selected)
+            objects << oo->ToString();
+    }
 
-	std::string sobjects = objects.str();
-	size_t len = sobjects.length() + 1;
-	char* ret = new char[len];
-	strcpy(ret, sobjects.c_str());
+    std::string sobjects = objects.str();
+    size_t len = sobjects.length() + 1;
+    char* ret = new char[len];
+    strcpy(ret, sobjects.c_str());
 
-	return ret;
+    return ret;
 }
 
 void BetsyNetPDFUnmanagedApi::DeselectOverlayObjects()
 {
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-		(*iter)->selected = false;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+        (*iter)->selected = false;
 }
 
 char* BetsyNetPDFUnmanagedApi::GetAllOverlayObjects()
 {
-	OverlayObject* oo;
-	std::stringstream objects;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		objects << oo->ToString();
-	}
+    OverlayObject* oo;
+    std::stringstream objects;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        objects << oo->ToString();
+    }
 
-	std::string sobjects = objects.str();
-	size_t len = sobjects.length() + 1;
-	char* ret = new char[len];
-	strcpy(ret, sobjects.c_str());
+    std::string sobjects = objects.str();
+    size_t len = sobjects.length() + 1;
+    char* ret = new char[len];
+    strcpy(ret, sobjects.c_str());
 
-	return ret;
+    return ret;
 }
 
 char* BetsyNetPDFUnmanagedApi::GetOverlayObjectAtPosition(WindowInfo* win, double x, double y)
 {
-	x = (x / 2540.0) * 72.0;
-	y = (y / 2540.0) * 72.0;
-	y = win->AsFixed()->GetPageInfo(1)->page.dy - y;
-	PointI val = win->AsFixed()->CvtToScreen(1, PointD(x, y));
+    x = (x / 2540.0) * 72.0;
+    y = (y / 2540.0) * 72.0;
+    y = win->AsFixed()->GetPageInfo(1)->page.dy - y;
+    PointI val = win->AsFixed()->CvtToScreen(1, PointD(x, y));
 
-	win->selectionRect = RectI(val.x, val.y, 1, 1);
+    win->selectionRect = RectI(val.x, val.y, 1, 1);
 
-	OverlayObject* oo;
-	std::stringstream objects;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		if(oo->CheckIsInSelection(win))
-			objects << oo->ToString();
-	}
+    OverlayObject* oo;
+    std::stringstream objects;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        if(oo->CheckIsInSelection(win))
+            objects << oo->ToString();
+    }
 
-	std::string sobjects = objects.str();
-	size_t len = sobjects.length() + 1;
-	char* ret = new char[len];
-	strcpy(ret, sobjects.c_str());
+    std::string sobjects = objects.str();
+    size_t len = sobjects.length() + 1;
+    char* ret = new char[len];
+    strcpy(ret, sobjects.c_str());
 
-	return ret;
+    return ret;
 }
 
 void BetsyNetPDFUnmanagedApi::CheckMouseClick(WindowInfo* win, int x, int y, bool ctrlPressed)
 {
-	char* clp = "";
-	// c is down
-	if(GetAsyncKeyState(0x43))
-		clp = "c";
-	// p is down
-	if(GetAsyncKeyState(0x50))
-		clp = "p";
+    char* clp = "";
+    // c is down
+    if(GetAsyncKeyState(0x43))
+        clp = "c";
+    // p is down
+    if(GetAsyncKeyState(0x50))
+        clp = "p";
 
-	if(clp == "" && (this->measureMode || this->lineMode))
-	{
-		PointI onScreen(x, y);
-		if(this->lineStart == NULL)
-		{			
-			this->lineStart = new PointD(win->AsFixed()->CvtFromScreen(onScreen));
-			return;
-		}
-		else
-		{
-			if(this->lineEnd == NULL && this->curLineEnd != NULL)
-			{
-				PointI end(this->curLineEnd->X, this->curLineEnd->Y);
-				this->lineEnd = new PointD(win->AsFixed()->CvtFromScreen(end));
-			}
-		}
+    if(clp == "" && (this->measureMode || this->lineMode))
+    {
+        PointI onScreen(x, y);
+        if(this->lineStart == NULL)
+        {			
+            this->lineStart = new PointD(win->AsFixed()->CvtFromScreen(onScreen));
+            return;
+        }
+        else
+        {
+            if(this->lineEnd == NULL && this->curLineEnd != NULL)
+            {
+                PointI end(this->curLineEnd->X, this->curLineEnd->Y);
+                this->lineEnd = new PointD(win->AsFixed()->CvtFromScreen(end));
+            }
+        }
 
-		if(this->measureMode)
-		{
-			// calc length and notify
-			double a = lineStart->x - lineEnd->x;
-			double b = lineStart->y - lineEnd->y;
+        if(this->measureMode)
+        {
+            // calc length and notify
+            double a = lineStart->x - lineEnd->x;
+            double b = lineStart->y - lineEnd->y;
 
-			double length_dpi = sqrt((a * a) + (b * b));
+            double length_dpi = sqrt((a * a) + (b * b));
 
-			// reset 
-			this->lineMode = false;
-			this->fixAngle = -1;
-			this->measureMode = false;
-			this->lineEnd = NULL;
-			this->curLineEnd = NULL;
-			this->lineStart = NULL;
+            // reset 
+            this->lineMode = false;
+            this->fixAngle = -1;
+            this->measureMode = false;
+            this->lineEnd = NULL;
+            this->curLineEnd = NULL;
+            this->lineStart = NULL;
 
-			this->notifyDistanceMeasured((length_dpi / 72.0) * 2540.0);
-		}
-		else
-			if(this->lineMode)
-			{
-				// notify start/end point coords
-				double p1x = (this->lineStart->x / 72.0) * 2540.0;
-				double p1y = win->AsFixed()->GetPageInfo(1)->page.dy - this->lineStart->y;
-				p1y = (p1y / 72.0) * 2540.0;
+            this->notifyDistanceMeasured((length_dpi / 72.0) * 2540.0);
+        }
+        else
+            if(this->lineMode)
+            {
+                // notify start/end point coords
+                double p1x = (this->lineStart->x / 72.0) * 2540.0;
+                double p1y = win->AsFixed()->GetPageInfo(1)->page.dy - this->lineStart->y;
+                p1y = (p1y / 72.0) * 2540.0;
 
-				double p2x = (this->lineEnd->x / 72.0) * 2540.0;
-				double p2y = win->AsFixed()->GetPageInfo(1)->page.dy - this->lineEnd->y;
-				p2y = (p2y / 72.0) * 2540.0;
+                double p2x = (this->lineEnd->x / 72.0) * 2540.0;
+                double p2y = win->AsFixed()->GetPageInfo(1)->page.dy - this->lineEnd->y;
+                p2y = (p2y / 72.0) * 2540.0;
 
-				// reset 
-				this->lineMode = false;
-				this->fixAngle = -1;
-				this->measureMode = false;
-				this->lineEnd = NULL;
-				this->curLineEnd = NULL;
-				this->lineStart = NULL;
+                // reset 
+                this->lineMode = false;
+                this->fixAngle = -1;
+                this->measureMode = false;
+                this->lineEnd = NULL;
+                this->curLineEnd = NULL;
+                this->lineStart = NULL;
 
-				this->notifyLineDrawn(p1x, p1y, p2x, p2y);
-			}
+                this->notifyLineDrawn(p1x, p1y, p2x, p2y);
+            }
 
-			return;
-	}
+            return;
+    }
 
-	bool selChanged = false;
+    bool selChanged = false;
 
-	if(clp == "" && !preventOverlayObjectSelection)
-	{
-		win->selectionRect = RectI(x, y, 1, 1);
-		selChanged = this->CheckSelectionChanged(win, ctrlPressed);
-	}
-	
-	if(!selChanged)
-	{
-		PointI pointOnScreen(x, y);
-		PointD pointOnPage = win->AsFixed()->CvtFromScreen(pointOnScreen);
-		double x = (pointOnPage.x / 72.0) * 2540.0;
-		double y = win->AsFixed()->GetPageInfo(1)->page.dy - pointOnPage.y;
-		y = (y / 72.0) * 2540.0;
-		this->notifyMouseClick(x, y, clp);
-	}
+    if(clp == "" && !preventOverlayObjectSelection)
+    {
+        win->selectionRect = RectI(x, y, 1, 1);
+        selChanged = this->CheckSelectionChanged(win, ctrlPressed);
+    }
+    
+    if(!selChanged)
+    {
+        PointI pointOnScreen(x, y);
+        PointD pointOnPage = win->AsFixed()->CvtFromScreen(pointOnScreen);
+        double x = (pointOnPage.x / 72.0) * 2540.0;
+        double y = win->AsFixed()->GetPageInfo(1)->page.dy - pointOnPage.y;
+        y = (y / 72.0) * 2540.0;
+        this->notifyMouseClick(x, y, clp);
+    }
 }
 
 void BetsyNetPDFUnmanagedApi::CheckDeleteOverlayObject()
 {
-	OverlayObject* oo;
-	bool selection = false;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		if(oo->selected)
-		{
-			selection = true;
-			break;
-		}
-	}
+    OverlayObject* oo;
+    bool selection = false;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        if(oo->selected)
+        {
+            selection = true;
+            break;
+        }
+    }
 
-	if(selection)
-		this->notifyDelete();
+    if(selection)
+        this->notifyDelete();
 }
 
 void BetsyNetPDFUnmanagedApi::CheckOverlayObjectAtMousePos(WindowInfo* win, int x, int y, bool ctrlPressed, bool moveObj)
 {
-	if(this->measureMode || this->lineMode)
-		return;
+    if(this->measureMode || this->lineMode)
+        return;
 
-	OverlayObject* oo;
-	win->selectionRect = RectI(x, y, 1, 1);
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		
-		if(moveObj && oo->selected && oo->CheckIsInSelection(win))
-		{
-			this->hitLabelForDragging = true;
-			this->moveLabel = oo->CheckIsInSelection(win, true);
-			this->dragStart = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
-			this->lastDragLoc = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
-			break;
-		}
-		if(!moveObj && oo->CheckIsInSelection(win))
-			break;
+    OverlayObject* oo;
+    win->selectionRect = RectI(x, y, 1, 1);
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        
+        if(moveObj && oo->selected && oo->CheckIsInSelection(win))
+        {
+            this->hitLabelForDragging = true;
+            this->moveLabel = oo->CheckIsInSelection(win, true);
+            this->dragStart = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
+            this->lastDragLoc = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
+            break;
+        }
+        if(!moveObj && oo->CheckIsInSelection(win))
+            break;
 
-		oo = NULL;
-	}
+        oo = NULL;
+    }
 
-	if(!moveObj && ctrlPressed)
-	{
-		if(oo == NULL)
-			this->lastObj = NULL;
+    if(!moveObj && ctrlPressed)
+    {
+        if(oo == NULL)
+            this->lastObj = NULL;
 
-		if(oo == this->lastObj)
-			return;
+        if(oo == this->lastObj)
+            return;
 
-		this->lastObj = oo;
-		
-		size_t len = oo->id.length() + 1;
-		char* ret = new char[len];
-		strcpy(ret, oo->id.c_str());
+        this->lastObj = oo;
+        
+        size_t len = oo->id.length() + 1;
+        char* ret = new char[len];
+        strcpy(ret, oo->id.c_str());
 
-		this->notifyMouseOverObject(ret);
-	}
+        this->notifyMouseOverObject(ret);
+    }
 }
 
 void BetsyNetPDFUnmanagedApi::MoveSelectedOverlayObjectsBy(WindowInfo* win, int x, int y)
 {
-	PointD currentLoc = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
-	double deltaX = lastDragLoc.x - currentLoc.x;
-	double deltaY = lastDragLoc.y - currentLoc.y;
+    PointD currentLoc = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
+    double deltaX = lastDragLoc.x - currentLoc.x;
+    double deltaY = lastDragLoc.y - currentLoc.y;
 
-	OverlayObject* oo;
-	bool repaint = false;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		oo = *iter;
-		if(oo->selected)
-		{
-			oo->Move(deltaX, deltaY, this->moveLabel);
-			repaint = true;
-		}
-	}
+    OverlayObject* oo;
+    bool repaint = false;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        oo = *iter;
+        if(oo->selected)
+        {
+            oo->Move(deltaX, deltaY, this->moveLabel);
+            repaint = true;
+        }
+    }
 
-	this->lastDragLoc = currentLoc;
+    this->lastDragLoc = currentLoc;
 
-	if(repaint)
-		win->RepaintAsync();
+    if(repaint)
+        win->RepaintAsync();
 }
 
 void BetsyNetPDFUnmanagedApi::CheckOverlayObjectMoved(WindowInfo* win, int x, int y)
 {
-	PointD dragEnd = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
-	double deltaX = this->dragStart.x - dragEnd.x;
-	double deltaY = this->dragStart.y - dragEnd.y;
+    PointD dragEnd = win->AsFixed()->CvtFromScreen(PointI(x, y), 1);
+    double deltaX = this->dragStart.x - dragEnd.x;
+    double deltaY = this->dragStart.y - dragEnd.y;
 
-	if(deltaX != 0.0 || deltaY != 0.0)
-	{
-		double x = (deltaX / 72.0) * 2540.0;
-		double y = (deltaY / 72.0) * 2540.0;
-		this->notifyObjectMoved(x, -y, this->moveLabel);
-	}
+    if(deltaX != 0.0 || deltaY != 0.0)
+    {
+        double x = (deltaX / 72.0) * 2540.0;
+        double y = (deltaY / 72.0) * 2540.0;
+        this->notifyObjectMoved(x, -y, this->moveLabel);
+    }
 
-	this->hitLabelForDragging = false;
-	this->moveLabel = false;
-	this->dragStart = PointD();
+    this->hitLabelForDragging = false;
+    this->moveLabel = false;
+    this->dragStart = PointD();
 }
 
 void BetsyNetPDFUnmanagedApi::CheckOnRequestContextMenu(WindowInfo* win, int x, int y)
 {
-	win->selectionRect = RectI(x, y, 1, 1);
+    win->selectionRect = RectI(x, y, 1, 1);
 
-	OverlayObject *curObj = NULL;
-	std::vector<OverlayObject*>::iterator iter;
-	for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
-	{
-		curObj = *iter;
-		if(curObj->selected && curObj->CheckIsInSelection(win))
-			break;
+    OverlayObject *curObj = NULL;
+    std::vector<OverlayObject*>::iterator iter;
+    for(iter = this->overlayObjects.begin(); iter != this->overlayObjects.end(); iter++)
+    {
+        curObj = *iter;
+        if(curObj->selected && curObj->CheckIsInSelection(win))
+            break;
 
-		curObj = NULL;
-	}
+        curObj = NULL;
+    }
 
-	if(curObj == NULL)
-	{
-		this->requestContextMenu(x, y, "");
-		return;
-	}
+    if(curObj == NULL)
+    {
+        this->requestContextMenu(x, y, "");
+        return;
+    }
 
-	size_t len = curObj->id.length() + 1;
-	char* ret = new char[len];
-	strcpy(ret, curObj->id.c_str());
+    size_t len = curObj->id.length() + 1;
+    char* ret = new char[len];
+    strcpy(ret, curObj->id.c_str());
 
-	this->requestContextMenu(x, y, ret);
+    this->requestContextMenu(x, y, ret);
 }
 
 void BetsyNetPDFUnmanagedApi::ClearOverlayObjectList(WindowInfo* win)
 {
-	this->overlayObjects.clear();
+    this->overlayObjects.clear();
 
-	win->RepaintAsync();
+    win->RepaintAsync();
 }
 
 std::string BetsyNetPDFUnmanagedApi::GetFakedCmd(std::string file, std::string hwnd, bool directPrinting, bool defaultPrinter, std::string printerName)
 {
-	std::string ssumatra("\"BetsyNetPDF.dll\" ");
-	std::string splugin(" -plugin ");
-	std::string sprinting(" -print-dialog -exit-on-print ");
-	std::string sdefaultPrinter(" -print-to-default -silent ");
-	std::string swithPrinterName(" -print-to " + printerName + " -silent ");
-	std::string scmd;
-	if(directPrinting)
-	{
-		if(defaultPrinter)
-		{
-			scmd = ssumatra + sdefaultPrinter + "\"" + file + "\"";
-		}
-		else 
-		{
-			if(!printerName.empty())
-			{
-				scmd = ssumatra + swithPrinterName + "\"" + file + "\"";
-			}
-			else
-			{
-				scmd = ssumatra + sprinting + "\"" + file + "\"";
-			}
-		}
-	}
-	else
-		scmd = ssumatra + splugin + hwnd + " \"" + file + "\"";
+    std::string ssumatra("\"BetsyNetPDF.dll\" ");
+    std::string splugin(" -plugin ");
+    std::string sprinting(" -print-dialog -exit-on-print ");
+    std::string sdefaultPrinter(" -print-to-default -silent ");
+    std::string swithPrinterName(" -print-to " + printerName + " -silent ");
+    std::string scmd;
+    if(directPrinting)
+    {
+        if(defaultPrinter)
+        {
+            scmd = ssumatra + sdefaultPrinter + "\"" + file + "\"";
+        }
+        else 
+        {
+            if(!printerName.empty())
+            {
+                scmd = ssumatra + swithPrinterName + "\"" + file + "\"";
+            }
+            else
+            {
+                scmd = ssumatra + sprinting + "\"" + file + "\"";
+            }
+        }
+    }
+    else
+        scmd = ssumatra + splugin + hwnd + " \"" + file + "\"";
 
-	return scmd;
+    return scmd;
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF unmanged api
@@ -6045,22 +6045,22 @@ std::string BetsyNetPDFUnmanagedApi::GetFakedCmd(std::string file, std::string h
 // BetsyNetPDF unmanged api callers
 ///////////////////////////////////////////////////////////////////////////////
 extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd, char* file, bool useExternContextMenu, bool directPrinting, bool defaultPrinter, char* printerName, WindowInfo* viewer,
-	OnSelectionChangedDelegate selChangedPtr, 
-	OnMouseClickDelegate mouseClickPointer, 
-	OnDeleteDelegate onDeletePointer, 
-	OnObjectMovedDelegate onMovePointer, 
-	OnRequestContextMenuDelegate requestContextMenuPointer, 
-	OnMouseOverObject onMouseOver,
-	OnDistanceMeasuredDelegate onMeasure,
-	OnLineDrawnDelegate onLine)
+    OnSelectionChangedDelegate selChangedPtr, 
+    OnMouseClickDelegate mouseClickPointer, 
+    OnDeleteDelegate onDeletePointer, 
+    OnObjectMovedDelegate onMovePointer, 
+    OnRequestContextMenuDelegate requestContextMenuPointer, 
+    OnMouseOverObject onMouseOver,
+    OnDistanceMeasuredDelegate onMeasure,
+    OnLineDrawnDelegate onLine)
 {
-	BetsyNetPDFUnmanagedApi* betsyApi = new BetsyNetPDFUnmanagedApi();
-	betsyApi->SetDelegates(selChangedPtr, mouseClickPointer, onDeletePointer, onMovePointer, requestContextMenuPointer, onMouseOver, onMeasure, onLine);
-	betsyApi->hwnd= std::string(hwnd);
-	betsyApi->file = std::string(file);
-	betsyApi->useExternContextMenu = useExternContextMenu;
+    BetsyNetPDFUnmanagedApi* betsyApi = new BetsyNetPDFUnmanagedApi();
+    betsyApi->SetDelegates(selChangedPtr, mouseClickPointer, onDeletePointer, onMovePointer, requestContextMenuPointer, onMouseOver, onMeasure, onLine);
+    betsyApi->hwnd= std::string(hwnd);
+    betsyApi->file = std::string(file);
+    betsyApi->useExternContextMenu = useExternContextMenu;
 
-	int retCode = 1;    // by default it's error
+    int retCode = 1;    // by default it's error
 
 #ifdef DEBUG
     // Memory leak detection (only enable _CRTDBG_LEAK_CHECK_DF for
@@ -6099,19 +6099,19 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
 
     //SetupCrashHandler();
 
-	if(gWindows.Count() == 0)
-	{
-		ScopedOle ole;
-		InitAllCommonControls();
-		ScopedGdiPlus gdiPlus(true);
-		mui::Initialize();
-		uitask::Initialize();
+    if(gWindows.Count() == 0)
+    {
+        ScopedOle ole;
+        InitAllCommonControls();
+        ScopedGdiPlus gdiPlus(true);
+        mui::Initialize();
+        uitask::Initialize();
 
-		prefs::Load();
-	}
+        prefs::Load();
+    }
 
-	Widen<wchar_t> to_wstring;
-	std::wstring wscmd = to_wstring(BetsyNetPDFUnmanagedApi::GetFakedCmd(file, hwnd, directPrinting, defaultPrinter, std::string(printerName)));
+    Widen<wchar_t> to_wstring;
+    std::wstring wscmd = to_wstring(BetsyNetPDFUnmanagedApi::GetFakedCmd(file, hwnd, directPrinting, defaultPrinter, std::string(printerName)));
     CommandLineInfo i((TCHAR*)wscmd.c_str());
 
     SetCurrentLang(i.lang ? i.lang : gGlobalPrefs->uiLanguage);
@@ -6144,17 +6144,17 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
     GetFixedPageUiColors(gRenderCache.textColor, gRenderCache.backgroundColor);
     DebugGdiPlusDevice(gUseGdiRenderer);
 
-	if(gWindows.Count() == 0)
-		RegisterWinClass();
+    if(gWindows.Count() == 0)
+        RegisterWinClass();
 
-	if (i.hwndPluginParent) 
-	{
-		SetupPluginMode(i);
-		gGlobalPrefs->showToolbar = false;
-		gGlobalPrefs->useTabs = false;
-		gGlobalPrefs->showMenubar = false;
-		gGlobalPrefs->checkForUpdates = false;
-	}
+    if (i.hwndPluginParent) 
+    {
+        SetupPluginMode(i);
+        gGlobalPrefs->showToolbar = false;
+        gGlobalPrefs->useTabs = false;
+        gGlobalPrefs->showMenubar = false;
+        gGlobalPrefs->checkForUpdates = false;
+    }
 
     if (i.printerName) {
         // note: this prints all PDF files. Another option would be to
@@ -6205,7 +6205,7 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
     //}
 
     WindowInfo *win = NULL;
-	bool isFirstWin = gWindows.Count() == 0;
+    bool isFirstWin = gWindows.Count() == 0;
     for (size_t n = 0; n < i.fileNames.Count(); n++) {
         win = LoadOnStartup(i.fileNames.At(n), i, isFirstWin);
         if (!win) {
@@ -6213,11 +6213,11 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
             continue;
         }
         if (i.printDialog)
-		{
-			if(viewer)
-				win->selectionOnPage = viewer->selectionOnPage;
+        {
+            if(viewer)
+                win->selectionOnPage = viewer->selectionOnPage;
             OnMenuPrint(win, i.exitWhenDone);
-		}
+        }
     }
     if (i.fileNames.Count() > 0 && !win) {
         // failed to create any window, even though there
@@ -6262,354 +6262,354 @@ extern "C" UNMANAGED_API WindowInfo* __stdcall CallBetsyNetPDFViewer(char* hwnd,
     // call this once it's clear whether Perm_SavePreferences has been granted
     prefs::RegisterForFileChanges();
 
-	win->betsyApi = betsyApi;
+    win->betsyApi = betsyApi;
 
 Exit:
-	return win;
+    return win;
 }
 
 extern "C" UNMANAGED_API void __stdcall CallOpenNewFile(WindowInfo* win, char* file)
 {
-	if(win != NULL)
-	{
-		std::string sfile(file);
-		Widen<wchar_t> to_wstring;
-		std::wstring wfile = to_wstring(sfile);
-		
-		if(win->betsyApi != NULL)
-			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->overlayObjects.clear();
+    if(win != NULL)
+    {
+        std::string sfile(file);
+        Widen<wchar_t> to_wstring;
+        std::wstring wfile = to_wstring(sfile);
+        
+        if(win->betsyApi != NULL)
+            ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->overlayObjects.clear();
 
-		LoadArgs args(wfile.c_str(), win);
-		args.showWin = true;
-		args.forceReuse = true;
-		LoadDocument(args);
-	}
+        LoadArgs args(wfile.c_str(), win);
+        args.showWin = true;
+        args.forceReuse = true;
+        LoadDocument(args);
+    }
 }
 
 extern "C" UNMANAGED_API bool __stdcall CallIsDocOpen(WindowInfo* win)
 {
-	if(win != NULL)
-		return win->IsDocLoaded();
-	else
-		return false;
+    if(win != NULL)
+        return win->IsDocLoaded();
+    else
+        return false;
 }
 
 extern "C" UNMANAGED_API void __stdcall CallUpdateViewer(WindowInfo* win, char* hwnd)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->UpdateViewer(win, hwnd);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->UpdateViewer(win, hwnd);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallFocusViewer(WindowInfo* win)
 {
-	if(win != NULL)
-	{
-		win->Focus();
-	}
+    if(win != NULL)
+    {
+        win->Focus();
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetMouseOverEnabled(WindowInfo* win, bool enabled)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->mouseOverEnabled = enabled;
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->mouseOverEnabled = enabled;
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetMeasureModeEnabled(WindowInfo* win, bool enabled)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->measureMode = enabled;
-		if(enabled)
-		{
-			((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
-			/*InvalidateRect(win->hwndCanvas, NULL, true);
-			UpdateWindow(win->hwndCanvas);*/
-			win->RepaintAsync();
-		}
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->measureMode = enabled;
+        if(enabled)
+        {
+            ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
+            /*InvalidateRect(win->hwndCanvas, NULL, true);
+            UpdateWindow(win->hwndCanvas);*/
+            win->RepaintAsync();
+        }
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetLineModeEnabled(WindowInfo* win, bool enabled)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineMode = enabled;
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->fixAngle = -1;
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineEnd = NULL;
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->curLineEnd = NULL;
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart = NULL;
-		win->RepaintAsync();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineMode = enabled;
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->fixAngle = -1;
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->DeselectOverlayObjects();
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineEnd = NULL;
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->curLineEnd = NULL;
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart = NULL;
+        win->RepaintAsync();
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetFixedAngle(WindowInfo* win, double angle)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->fixAngle = angle;
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->fixAngle = angle;
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetDeactivateTextSelection(WindowInfo* win, bool value)
 {
-	if(win != NULL && win->AsFixed() != NULL)
-	{
-		win->AsFixed()->deactivateTextSelection = value;
-	}
+    if(win != NULL && win->AsFixed() != NULL)
+    {
+        win->AsFixed()->deactivateTextSelection = value;
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetPreventOverlayObjectSelection(WindowInfo* win, bool value)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->preventOverlayObjectSelection = value;
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->preventOverlayObjectSelection = value;
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetShowOverlapping(WindowInfo* win, bool value)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->showOverlapping = value;
-		win->RepaintAsync();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->showOverlapping = value;
+        win->RepaintAsync();
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetHideLabels(WindowInfo* win, bool value)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->hideLabels = value;
-		win->RepaintAsync();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->hideLabels = value;
+        win->RepaintAsync();
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetTransparantOverlayObjects(WindowInfo* win, bool value)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->transparantOverlayObjects = value;
-		win->RepaintAsync();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->transparantOverlayObjects = value;
+        win->RepaintAsync();
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetLineStart(WindowInfo* win, double x, double y)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineMode = true;
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineMode = true;
 
-		x = (x / 2540.0) * 72.0;
-		y = (y / 2540.0) * 72.0;
-		y = win->AsFixed()->GetPageInfo(1)->page.dy - y;
+        x = (x / 2540.0) * 72.0;
+        y = (y / 2540.0) * 72.0;
+        y = win->AsFixed()->GetPageInfo(1)->page.dy - y;
 
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart = new PointD(x, y);
-		win->RepaintAsync();
-	}
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart = new PointD(x, y);
+        win->RepaintAsync();
+    }
 }
 
 extern "C" UNMANAGED_API PointF* __stdcall CallGetLineStart(WindowInfo* win)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		if(((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart != NULL)
-		{
-			float x = (((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart->x / 72.0) * 2540.0;
-			float y = win->AsFixed()->GetPageInfo(1)->page.dy - ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart->y;
-			y = (y / 72.0) * 2540.0;
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        if(((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart != NULL)
+        {
+            float x = (((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart->x / 72.0) * 2540.0;
+            float y = win->AsFixed()->GetPageInfo(1)->page.dy - ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart->y;
+            y = (y / 72.0) * 2540.0;
 
-			PointF* res = new PointF(x, y);
-			return res;
-		}
-	}
+            PointF* res = new PointF(x, y);
+            return res;
+        }
+    }
 }
 
 extern "C" UNMANAGED_API bool __stdcall CallIsLineStart(WindowInfo* win)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		return (((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart == NULL);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        return (((BetsyNetPDFUnmanagedApi*)win->betsyApi)->lineStart == NULL);
+    }
 }
 
 extern "C" UNMANAGED_API PointF* __stdcall CallCvtScreen2Doc(WindowInfo* win, Point* screenCoords)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		PointD val = win->AsFixed()->CvtFromScreen(PointI(screenCoords->X, screenCoords->Y), 1);
+    if(win != NULL && win->IsDocLoaded())
+    {
+        PointD val = win->AsFixed()->CvtFromScreen(PointI(screenCoords->X, screenCoords->Y), 1);
 
-		double x = (val.x / 72.0) * 2540.0;
-		double y = win->AsFixed()->GetPageInfo(1)->page.dy - val.y;
-		y = (y / 72.0) * 2540.0;
+        double x = (val.x / 72.0) * 2540.0;
+        double y = win->AsFixed()->GetPageInfo(1)->page.dy - val.y;
+        y = (y / 72.0) * 2540.0;
 
-		PointF* res = new PointF(x, y);
-		return res;
-	}
+        PointF* res = new PointF(x, y);
+        return res;
+    }
 }
 
 extern "C" UNMANAGED_API Point* __stdcall CallCvtDoc2Screen(WindowInfo* win, PointF* docCoords)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		double x = (docCoords->X / 2540.0) * 72.0;
-		double y = (docCoords->Y / 2540.0) * 72.0;
-		y = win->AsFixed()->GetPageInfo(1)->page.dy - y;
+    if(win != NULL && win->IsDocLoaded())
+    {
+        double x = (docCoords->X / 2540.0) * 72.0;
+        double y = (docCoords->Y / 2540.0) * 72.0;
+        y = win->AsFixed()->GetPageInfo(1)->page.dy - y;
 
-		PointI val = win->AsFixed()->CvtToScreen(1, PointD(x, y));
-		Point* res = new Point(val.x, val.y);
-		return res;
-	}
+        PointI val = win->AsFixed()->CvtToScreen(1, PointD(x, y));
+        Point* res = new Point(val.x, val.y);
+        return res;
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSaveAs(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		OnMenuSaveAs(*win);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        OnMenuSaveAs(*win);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallPrint(WindowInfo* win, bool printOnPlotter)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		OnMenuPrint(win, false, printOnPlotter);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        OnMenuPrint(win, false, printOnPlotter);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallFitPageWidth(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		ChangeZoomLevel(win, ZOOM_FIT_WIDTH, true);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        ChangeZoomLevel(win, ZOOM_FIT_WIDTH, true);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallFitWholePage(WindowInfo * win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		ChangeZoomLevel(win, ZOOM_FIT_PAGE, false);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        ChangeZoomLevel(win, ZOOM_FIT_PAGE, false);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallZoomOut(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		ZoomToSelection(win, win->AsFixed()->GetNextZoomStep(ZOOM_MIN));
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        ZoomToSelection(win, win->AsFixed()->GetNextZoomStep(ZOOM_MIN));
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallZoomIn(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		ZoomToSelection(win, win->AsFixed()->GetNextZoomStep(ZOOM_MAX));
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        ZoomToSelection(win, win->AsFixed()->GetNextZoomStep(ZOOM_MAX));
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallRotateLeft(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		win->AsFixed()->RotateBy(-90);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        win->AsFixed()->RotateBy(-90);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallRotateRight(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		win->AsFixed()->RotateBy(90);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        win->AsFixed()->RotateBy(90);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallRotateCounterClockWise(WindowInfo* win, int angle)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		win->AsFixed()->RotateBy(angle * -1);
-	}
+    if(win != NULL && win->IsDocLoaded())
+    {
+        win->AsFixed()->RotateBy(angle * -1);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallProcessOverlayObjects(WindowInfo* win, char* objs)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ProcessOverlayObjects(win, objs);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ProcessOverlayObjects(win, objs);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallSetSelectedOverlayObjects(WindowInfo* win, char* objectIds)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->SetSelectedOverlayObjects(win, objectIds);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->SetSelectedOverlayObjects(win, objectIds);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallRemoveOverlayObject(WindowInfo* win, char* id)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->RemoveOverlayObject(win, id);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->RemoveOverlayObject(win, id);
+    }
 }
 
 extern "C" UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjectIds(WindowInfo* win)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetSelectedOverlayObjectIds();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetSelectedOverlayObjectIds();
+    }
 }
 
 extern "C" UNMANAGED_API char* __stdcall CallGetSelectedOverlayObjects(WindowInfo* win)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetSelectedOverlayObjects();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetSelectedOverlayObjects();
+    }
 }
 
 extern "C" UNMANAGED_API char* __stdcall CallGetAllOverlayObjects(WindowInfo* win)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetAllOverlayObjects();
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetAllOverlayObjects();
+    }
 }
 
 extern "C" UNMANAGED_API char* __stdcall CallGetOverlayObjectAtPosition(WindowInfo* win, double x, double y)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetOverlayObjectAtPosition(win, x, y);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        return ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->GetOverlayObjectAtPosition(win, x, y);
+    }
 }
 
 extern "C" UNMANAGED_API void __stdcall CallClearOverlayObjectList(WindowInfo* win)
 {
-	if(win != NULL && win->betsyApi != NULL)
-	{
-		((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ClearOverlayObjectList(win);
-	}
+    if(win != NULL && win->betsyApi != NULL)
+    {
+        ((BetsyNetPDFUnmanagedApi*)win->betsyApi)->ClearOverlayObjectList(win);
+    }
 }
 
 extern "C" UNMANAGED_API int __stdcall CallGetDocumentRotation(WindowInfo* win)
 {
-	if(win != NULL && win->IsDocLoaded())
-	{
-		return win->AsFixed()->GetRotation();
-	}
-	else
-		return 0;
+    if(win != NULL && win->IsDocLoaded())
+    {
+        return win->AsFixed()->GetRotation();
+    }
+    else
+        return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////
 // end BetsyNetPDF unmanged api callers
